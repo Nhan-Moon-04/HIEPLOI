@@ -4,6 +4,7 @@ import { ClockCircleOutlined, DownloadOutlined } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
 import dayjs from 'dayjs';
 import api from '../api/client';
+import EmployeeDetailModal from '../components/Attendance/EmployeeDetailModal';
 
 const STATUS_MAP = {
   full: { color: '#22c55e', bg: '#f0fdf4', label: 'Du', icon: '✓' },
@@ -18,7 +19,7 @@ const STATUS_MAP = {
 export default function Attendance() {
   const [monthKey, setMonthKey] = useState(dayjs().format('YYYY-MM'));
   const [dept, setDept] = useState(null);
-  const [viewMode, setViewMode] = useState('grid'); // grid | detail
+  const [selectedRow, setSelectedRow] = useState(null);
 
   const { data: att, isLoading } = useQuery({
     queryKey: ['attendance', monthKey, dept],
@@ -160,7 +161,9 @@ export default function Attendance() {
                     {row.employee_code}
                   </td>
                   <td style={{ ...tdStyle, position: 'sticky', left: 40, background: '#fff', zIndex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 120 }}>
-                    <Tooltip title={row.full_name}>{row.full_name}</Tooltip>
+                    <a onClick={() => setSelectedRow(row)} style={{ color: '#4361ee', fontWeight: 500, cursor: 'pointer' }}>
+                      <Tooltip title={row.full_name}>{row.full_name}</Tooltip>
+                    </a>
                   </td>
                   <td style={{ ...tdStyle, position: 'sticky', left: 160, background: '#fff', zIndex: 1, textAlign: 'center' }}>
                     <Tag color="blue" style={{ fontSize: 10, margin: 0 }}>{row.default_shift_code}</Tag>
@@ -200,9 +203,15 @@ export default function Attendance() {
           </span>
         ))}
         <span style={{ marginLeft: 'auto', fontSize: 10, color: '#9ba8bf' }}>
-          * Vao som = ko van de | Ve som &gt;15p = canh bao
+          * Vao som = ko van de | Ve som &gt;15p = canh bao | Click ten NV de xem chi tiet
         </span>
       </div>
+
+      <EmployeeDetailModal
+        visible={!!selectedRow}
+        onClose={() => setSelectedRow(null)}
+        data={selectedRow}
+      />
     </div>
   );
 }

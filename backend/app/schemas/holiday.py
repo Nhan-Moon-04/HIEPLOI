@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 from typing import Optional
 from pydantic import BaseModel
 
@@ -25,13 +25,13 @@ class HolidayUpdate(BaseModel):
 class HolidayResponse(HolidayBase):
     id: int
     created_by: Optional[str] = None
-    created_at: Optional[str] = None
-    updated_at: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
 
 
 class HolidayBulkGenerate(BaseModel):
-    """Request body de tu dong tao ngay le VN trong nam"""
-    year: int
+    """Request body de tu dong tao ngay le VN trong thang"""
+    month_key: str

@@ -29,6 +29,7 @@ async def import_attendance(
 ):
     """Import file cham cong tu may cham cong.
     Format: C1=Ma NV, C2=Ten, C3=Bo phan, C4=Thoi gian (datetime)
+    Bo phan trong file se bo qua, lay theo nhan vien trong DB.
     Se xu ly: loai trung, nhom theo ngay, tinh first_check_in/last_check_out, luu vao attendance_daily.
     Ca dem: scan truoc 6h sang => tinh la ca hom truoc."""
     import openpyxl
@@ -71,6 +72,8 @@ async def import_attendance(
             skipped_employees.add(emp_code)
             continue
 
+        emp = emp_map[emp_code]
+
         if scan_time is None:
             continue
 
@@ -95,6 +98,7 @@ async def import_attendance(
         log = AttendanceLog(
             employee_code=emp_code,
             employee_name=str(emp_name or ""),
+            department=emp.department,
             event_time=scan_time,
             source_file=file.filename,
             import_batch=batch_id,

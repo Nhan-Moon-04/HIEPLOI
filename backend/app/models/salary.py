@@ -10,6 +10,8 @@ class MonthlySalary(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     employee_id = Column(Integer, ForeignKey("employees.id"), nullable=False)
     month_key = Column(String(7), nullable=False)  # YYYY-MM
+    base_salary = Column(Numeric(12, 2))  # Lương cơ bản
+    allowance = Column(Numeric(12, 2), default=0)  # Phụ cấp
     base_daily_wage = Column(Numeric(12, 2))
     pay_method = Column(String(32))  # cash, bank
     salary_coefficient = Column(Numeric(10, 4), default=1.0)
@@ -28,6 +30,7 @@ class MonthlyWorkdayConfig(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     month_key = Column(String(7), unique=True, nullable=False)  # YYYY-MM
     company_work_days = Column(Numeric(6, 2), default=26)  # Hệ số ngày công
+    is_locked = Column(Boolean, default=False)  # Chốt tháng
     notes = Column(String(255))
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

@@ -14,6 +14,9 @@ import Holidays from './pages/Holidays';
 import Schedules from './pages/Schedules';
 import Overtime from './pages/Overtime';
 import Attendance from './pages/Attendance';
+import ImportExport from './pages/ImportExport';
+import MealAllowance from './pages/MealAllowance';
+import BaseSalary from './pages/BaseSalary';
 
 function PrivateRoute({ children }) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -42,9 +45,12 @@ export default function App() {
                   <Route path="/shifts" element={<Shifts />} />
                   <Route path="/employees" element={<Employees />} />
                   <Route path="/holidays" element={<Holidays />} />
+                  <Route path="/import-export" element={<ImportExport />} />
                   <Route path="/schedules" element={<Schedules />} />
                   <Route path="/overtime" element={<Overtime />} />
                   <Route path="/attendance" element={<Attendance />} />
+                  <Route path="/meal-allowance" element={<MealAllowance />} />
+                  <Route path="/salaries" element={<BaseSalary />} />
                 </Routes>
               </MainLayout>
             </PrivateRoute>

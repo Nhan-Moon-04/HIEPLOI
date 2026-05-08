@@ -40,6 +40,8 @@ class AttendanceCell(BaseModel):
     is_holiday: bool = False
     is_sunday: bool = False
     notes: Optional[str] = None
+    meal_allowance: float = 0.0
+    night_allowance: float = 0.0
 
 
 class AttendanceRow(BaseModel):
@@ -88,6 +90,8 @@ def evaluate_attendance(shift, check_in_dt, check_out_dt, work_date, is_sunday, 
         "ot_hours": 0.0,
         "status": "no_data",
         "notes": "",
+        "meal_allowance": 0.0,
+        "night_allowance": 0.0,
     }
 
     if is_holiday:
@@ -148,6 +152,15 @@ def evaluate_attendance(shift, check_in_dt, check_out_dt, work_date, is_sunday, 
         ot = max(ot, standard)
     result["ot_hours"] = ot
 
+    # Tiền ăn: Nếu có mặt thì tính meal_allowance * meal_count (hoặc cứ cho mặc định nếu config meal_count)
+    # Tạm thời nếu status in (full, early_leave, short) thì đc hưởng meal_allowance (hoặc theo số h thực tế)
+    if result["status"] in ("full", "early_leave", "short"):
+        meal_val = float(shift.meal_allowance or 0)
+        meal_count = int(shift.meal_count or 1)
+        # Giả sử trong hệ thống hiện tại, nếu check-in thì cho meal_allowance * count
+        # Hoặc nếu là nghỉ phép có lương (paid leave) thì k có ăn.
+        result["meal_allowance"] = meal_val * (meal_count if meal_count > 0 else 1)
+
     return result
 
 
@@ -156,6 +169,9 @@ async def get_attendance(
     month_key: str = Query(..., description="YYYY-MM"),
     employee_id: Optional[int] = None,
     department: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    night_allowance_rate: Optional[float] = 0.0,
     db: AsyncSession = Depends(get_db),
     current_user: AppUser = Depends(get_current_user),
 ):
@@ -168,6 +184,18 @@ async def get_attendance(
     days_in_month = calendar.monthrange(year, month)[1]
     first_day = date(year, month, 1)
     last_day = date(year, month, days_in_month)
+
+    if start_date:
+        sd = date.fromisoformat(start_date)
+        first_day = max(first_day, sd)
+    if end_date:
+        ed = date.fromisoformat(end_date)
+        last_day = min(last_day, ed)
+
+    if first_day > last_day:
+        # Invalid range or no days in range for this month
+        return AttendanceMonthResponse(month_key=month_key, days_in_month=days_in_month, rows=[])
+
 
     # Load shifts
     shift_result = await db.execute(select(ShiftTemplate))
@@ -221,7 +249,7 @@ async def get_attendance(
         total_hours = 0.0
         total_ot = 0.0
 
-        for d in range(1, days_in_month + 1):
+        for d in range(first_day.day, last_day.day + 1):
             dt = date(year, month, d)
             dow_idx = dt.weekday()
             dow = DOW_VN[dow_idx]
@@ -244,6 +272,10 @@ async def get_attendance(
             ci_str = check_in_dt.strftime("%H:%M") if check_in_dt else None
             co_str = check_out_dt.strftime("%H:%M") if check_out_dt else None
 
+            # Night allowance
+            if shift and shift.is_night_shift and ev["status"] in ("full", "early_leave", "short"):
+                ev["night_allowance"] = night_allowance_rate
+
             cell = AttendanceCell(
                 work_date=str(dt),
                 day=d,
@@ -262,6 +294,8 @@ async def get_attendance(
                 is_holiday=is_holiday,
                 is_sunday=is_sunday,
                 notes=ev["notes"],
+                meal_allowance=ev["meal_allowance"],
+                night_allowance=ev["night_allowance"],
             )
             days_cells.append(cell)
 
@@ -288,6 +322,9 @@ async def get_attendance(
                 "total_early_leave": total_early,
                 "total_hours": round(total_hours, 2),
                 "total_ot": round(total_ot, 2),
+                "total_meal_allowance": sum(c.meal_allowance for c in days_cells),
+                "total_night_allowance": sum(c.night_allowance for c in days_cells),
+                "total_paid_leave": len([c for c in days_cells if c.status == "off" and c.notes and "Nghi" not in c.notes]) # Gian luoc
             },
         ))
 

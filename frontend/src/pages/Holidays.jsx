@@ -13,7 +13,6 @@ export default function Holidays() {
   const [genModal, setGenModal] = useState(false);
   const [monthKey, setMonthKey] = useState(dayjs().format('YYYY-MM'));
   const [form] = Form.useForm();
-  const [genYear, setGenYear] = useState(dayjs().year());
   const qc = useQueryClient();
 
   const { data: holidays = [], isLoading } = useQuery({
@@ -46,7 +45,7 @@ export default function Holidays() {
   });
 
   const genMut = useMutation({
-    mutationFn: (year) => api.post('/holidays/generate-vn', { year }),
+    mutationFn: (month_key) => api.post('/holidays/generate-vn', { month_key }),
     onSuccess: (res) => {
       message.success(res.data.message);
       qc.invalidateQueries(['holidays']);
@@ -163,16 +162,11 @@ export default function Holidays() {
       </Modal>
 
       {/* Generate VN holidays modal */}
-      <Modal title="Tu dong tao ngay le Viet Nam" open={genModal} onCancel={() => setGenModal(false)}
-        onOk={() => genMut.mutate(genYear)} confirmLoading={genMut.isPending} okText="Tao" cancelText="Huy">
+      <Modal title={`Tạo ngày lễ tháng ${dayjs(monthKey).format('M/YYYY')}`} open={genModal} onCancel={() => setGenModal(false)}
+        onOk={() => genMut.mutate(monthKey)} confirmLoading={genMut.isPending} okText="Tao" cancelText="Huy">
         <p style={{ marginBottom: 16, color: '#6b7a99' }}>
-          He thong se tu tao cac ngay le co dinh cua Viet Nam (Tet, 30/4, 1/5, 2/9, Gio to Hung Vuong...)
-          cho nam ban chon. Cac ngay da ton tai se duoc bo qua.
+          Hệ thống sẽ tự động tìm và tạo các ngày lễ cố định của Việt Nam (nếu có) trong tháng <b>{dayjs(monthKey).format('M/YYYY')}</b> này. Các ngày lễ đã tồn tại sẽ được bỏ qua.
         </p>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <span style={{ fontWeight: 500 }}>Nam:</span>
-          <InputNumber value={genYear} onChange={setGenYear} min={2024} max={2030} style={{ width: 120 }} />
-        </div>
       </Modal>
     </div>
   );

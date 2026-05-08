@@ -45,25 +45,31 @@ async def list_holidays(
     current_user: AppUser = Depends(require_roles(UserRole.ADMIN)),
 ):
     """Danh sach ngay le/nghi - chi Admin"""
-    query = select(CompanyHoliday)
+    import traceback
+    try:
+        query = select(CompanyHoliday)
 
-    if month_key:
-        try:
-            y, m = map(int, month_key.split("-"))
-            query = query.where(
-                and_(
-                    extract("year", CompanyHoliday.holiday_date) == y,
-                    extract("month", CompanyHoliday.holiday_date) == m,
+        if month_key:
+            try:
+                y, m = map(int, month_key.split("-"))
+                query = query.where(
+                    and_(
+                        extract("year", CompanyHoliday.holiday_date) == y,
+                        extract("month", CompanyHoliday.holiday_date) == m,
+                    )
                 )
-            )
-        except ValueError:
-            pass
-    elif year:
-        query = query.where(extract("year", CompanyHoliday.holiday_date) == year)
+            except ValueError:
+                pass
+        elif year:
+            query = query.where(extract("year", CompanyHoliday.holiday_date) == year)
 
-    query = query.order_by(CompanyHoliday.holiday_date)
-    result = await db.execute(query)
-    return [HolidayResponse.model_validate(h) for h in result.scalars().all()]
+        query = query.order_by(CompanyHoliday.holiday_date)
+        result = await db.execute(query)
+        holidays = result.scalars().all()
+        return [HolidayResponse.model_validate(h) for h in holidays]
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("", response_model=HolidayResponse, status_code=201)
@@ -152,34 +158,40 @@ async def generate_vn_holidays(
     db: AsyncSession = Depends(get_db),
     current_user: AppUser = Depends(require_roles(UserRole.ADMIN)),
 ):
-    """Tu dong tao cac ngay le Viet Nam trong nam. Khong ghi de ngay da ton tai."""
-    year = request.year
+    """Tu dong tao cac ngay le Viet Nam trong thang hien tai."""
+    try:
+        year, month = map(int, request.month_key.split("-"))
+    except ValueError:
+        raise HTTPException(400, "month_key phai la YYYY-MM")
+
     created = 0
     skipped = 0
 
     holidays_to_create = []
 
     # Fixed holidays
-    for day, month, name in VN_HOLIDAYS:
-        try:
-            holidays_to_create.append((date(year, month, day), name, "national"))
-        except ValueError:
-            pass
+    for day, m, name in VN_HOLIDAYS:
+        if m == month:
+            try:
+                holidays_to_create.append((date(year, m, day), name, "national"))
+            except ValueError:
+                pass
 
     # Tet Nguyen Dan
     tet_dates = TET_DATES_BY_YEAR.get(year)
     if tet_dates:
-        for i, (day, month) in enumerate(tet_dates):
-            try:
-                holidays_to_create.append(
-                    (date(year, month, day), f"Tet Nguyen Dan (ngay {i+1})", "national")
-                )
-            except ValueError:
-                pass
+        for i, (day, m) in enumerate(tet_dates):
+            if m == month:
+                try:
+                    holidays_to_create.append(
+                        (date(year, m, day), f"Tet Nguyen Dan (ngay {i+1})", "national")
+                    )
+                except ValueError:
+                    pass
 
     # Gio To Hung Vuong
     hk = HUNG_KINGS_BY_YEAR.get(year)
-    if hk:
+    if hk and hk[1] == month:
         try:
             holidays_to_create.append(
                 (date(year, hk[1], hk[0]), "Gio To Hung Vuong (10/3 AL)", "national")
@@ -206,8 +218,8 @@ async def generate_vn_holidays(
 
     await db.commit()
     return {
-        "message": f"Da tao {created} ngay le cho nam {year}, bo qua {skipped} ngay da ton tai",
+        "message": f"Da tao {created} ngay le cho thang {request.month_key}, bo qua {skipped} ngay da ton tai",
         "created": created,
         "skipped": skipped,
-        "year": year,
+        "month_key": request.month_key,
     }

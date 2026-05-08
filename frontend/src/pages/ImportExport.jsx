@@ -85,7 +85,7 @@ export default function ImportExport() {
           </ul>
           <Alert
             type="info" showIcon
-            message="Format: Ma NV | Ten | Bo phan | Thoi gian scan"
+            message="Format: Ma NV | Ten | Bo phan (bo qua, lay trong DB) | Thoi gian scan"
             style={{ marginBottom: 16, fontSize: 11 }}
           />
           <Upload

@@ -21,39 +21,40 @@ import useAuthStore from '../../stores/authStore';
 
 const sections = [
   {
-    group: 'TONG QUAN',
+    group: 'TỔNG QUAN',
     items: [{ key: '/dashboard', icon: <AppstoreOutlined />, label: 'Dashboard' }],
   },
   {
-    group: 'NHAN SU',
+    group: 'NHÂN SỰ',
     roles: ['admin', 'accountant'],
     items: [
-      { key: '/employees', icon: <TeamOutlined />, label: 'Nhan vien' },
-      { key: '/schedules', icon: <CalendarOutlined />, label: 'Lich lam' },
-      { key: '/attendance', icon: <ClockCircleOutlined />, label: 'Cham cong' },
-      { key: '/overtime', icon: <RiseOutlined />, label: 'Tang ca' },
-      { key: '/shifts', icon: <ScheduleOutlined />, label: 'Ma ca' },
-      { key: '/leave', icon: <CalendarOutlined />, label: 'Phep nam' },
+      { key: '/employees', icon: <TeamOutlined />, label: 'Nhân viên' },
+      { key: '/schedules', icon: <CalendarOutlined />, label: 'Lịch làm' },
+      { key: '/attendance', icon: <ClockCircleOutlined />, label: 'Chấm công' },
+      { key: '/overtime', icon: <RiseOutlined />, label: 'Tăng ca' },
+      { key: '/shifts', icon: <ScheduleOutlined />, label: 'Mã ca' },
+      { key: '/leave', icon: <CalendarOutlined />, label: 'Phép năm' },
     ],
   },
   {
-    group: 'LUONG & THUE',
+    group: 'LƯƠNG & THUẾ',
     roles: ['admin', 'accountant'],
     items: [
-      { key: '/salaries', icon: <DollarOutlined />, label: 'Bang luong' },
-      { key: '/payslips', icon: <FileTextOutlined />, label: 'Phieu luong' },
-      { key: '/insurance', icon: <SafetyOutlined />, label: 'BHXH / Thue' },
-      { key: '/advances', icon: <BankOutlined />, label: 'Tam ung' },
+      { key: '/meal-allowance', icon: <DollarOutlined />, label: 'Tiền ăn' },
+      { key: '/salaries', icon: <DollarOutlined />, label: 'Lương chung' },
+      { key: '/payslips', icon: <FileTextOutlined />, label: 'Phiếu lương' },
+      { key: '/insurance', icon: <SafetyOutlined />, label: 'BHXH / Thuế' },
+      { key: '/advances', icon: <BankOutlined />, label: 'Tạm ứng' },
     ],
   },
   {
-    group: 'HE THONG',
+    group: 'HỆ THỐNG',
     roles: ['admin'],
     items: [
-      { key: '/holidays', icon: <CalendarOutlined />, label: 'Ngay OFF & Le' },
+      { key: '/holidays', icon: <CalendarOutlined />, label: 'Ngày OFF & Lễ' },
       { key: '/import-export', icon: <ImportOutlined />, label: 'Import / Export' },
-      { key: '/audit', icon: <AuditOutlined />, label: 'Nhat ky' },
-      { key: '/settings', icon: <SettingOutlined />, label: 'Cai dat' },
+      { key: '/audit', icon: <AuditOutlined />, label: 'Nhật ký' },
+      { key: '/settings', icon: <SettingOutlined />, label: 'Cài đặt' },
     ],
   },
 ];

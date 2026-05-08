@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.database import engine, Base
 from app.models import *  # noqa: F401, F403 - Import all models so they register with Base
-from app.routers import auth, shifts, employees, dashboard, holidays, schedules, overtime, attendance, import_export
+from app.routers import auth, shifts, employees, dashboard, holidays, schedules, overtime, attendance, import_export, meal_allowance, salaries
 from app.services.seed import seed_database
 
 
@@ -12,7 +12,7 @@ async def lifespan(app: FastAPI):
     """Startup: create tables + seed data"""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    await seed_database()
+    # await seed_database()  # Dừng tự động seed dữ liệu theo yêu cầu
     yield
     await engine.dispose()
 
@@ -43,6 +43,8 @@ app.include_router(schedules.router, prefix="/api")
 app.include_router(overtime.router, prefix="/api")
 app.include_router(attendance.router, prefix="/api")
 app.include_router(import_export.router, prefix="/api")
+app.include_router(salaries.router, prefix="/api")
+app.include_router(meal_allowance.router, prefix="/api")
 
 
 @app.get("/api/health")
