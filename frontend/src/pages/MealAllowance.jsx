@@ -138,7 +138,41 @@ export default function MealAllowance() {
           {user?.role === 'admin' && (
             <Button onClick={() => setNightModal(true)}>Cấu hình PC Đêm</Button>
           )}
-          <Button icon={<DownloadOutlined />} type="primary">Xuất Excel</Button>
+          <Button 
+            icon={<DownloadOutlined />} 
+            type="primary" 
+            onClick={async () => {
+              const hide = message.loading('Đang khởi tạo file Excel...', 0);
+              try {
+                const start = dateRange[0]?.format('YYYY-MM-DD');
+                const end = dateRange[1]?.format('YYYY-MM-DD');
+                const res = await api.get('/import-export/export-meal-allowance', {
+                  params: {
+                    start_date: start,
+                    end_date: end,
+                    night_allowance: nightAllowanceRate,
+                    department: dept || undefined
+                  },
+                  responseType: 'blob'
+                });
+                
+                const url = window.URL.createObjectURL(new Blob([res.data]));
+                const link = document.createElement('a');
+                link.href = url;
+                link.setAttribute('download', `TienAn_BoiDuong_${start}_${end}.xlsx`);
+                document.body.appendChild(link);
+                link.click();
+                link.remove();
+                message.success('Đã xuất file thành công');
+              } catch (err) {
+                message.error('Lỗi khi xuất file Excel');
+              } finally {
+                hide();
+              }
+            }}
+          >
+            Xuất Excel
+          </Button>
         </div>
       </div>
 

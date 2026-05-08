@@ -1,0 +1,14 @@
+Row 1: CÔNG TY TNHH HIỆP LỢI | None | None | None | None | None | None | None | None | None | None | None | None | None | None | None | None | None | None | None | None | None | None | None
+Row 2: MST: 3701609885 | None | None | None | None | None | None | None | None | None | None | None | None | None | None | None | None | None | None | None | None | None | None | None
+Row 3: TIỀN CƠM VÀ TIỀN BỒI DƯỠNG TĂNG CA ĐÊM TỪ NGÀY 16/04/2026 - 28/04/2026 | None | None | None | None | None | None | None | None | None | None | None | None | None | None | None | None | None | None | None | None | None | None | None
+Row 4: None | None | None | None | None | None | None | None | None | None | None | None | None | None | None | None | None | None | None | None | None | None | None | None
+Row 5: STT | MSNV | HỌ VÀ TÊN | Số Bửa | Tiền Cơm | Cộng Tiền cơm | Số Đêm | Bồi Dưỡng Ca Đêm | Cộng tiền bồi dưỡng Đêm | Số Bửa | Tiền BD Đi Phụ Xe | Cộng tiền bồi dưỡng | TIỀN ĐIỆN | TIỀN THỰC LÃNH | SỐ TIÈN THIẾU | SỐ TIỀN DƯ | KÍ NHẬN | None | None | None | None | None | None | None
+Row 6: 1 | 1 | TRIEU HUE KIEU | 20 | 40000 | 800000 | 0 | 0 | 0 | None | None | 0 | None | 800000 | None | None | None | None | None | None | None | None | None | None
+Row 7: 2 | 2 | PHUNG VAN GHET | 8 | 40000 | 320000 | 0 | 0 | 0 | None | None | 0 | None | 320000 | None | None | None | None | None | None | None | None | None | None
+Row 8: 3 | 3 | DANG VAN TINH | 13 | 40000 | 520000 | 0 | 0 | 0 | None | None | 0 | None | 515000 | 5000 | None | None | None | None | None | None | None | None | None
+Row 9: 4 | 5 | BUI THI HOA | 12 | 40000 | 480000 | 0 | 0 | 0 | None | None | 0 | None | 480000 | None | None | None | None | None | None | None | None | None | None
+Row 10: 5 | 6 | CHAU VAN LUAN | 11 | 40000 | 440000 | 0 | 0 | 0 | 6 | 30000 | 180000 | None | 635000 | None | 15000 | None | None | None | None | None | None | None | None
+Row 11: 6 | 7 | CAO LUU THIEN BAO | 14 | 40000 | 560000 | 0 | 0 | 0 | None | None | 0 | None | 550000 | 10000 | None | None | None | None | None | None | None | None | None
+Row 12: 7 | 8 | DANG KHOI NGOI | 11 | 40000 | 440000 | 0 | 0 | 0 | None | None | 0 | None | 440000 | None | None | None | None | None | None | None | None | None | None
+Row 13: 8 | 9 | TRAN THI THUY NGUYEN | 11 | 40000 | 440000 | 0 | 0 | 0 | None | None | 0 | None | 440000 | None | None | None | None | None | None | None | None | None | None
+Row 14: 9 | 11 | PHAN THI MY TIEN | 26 | 35000 | 910000 | 0 | 0 | 0 | None | None | 0 | None | 910000 | None | None | None | None | None | None | None | None | None | None

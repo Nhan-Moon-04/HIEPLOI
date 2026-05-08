@@ -4,7 +4,7 @@ import calendar
 import json
 import uuid
 from io import BytesIO
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, text, delete
@@ -382,3 +382,134 @@ async def restore_database(
         "backup_version": backup.get("version"),
         "backup_date": backup.get("created_at"),
     }
+@router.get("/export-meal-allowance")
+async def export_meal_allowance(
+    start_date: date = Query(...),
+    end_date: date = Query(...),
+    night_allowance: float = Query(0),
+    department: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: AppUser = Depends(require_roles(UserRole.ADMIN, UserRole.ACCOUNTANT)),
+):
+    """Xuat file Excel tien com + boi duong ca dem theo format mau"""
+    import openpyxl
+    from openpyxl.styles import Border, Side, Alignment, Font, PatternFill
+
+    # 1. Lay du lieu (giong ben meal_allowance.py nhung goi truc tiep)
+    from app.routers.meal_allowance import get_meal_allowance
+    data = await get_meal_allowance(start_date, end_date, department, night_allowance, db, current_user)
+    
+    # 2. Tao Workbook
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Tien Com - Boi Duong"
+
+    # Style
+    thin = Side(border_style="thin", color="000000")
+    border = Border(top=thin, left=thin, right=thin, bottom=thin)
+    header_font = Font(name="Times New Roman", bold=True, size=11)
+    title_font = Font(name="Times New Roman", bold=True, size=14)
+    normal_font = Font(name="Times New Roman", size=11)
+    center = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    right = Alignment(horizontal="right", vertical="center")
+    gray_fill = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
+
+    # Row 1-3: Headers
+    ws.merge_cells("A1:Q1")
+    ws["A1"] = "CÔNG TY TNHH HIỆP LỢI"
+    ws["A1"].font = Font(name="Times New Roman", bold=True, size=12)
+
+    ws.merge_cells("A2:Q2")
+    ws["A2"] = "MST: 3701609885"
+    ws["A2"].font = Font(name="Times New Roman", size=11)
+
+    ws.merge_cells("A3:Q3")
+    date_str = f"TỪ NGÀY {start_date.strftime('%d/%m/%Y')} - {end_date.strftime('%d/%m/%Y')}"
+    ws["A3"] = f"TIỀN CƠM VÀ TIỀN BỒI DƯỠNG TĂNG CA ĐÊM {date_str}"
+    ws["A3"].font = title_font
+    ws["A3"].alignment = center
+
+    # Row 5: Header table
+    headers = [
+        "STT", "MSNV", "HỌ VÀ TÊN", "Số Bữa", "Tiền Cơm", "Cộng Tiền cơm",
+        "Số Đêm", "Bồi Dưỡng Ca Đêm", "Cộng tiền bồi dưỡng Đêm", "Số Bữa",
+        "Tiền BD Đi Phụ Xe", "Cộng tiền bồi dưỡng", "TIỀN ĐIỆN", "TIỀN THỰC LÃNH",
+        "SỐ TIỀN THIẾU", "SỐ TIỀN DƯ", "KÍ NHẬN"
+    ]
+    for col_idx, header in enumerate(headers, 1):
+        cell = ws.cell(row=5, column=col_idx)
+        cell.value = header
+        cell.font = header_font
+        cell.alignment = center
+        cell.border = border
+        cell.fill = gray_fill
+
+    # Row 6+: Data
+    current_row = 6
+    for idx, item in enumerate(data.rows, 1):
+        # STT, MSNV, Name
+        ws.cell(current_row, 1, idx).font = normal_font
+        ws.cell(current_row, 2, item.employee_code).font = normal_font
+        ws.cell(current_row, 3, item.full_name).font = normal_font
+        
+        # Meal
+        ws.cell(current_row, 4, item.work_days).font = normal_font
+        ws.cell(current_row, 5, item.meal_rate).font = normal_font
+        # Formula: Cell F = D * E
+        ws.cell(current_row, 6, f"=D{current_row}*E{current_row}").font = normal_font
+        
+        # Night
+        ws.cell(current_row, 7, item.night_shifts).font = normal_font
+        ws.cell(current_row, 8, night_allowance).font = normal_font
+        # Formula: Cell I = G * H
+        ws.cell(current_row, 9, f"=G{current_row}*H{current_row}").font = normal_font
+        
+        # Phụ xe (Empty with formula)
+        ws.cell(current_row, 10, None).font = normal_font
+        ws.cell(current_row, 11, None).font = normal_font
+        # Formula: Cell L = J * K
+        ws.cell(current_row, 12, f"=J{current_row}*K{current_row}").font = normal_font
+        
+        # Tiền điện (Empty)
+        ws.cell(current_row, 13, None).font = normal_font
+        
+        # Thực lãnh
+        # Formula: Cell N = F + I + L + P - O - M
+        ws.cell(current_row, 14, f"=F{current_row}+I{current_row}+L{current_row}+P{current_row}-O{current_row}-M{current_row}").font = Font(name="Times New Roman", bold=True)
+        
+        # Thiếu, Dư, Kí nhận
+        ws.cell(current_row, 15, None).font = normal_font
+        ws.cell(current_row, 16, None).font = normal_font
+        ws.cell(current_row, 17, None).font = normal_font
+
+        # Borders for all cells in row
+        for c in range(1, 18):
+            ws.cell(current_row, c).border = border
+            if c in [5, 6, 8, 9, 11, 12, 13, 14, 15, 16]:
+                ws.cell(current_row, c).number_format = "#,##0"
+                ws.cell(current_row, c).alignment = right
+            else:
+                ws.cell(current_row, c).alignment = center
+
+        current_row += 1
+
+    # Column widths
+    ws.column_dimensions["A"].width = 5
+    ws.column_dimensions["B"].width = 10
+    ws.column_dimensions["C"].width = 25
+    for c in "DEFGHIJKLM":
+        ws.column_dimensions[c].width = 12
+    ws.column_dimensions["N"].width = 15
+    ws.column_dimensions["Q"].width = 15
+
+    # Export
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    filename = f"TienAn_BoiDuong_{start_date}_{end_date}.xlsx"
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
