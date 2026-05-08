@@ -3,12 +3,15 @@ from datetime import date
 import calendar
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, or_, and_, cast, Integer
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy import select, func, or_, and_, cast, Integer, Numeric
 from app.database import get_db
 from app.models.employee import Employee
+from app.models.salary import MonthlySalary
 from app.models.user import AppUser, UserRole
 from app.schemas.employee import EmployeeCreate, EmployeeUpdate, EmployeeResponse
 from app.middleware.auth import get_current_user, require_roles
+from app.utils.audit_helper import log_audit
 
 router = APIRouter(prefix="/employees", tags=["Employees - Nhân Viên"])
 
@@ -25,7 +28,13 @@ async def list_employees(
     current_user: AppUser = Depends(get_current_user),
 ):
     """Danh sach nhan vien co phan trang + tim kiem + loc theo thang"""
-    query = select(Employee)
+    # Base query
+    if month_key:
+        query = select(Employee, MonthlySalary.base_salary.label("month_salary")).outerjoin(
+            MonthlySalary, and_(MonthlySalary.employee_id == Employee.id, MonthlySalary.month_key == month_key)
+        )
+    else:
+        query = select(Employee, cast(None, Numeric).label("month_salary"))
 
     if search:
         query = query.where(
@@ -59,13 +68,19 @@ async def list_employees(
     total_result = await db.execute(count_query)
     total = total_result.scalar()
 
-    # Paginate - sort employee_code as integer
-    query = query.order_by(cast(Employee.employee_code, Integer)).offset((page - 1) * page_size).limit(page_size)
+    # Paginate
+    query = query.order_by(Employee.employee_code).offset((page - 1) * page_size).limit(page_size)
     result = await db.execute(query)
-    employees = result.scalars().all()
+    rows = result.all()
+    
+    employees_res = []
+    for emp, m_sal in rows:
+        item = EmployeeResponse.model_validate(emp)
+        item.month_salary = m_sal
+        employees_res.append(item)
 
     return {
-        "items": [EmployeeResponse.model_validate(e) for e in employees],
+        "items": employees_res,
         "total": total,
         "page": page,
         "page_size": page_size,
@@ -107,14 +122,22 @@ async def create_employee(
     current_user: AppUser = Depends(require_roles(UserRole.ADMIN, UserRole.ACCOUNTANT)),
 ):
     """Tạo nhân viên mới"""
-    result = await db.execute(select(Employee).where(Employee.employee_code == request.employee_code))
+    # Cho phep trung ma neu nguoi cu da nghi (is_active = False)
+    result = await db.execute(
+        select(Employee).where(and_(Employee.employee_code == request.employee_code, Employee.is_active == True))
+    )
     if result.scalar_one_or_none():
-        raise HTTPException(status_code=400, detail=f"Mã NV '{request.employee_code}' đã tồn tại")
+        raise HTTPException(status_code=400, detail=f"Mã NV '{request.employee_code}' đang được sử dụng bởi một nhân viên đang làm việc.")
 
     emp = Employee(**request.model_dump())
     db.add(emp)
     await db.commit()
     await db.refresh(emp)
+
+    # Ghi nhật ký
+    await log_audit(db, "employees", emp.id, "CREATE", current_user.username, None, request.model_dump())
+    await db.commit()
+
     return EmployeeResponse.model_validate(emp)
 
 
@@ -131,12 +154,21 @@ async def update_employee(
     if not emp:
         raise HTTPException(status_code=404, detail="Nhân viên không tồn tại")
 
+    # Lưu bản cũ để ghi log
+    before_data = {c.name: getattr(emp, c.name) for c in emp.__table__.columns}
+    
     update_data = request.model_dump(exclude_unset=True)
     for key, value in update_data.items():
         setattr(emp, key, value)
 
     await db.commit()
     await db.refresh(emp)
+    
+    # Ghi nhật ký
+    after_data = {c.name: getattr(emp, c.name) for c in emp.__table__.columns}
+    await log_audit(db, "employees", emp.id, "UPDATE", current_user.username, before_data, after_data)
+    await db.commit()
+
     return EmployeeResponse.model_validate(emp)
 
 
@@ -152,6 +184,19 @@ async def delete_employee(
     if not emp:
         raise HTTPException(status_code=404, detail="Nhân viên không tồn tại")
 
-    await db.delete(emp)
-    await db.commit()
+    before_data = {c.name: getattr(emp, c.name) for c in emp.__table__.columns}
+    
+    # Ghi nhật ký (chuẩn bị sẵn trong session)
+    await log_audit(db, "employees", employee_id, "DELETE", current_user.username, before_data, None)
+
+    try:
+        await db.delete(emp)
+        await db.commit() # Commit cả việc xóa và việc ghi log
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=400, 
+            detail="Không thể xóa nhân viên này vì đã có dữ liệu chấm công hoặc lương liên quan. Vui lòng chuyển trạng thái sang 'Nghỉ việc' thay vì xóa."
+        )
+
     return {"message": f"Đã xóa nhân viên '{emp.full_name}'"}

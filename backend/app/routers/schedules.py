@@ -64,7 +64,7 @@ async def get_schedule(
 
     emp_q = select(Employee).where(
         Employee.is_active == True,
-    ).order_by(cast(Employee.employee_code, Integer))
+    ).order_by(Employee.employee_code)
     emps = (await db.execute(emp_q)).scalars().all()
 
     sched_q = select(WorkSchedule).where(WorkSchedule.month_key == month_key)

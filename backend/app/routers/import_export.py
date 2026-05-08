@@ -4,7 +4,7 @@ import calendar
 import json
 import uuid
 from io import BytesIO
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, text, delete
@@ -15,6 +15,7 @@ from app.models.shift import ShiftTemplate
 from app.models.schedule import WorkSchedule
 from app.models.user import AppUser, UserRole
 from app.middleware.auth import require_roles
+from app.utils.audit_helper import log_audit
 
 router = APIRouter(prefix="/import-export", tags=["Import/Export"])
 
@@ -24,6 +25,7 @@ NIGHT_SHIFT_CUTOFF = time(6, 0)  # Gio truoc 6h sang tinh la ca dem hom truoc
 @router.post("/attendance")
 async def import_attendance(
     file: UploadFile = File(...),
+    month_key: str = Form(...),
     db: AsyncSession = Depends(get_db),
     current_user: AppUser = Depends(require_roles(UserRole.ADMIN, UserRole.ACCOUNTANT)),
 ):
@@ -40,11 +42,64 @@ async def import_attendance(
 
     batch_id = str(uuid.uuid4())[:8]
 
-    # Load employee code -> id mapping
-    emp_result = await db.execute(select(Employee))
-    emp_map = {}
-    for e in emp_result.scalars().all():
-        emp_map[str(e.employee_code)] = e
+    # 1. Thu thap thong tin nhan vien tu file Excel
+    file_employees = {} # code -> name
+    for r in range(2, ws.max_row + 1):
+        c_raw = ws.cell(r, 1).value
+        n_raw = ws.cell(r, 2).value
+        if c_raw is not None and n_raw is not None:
+            c = str(int(c_raw) if isinstance(c_raw, float) else c_raw).strip().lstrip("'")
+            file_employees[c] = str(n_raw).strip()
+
+    # 2. Dong bo bang Employee
+    all_emps = (await db.execute(select(Employee))).scalars().all()
+    active_emps = [e for e in all_emps if e.is_active]
+    codes_in_file = set(file_employees.keys())
+    
+    # Xac dinh ngay moc (dau thang duoc chon)
+    try:
+        y, m = map(int, month_key.split("-"))
+        ref_date = date(y, m, 1)
+    except:
+        ref_date = date.today().replace(day=1)
+
+    # A. Cho nghi viec nhung nguoi KHONG co trong file
+    for emp in active_emps:
+        if str(emp.employee_code) not in codes_in_file:
+            emp.is_active = False
+            emp.leave_date = ref_date
+            
+    # B. Xu ly nhan vien trong file (moi hoac cap nhat)
+    for code, name in file_employees.items():
+        # Tim theo code (uu tien active)
+        emp = next((e for e in active_emps if str(e.employee_code).lstrip("'") == code), None)
+        if emp:
+            # Cap nhat ten neu khac (de dong bo voi file moi nhat)
+            if emp.full_name != name:
+                emp.full_name = name
+            continue
+            
+        # Neu khong thay trong active, tim trong all (co the da nghi)
+        emp_any = next((e for e in all_emps if str(e.employee_code).lstrip("'") == code), None)
+        if emp_any:
+            emp_any.is_active = True
+            emp_any.leave_date = None
+            emp_any.full_name = name # Cap nhat ten luon
+        else:
+            # Tao moi hoan toan
+            new_emp = Employee(
+                employee_code=code,
+                full_name=name,
+                is_active=True,
+                join_date=ref_date
+            )
+            db.add(new_emp)
+
+    await db.commit()
+
+    # Load lai employee code -> object mapping (chi lay nhung nguoi dang active sau khi sync)
+    emp_result = await db.execute(select(Employee).where(Employee.is_active == True))
+    emp_map = {str(e.employee_code).lstrip("'"): e for e in emp_result.scalars().all()}
 
     # Load shifts
     shift_result = await db.execute(select(ShiftTemplate))
@@ -64,7 +119,7 @@ async def import_attendance(
         if emp_code_raw is None:
             continue
 
-        emp_code = str(int(emp_code_raw) if isinstance(emp_code_raw, float) else emp_code_raw).strip()
+        emp_code = str(int(emp_code_raw) if isinstance(emp_code_raw, float) else emp_code_raw).strip().lstrip("'")
         scan_time = ws.cell(r, 4).value
         emp_name = ws.cell(r, 2).value
 
@@ -174,6 +229,13 @@ async def import_attendance(
                 db.add(att)
                 processed += 1
 
+    await db.commit()
+
+    # Ghi nhật ký
+    await log_audit(
+        db, "attendance", batch_id, "IMPORT", current_user.username,
+        notes=f"Import {file.filename} - {month_key}. {processed} moi, {updated} cap nhat. {len(raw_scans)} NV."
+    )
     await db.commit()
 
     return {

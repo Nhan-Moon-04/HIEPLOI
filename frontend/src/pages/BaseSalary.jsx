@@ -142,12 +142,13 @@ export default function BaseSalary() {
           message="Lưu ý cấu trúc file Excel" 
           description={
             <ul style={{ paddingLeft: 20, marginTop: 8, fontSize: 13 }}>
-              <li>Tên sheet phải là sheet đầu tiên trong file.</li>
+              <li>Tên sheet: <b>Bang Luong</b> (nếu không thấy sẽ lấy sheet đầu tiên).</li>
               <li>Dữ liệu bắt đầu từ <b>Dòng 3</b>.</li>
-              <li><b>Cột B:</b> Mã NV (Bắt buộc phải khớp với mã trong hệ thống).</li>
+              <li><b>Cột B (Mã NV):</b> Hệ thống sẽ tự động tạo/cập nhật nhân viên theo mã này.</li>
+              <li><b>Cột C:</b> Họ tên nhân viên.</li>
               <li><b>Cột D:</b> Lương cơ bản.</li>
               <li><b>Cột E:</b> Phụ cấp.</li>
-              <li>Hệ số lương đọc tự động ở cột H (Ví dụ ô C8: 26).</li>
+              <li><b>Hệ số lương:</b> Đọc tự động từ ô chứa chữ 'He so luong' (VD: Ô G2: 26).</li>
             </ul>
           }
           style={{ marginBottom: 16 }}

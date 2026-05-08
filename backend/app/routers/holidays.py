@@ -199,6 +199,14 @@ async def generate_vn_holidays(
         except ValueError:
             pass
 
+    # Chu nhat trong thang
+    import calendar
+    num_days = calendar.monthrange(year, month)[1]
+    for d in range(1, num_days + 1):
+        dt = date(year, month, d)
+        if dt.weekday() == 6: # 6 la Chu nhat
+            holidays_to_create.append((dt, "Chu nhat", "company"))
+
     for h_date, h_name, h_type in holidays_to_create:
         existing = await db.execute(
             select(CompanyHoliday).where(CompanyHoliday.holiday_date == h_date)

@@ -7,7 +7,7 @@ class Employee(Base):
     __tablename__ = "employees"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    employee_code = Column(String(32), unique=True, nullable=False, index=True)
+    employee_code = Column(String(32), nullable=False, index=True)
     full_name = Column(String(120), nullable=False)
     full_name_tw = Column(String(120))  # Tên tiếng Hoa
     gender = Column(String(16))

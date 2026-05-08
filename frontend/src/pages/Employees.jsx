@@ -87,7 +87,20 @@ export default function Employees() {
     { title: 'Ho ten', dataIndex: 'full_name', width: 180, render: (t) => <span style={{ fontWeight: 500 }}>{t}</span> },
     { title: 'Bo phan', dataIndex: 'department', width: 120, render: (t) => t || '-' },
     { title: 'Ca', dataIndex: 'default_shift_code', width: 50, render: (t) => t ? <Tag color="blue">{t}</Tag> : '-', align: 'center' },
-    { title: 'Luong co ban', dataIndex: 'base_salary', width: 115, render: (v) => v ? Number(v).toLocaleString('vi-VN') : '-', align: 'right' },
+    { 
+      title: 'Luong co ban', 
+      key: 'salary', 
+      width: 115, 
+      align: 'right', 
+      render: (_, r) => {
+        const val = r.month_salary !== null ? r.month_salary : r.base_salary;
+        return val ? (
+          <span style={{ fontWeight: r.month_salary !== null ? 600 : 400, color: r.month_salary !== null ? '#059669' : 'inherit' }}>
+            {Number(val).toLocaleString('vi-VN')}
+          </span>
+        ) : '-';
+      }
+    },
     { title: 'Ngay vao', dataIndex: 'join_date', width: 95, render: (d) => d ? dayjs(d).format('DD/MM/YYYY') : '-' },
     { title: 'Ngay nghi', dataIndex: 'leave_date', width: 95, render: (d) => d ? dayjs(d).format('DD/MM/YYYY') : '-' },
     {

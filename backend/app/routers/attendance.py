@@ -111,10 +111,18 @@ def evaluate_attendance(shift, check_in_dt, check_out_dt, work_date, is_sunday, 
     standard = float(shift.standard_hours or 8)
 
     if not check_in_dt and not check_out_dt:
-        # Ko co du lieu cham cong
+        # Ko co du lieu cham cong nao
         result["status"] = "absent"
         result["deviation"] = -standard
-        result["notes"] = "Khong quet the"
+        result["notes"] = "Vang mat (Khong quet the)"
+        return result
+
+    if not check_in_dt or not check_out_dt:
+        # Chi co 1 dau (vao hoac ra)
+        result["status"] = "forgot_scan"
+        result["actual_hours"] = 0.0
+        result["deviation"] = -standard
+        result["notes"] = "Quen quet the (Chi co 1 dau)"
         return result
 
     # Tinh gio lam thuc te
@@ -245,6 +253,7 @@ async def get_attendance(
         days_cells = []
         total_present = 0
         total_absent = 0
+        total_forgot_scan = 0
         total_early = 0
         total_hours = 0.0
         total_ot = 0.0
@@ -283,10 +292,10 @@ async def get_attendance(
                 work_date=str(dt),
                 day=d,
                 dow=dow,
-                shift_code=shift.code if shift else None,
-                shift_name=shift.name if shift else None,
-                shift_start=str(shift.start_time)[:5] if shift and shift.start_time else None,
-                shift_end=str(shift.end_time)[:5] if shift and shift.end_time else None,
+                shift_code="N" if ev["status"] == "absent" else (shift.code if shift else None),
+                shift_name="Nghi khong phep" if ev["status"] == "absent" else (shift.name if shift else None),
+                shift_start=str(shift.start_time)[:5] if shift and shift.start_time and ev["status"] != "absent" else None,
+                shift_end=str(shift.end_time)[:5] if shift and shift.end_time and ev["status"] != "absent" else None,
                 standard_hours=float(shift.standard_hours) if shift and shift.standard_hours else None,
                 check_in=ci_str,
                 check_out=co_str,
@@ -308,6 +317,8 @@ async def get_attendance(
                 total_hours += ev["actual_hours"]
             if ev["status"] == "absent":
                 total_absent += 1
+            if ev["status"] == "forgot_scan":
+                total_forgot_scan += 1
             if ev["status"] == "early_leave":
                 total_early += 1
             total_ot += ev["ot_hours"]
@@ -322,6 +333,7 @@ async def get_attendance(
             summary={
                 "total_present": total_present,
                 "total_absent": total_absent,
+                "total_forgot_scan": total_forgot_scan,
                 "total_early_leave": total_early,
                 "total_hours": round(total_hours, 2),
                 "total_ot": round(total_ot, 2),

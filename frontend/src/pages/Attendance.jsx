@@ -10,7 +10,8 @@ const STATUS_MAP = {
   full: { color: '#22c55e', bg: '#f0fdf4', label: 'Du', icon: '✓' },
   early_leave: { color: '#f59e0b', bg: '#fffbeb', label: 'Ve som', icon: '⚠' },
   short: { color: '#f97316', bg: '#fff7ed', label: 'Thieu', icon: '!' },
-  absent: { color: '#ef4444', bg: '#fef2f2', label: 'Vang', icon: '✗' },
+  absent: { color: '#ef4444', bg: '#fef2f2', label: 'Vang', icon: 'N' },
+  forgot_scan: { color: '#f97316', bg: '#fff7ed', label: 'Quen', icon: 'Q' },
   holiday: { color: '#8b5cf6', bg: '#f5f3ff', label: 'Le', icon: 'H' },
   off: { color: '#6b7280', bg: '#f9fafb', label: 'Nghi', icon: '-' },
   no_data: { color: '#d1d5db', bg: '#fff', label: '', icon: '' },
@@ -40,7 +41,7 @@ export default function Attendance() {
     const st = STATUS_MAP[cell.status] || STATUS_MAP.no_data;
     if (cell.status === 'no_data') return <span style={{ color: '#e5e7eb' }}>·</span>;
 
-    const hasIssue = cell.status === 'early_leave' || cell.status === 'absent' || cell.status === 'short';
+    const hasIssue = cell.status === 'early_leave' || cell.status === 'absent' || cell.status === 'short' || cell.status === 'forgot_scan';
 
     return (
       <Tooltip title={
@@ -151,6 +152,7 @@ export default function Attendance() {
                 })}
                 <th style={{ ...thStyle, width: 40, background: '#f0fdf4', color: '#22c55e' }}>Co</th>
                 <th style={{ ...thStyle, width: 40, background: '#fef2f2', color: '#ef4444' }}>Vang</th>
+                <th style={{ ...thStyle, width: 40, background: '#fff7ed', color: '#f97316' }}>Quen</th>
                 <th style={{ ...thStyle, width: 45, background: '#fffbeb', color: '#f59e0b' }}>V.som</th>
               </tr>
             </thead>
@@ -181,6 +183,9 @@ export default function Attendance() {
                   </td>
                   <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 600, color: '#ef4444', background: '#fffafa' }}>
                     {row.summary?.total_absent || 0}
+                  </td>
+                  <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 600, color: '#f97316', background: '#fff7ed' }}>
+                    {row.summary?.total_forgot_scan || 0}
                   </td>
                   <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 600, color: '#f59e0b', background: '#fffcf5' }}>
                     {row.summary?.total_early_leave || 0}

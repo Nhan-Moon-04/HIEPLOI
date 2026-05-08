@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Upload, Button, Card, message, Modal, List, Tag, Divider, Alert } from 'antd';
+import { Upload, Button, Card, message, Modal, List, Tag, Divider, Alert, DatePicker } from 'antd';
+import dayjs from 'dayjs';
 import {
   UploadOutlined, DownloadOutlined, CloudUploadOutlined,
   DatabaseOutlined, ImportOutlined, ExportOutlined,
@@ -11,11 +12,13 @@ import api from '../api/client';
 export default function ImportExport() {
   const [importResult, setImportResult] = useState(null);
   const [restoreResult, setRestoreResult] = useState(null);
+  const [importMonth, setImportMonth] = useState(dayjs().format('YYYY-MM'));
 
   const importAtt = useMutation({
     mutationFn: (file) => {
       const fd = new FormData();
       fd.append('file', file);
+      fd.append('month_key', importMonth);
       return api.post('/import-export/attendance', fd, {
         headers: { 'Content-Type': 'multipart/form-data' },
         timeout: 60000,
@@ -88,6 +91,16 @@ export default function ImportExport() {
             message="Format: Ma NV | Ten | Bo phan (bo qua, lay trong DB) | Thoi gian scan"
             style={{ marginBottom: 16, fontSize: 11 }}
           />
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 12, marginBottom: 4, fontWeight: 500 }}>Chon thang cham cong:</div>
+            <DatePicker
+              picker="month"
+              value={dayjs(importMonth)}
+              onChange={(d) => d && setImportMonth(d.format('YYYY-MM'))}
+              format="MM / YYYY"
+              style={{ width: '100%' }}
+            />
+          </div>
           <Upload
             accept=".xlsx,.xls"
             showUploadList={false}

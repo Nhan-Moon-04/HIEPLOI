@@ -10,6 +10,8 @@ from app.middleware.auth import require_roles, get_current_user
 from pydantic import BaseModel
 import openpyxl
 from io import BytesIO
+from app.utils.audit_helper import log_audit
+from datetime import date
 
 router = APIRouter(prefix="/salaries", tags=["Salaries - Lương"])
 
@@ -87,7 +89,11 @@ async def import_base_salaries(
     except Exception:
         raise HTTPException(400, "File không hợp lệ. Vui lòng upload file Excel (.xlsx)")
     
-    ws = wb[wb.sheetnames[0]]
+    ws = None
+    if "Bang Luong" in wb.sheetnames:
+        ws = wb["Bang Luong"]
+    else:
+        ws = wb[wb.sheetnames[0]]
 
     # Tìm hệ số lương
     standard_days = 26.0
@@ -109,10 +115,22 @@ async def import_base_salaries(
         db.add(config)
     else:
         config.company_work_days = standard_days
+    # 1. Thu thap thong tin tu file Excel
+    file_emps = {} # code -> {name, base_salary, allowance}
+    for r in range(3, ws.max_row + 1):
+        c_raw = ws.cell(r, 2).value
+        n_raw = ws.cell(r, 3).value
+        if c_raw and n_raw:
+            code = str(int(c_raw) if isinstance(c_raw, float) else c_raw).strip().lstrip("'")
+            file_emps[code] = {
+                "name": str(n_raw).strip(),
+                "base_salary": float(ws.cell(r, 4).value or 0),
+                "allowance": float(ws.cell(r, 5).value or 0)
+            }
 
-    # Load nhân viên
-    emp_result = await db.execute(select(Employee))
-    emp_map = {e.employee_code: e for e in emp_result.scalars().all()}
+    # Load lai nhan vien dang hoat dong
+    emp_result = await db.execute(select(Employee).where(Employee.is_active == True))
+    emp_map = {str(e.employee_code).lstrip("'"): e for e in emp_result.scalars().all()}
 
     processed = 0
     # Đọc dữ liệu từ dòng 3 (sau header)
@@ -121,19 +139,23 @@ async def import_base_salaries(
         if not emp_code:
             continue
         
-        emp_code = str(int(emp_code) if isinstance(emp_code, float) else emp_code).strip()
+        emp_code = str(int(emp_code) if isinstance(emp_code, float) else emp_code).strip().lstrip("'")
         if emp_code not in emp_map:
             continue
             
         emp = emp_map[emp_code]
-        base_salary = float(ws.cell(r, 4).value or 0)
-        allowance = float(ws.cell(r, 5).value or 0)
+        info = file_emps.get(emp_code, {})
+        base_salary = info.get("base_salary", 0)
+        allowance = info.get("allowance", 0)
 
         # Upsert
         sal_result = await db.execute(select(MonthlySalary).where(
             and_(MonthlySalary.employee_id == emp.id, MonthlySalary.month_key == month_key)
         ))
         sal = sal_result.scalar_one_or_none()
+
+        # Dong bo nguoc lai bang Employee (Luong co ban hien tai)
+        emp.base_salary = base_salary
 
         if sal:
             sal.base_salary = base_salary
@@ -151,6 +173,14 @@ async def import_base_salaries(
         processed += 1
 
     await db.commit()
+
+    # Ghi nhật ký
+    await log_audit(
+        db, "monthly_salaries", month_key, "IMPORT", current_user.username,
+        notes=f"Import luong thang {month_key} tu {file.filename}. {processed} NV. He so: {standard_days}"
+    )
+    await db.commit()
+
     return {"message": f"Import thành công lương cho {processed} nhân viên (Hệ số: {standard_days} ngày)", "processed": processed}
 
 
