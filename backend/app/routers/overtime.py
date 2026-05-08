@@ -106,7 +106,7 @@ async def get_overtime(
             if override_shift_id:
                 shift = shifts_by_id.get(override_shift_id)
             else:
-                shift = default_shift
+                shift = None if is_sunday else default_shift
 
             if not shift:
                 days_data[d] = {"shift": None, "ot": 0, "is_sunday": is_sunday}

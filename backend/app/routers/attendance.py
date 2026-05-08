@@ -258,7 +258,10 @@ async def get_attendance(
 
             # Determine shift
             override_id = override_map.get((emp.id, d))
-            shift = shifts_by_id.get(override_id) if override_id else default_shift
+            if override_id:
+                shift = shifts_by_id.get(override_id)
+            else:
+                shift = None if is_sunday else default_shift
 
             # Get attendance record
             att = att_map.get((emp.id, dt))
