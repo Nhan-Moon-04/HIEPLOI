@@ -1,0 +1,19 @@
+# Ignore node_modules trong frontend
+frontend/node_modules/
+
+# KHÔNG ignore venv (để trống dòng này hoặc không thêm venv)
+
+# Python cache (vẫn nên ignore)
+__pycache__/
+*.pyc
+
+# Env file
+.env
+
+# Build
+dist/
+build/
+
+# OS
+.DS_Store
+Thumbs.db
