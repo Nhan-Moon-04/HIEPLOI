@@ -63,7 +63,7 @@ export default function BaseSalary() {
     <div>
       <div className="page-head">
         <div>
-          <h1><DollarOutlined style={{ marginRight: 6 }} />Lương chung (Cố định)</h1>
+          <h1><DollarOutlined style={{ marginRight: 6 }} />Lương cơ bản (Cố định)</h1>
           <div className="sub">
             Tháng {dayjs(monthKey).format('M/YYYY')} 
             {isLocked && <Tag color="red" style={{ marginLeft: 8 }} icon={<LockOutlined />}>Đã chốt</Tag>}

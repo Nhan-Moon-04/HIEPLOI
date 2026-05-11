@@ -88,7 +88,7 @@ export default function ImportExport() {
           </ul>
           <Alert
             type="info" showIcon
-            message="Format: Ma NV | Ten | Bo phan (bo qua, lay trong DB) | Thoi gian scan"
+            message="Format: Ma NV | Ten | Bo phan | Thoi gian scan (.xlsx hoặc .csv)"
             style={{ marginBottom: 16, fontSize: 11 }}
           />
           <div style={{ marginBottom: 16 }}>
@@ -102,12 +102,12 @@ export default function ImportExport() {
             />
           </div>
           <Upload
-            accept=".xlsx,.xls"
+            accept=".xlsx,.xls,.csv"
             showUploadList={false}
             beforeUpload={(file) => { importAtt.mutate(file); return false; }}
           >
             <Button type="primary" icon={<UploadOutlined />} loading={importAtt.isPending} size="large" block>
-              Chon file cham cong (.xlsx)
+              Chon file cham cong (.xlsx, .csv)
             </Button>
           </Upload>
 

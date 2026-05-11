@@ -108,6 +108,7 @@ export default function MealAllowance() {
             {dateRange[0]?.format('DD/MM/YYYY')} - {dateRange[1]?.format('DD/MM/YYYY')}
             <span style={{ marginLeft: 16 }}>Tổng tiền ăn: <b style={{ color: '#10b981', fontSize: 14 }}>{totalMealAll.toLocaleString()} đ</b></span>
             <span style={{ marginLeft: 16 }}>Tổng PC đêm: <b style={{ color: '#8b5cf6', fontSize: 14 }}>{totalNightAll.toLocaleString()} đ</b></span>
+            <span style={{ marginLeft: 16 }}>Tổng cộng: <b style={{ color: '#4361ee', fontSize: 16 }}>{(totalMealAll + totalNightAll).toLocaleString()} đ</b></span>
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>

@@ -17,7 +17,7 @@ export default function EmployeeDetailModal({ visible, onClose, data }) {
       };
     }
     shiftSummary[cell.shift_code].days += 1;
-    shiftSummary[cell.shift_code].totalMeal += cell.meal_allowance || 0;
+    shiftSummary[cell.shift_code].totalMeal += (cell.meal_allowance || 0) + (cell.night_allowance || 0);
   });
 
   const shiftSummaryData = Object.values(shiftSummary);
@@ -73,8 +73,8 @@ export default function EmployeeDetailModal({ visible, onClose, data }) {
         </Col>
         <Col span={6}>
           <Card size="small" style={{ background: '#f0fdf4', borderColor: '#dcfce7' }}>
-            <div style={{ fontSize: 12, color: '#166534' }}>Tổng tiền ăn đợt</div>
-            <div style={{ fontSize: 24, fontWeight: 600, color: '#16a34a' }}>{formatNumber(data.summary.total_meal_allowance)}</div>
+            <div style={{ fontSize: 12, color: '#166534' }}>Tổng tiền nhận đợt</div>
+            <div style={{ fontSize: 24, fontWeight: 600, color: '#16a34a' }}>{formatNumber((data.summary.total_meal_allowance || 0) + (data.summary.total_night_allowance || 0))}</div>
           </Card>
         </Col>
       </Row>
@@ -90,7 +90,7 @@ export default function EmployeeDetailModal({ visible, onClose, data }) {
           { title: 'Mã ca', dataIndex: 'code', key: 'code', width: 100 },
           { title: 'Tên ca', dataIndex: 'name', key: 'name' },
           { title: 'Số ngày', dataIndex: 'days', key: 'days', width: 100, align: 'center' },
-          { title: 'Tổng tiền ăn', dataIndex: 'totalMeal', key: 'totalMeal', width: 150, align: 'right', render: v => formatNumber(v) },
+          { title: 'Tổng (Ăn + PC Đêm)', dataIndex: 'totalMeal', key: 'totalMeal', width: 200, align: 'right', render: v => formatNumber(v) },
         ]}
       />
 

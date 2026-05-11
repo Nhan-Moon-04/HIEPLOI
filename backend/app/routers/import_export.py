@@ -16,6 +16,7 @@ from app.models.schedule import WorkSchedule
 from app.models.user import AppUser, UserRole
 from app.middleware.auth import require_roles
 from app.utils.audit_helper import log_audit
+from app.services.nu_shift import is_nu_dynamic_shift_code
 
 router = APIRouter(prefix="/import-export", tags=["Import/Export"])
 
@@ -34,220 +35,266 @@ async def import_attendance(
     Bo phan trong file se bo qua, lay theo nhan vien trong DB.
     Se xu ly: loai trung, nhom theo ngay, tinh first_check_in/last_check_out, luu vao attendance_daily.
     Ca dem: scan truoc 6h sang => tinh la ca hom truoc."""
-    import openpyxl
-
-    content = await file.read()
-    wb = openpyxl.load_workbook(BytesIO(content), data_only=True)
-    ws = wb[wb.sheetnames[0]]  # Sheet dau tien
-
-    batch_id = str(uuid.uuid4())[:8]
-
-    # 1. Thu thap thong tin nhan vien tu file Excel
-    file_employees = {} # code -> name
-    for r in range(2, ws.max_row + 1):
-        c_raw = ws.cell(r, 1).value
-        n_raw = ws.cell(r, 2).value
-        if c_raw is not None and n_raw is not None:
-            c = str(int(c_raw) if isinstance(c_raw, float) else c_raw).strip().lstrip("'")
-            file_employees[c] = str(n_raw).strip()
-
-    # 2. Dong bo bang Employee
-    all_emps = (await db.execute(select(Employee))).scalars().all()
-    active_emps = [e for e in all_emps if e.is_active]
-    codes_in_file = set(file_employees.keys())
-    
-    # Xac dinh ngay moc (dau thang duoc chon)
     try:
-        y, m = map(int, month_key.split("-"))
-        ref_date = date(y, m, 1)
-    except:
-        ref_date = date.today().replace(day=1)
-
-    # A. Cho nghi viec nhung nguoi KHONG co trong file
-    for emp in active_emps:
-        if str(emp.employee_code) not in codes_in_file:
-            emp.is_active = False
-            emp.leave_date = ref_date
-            
-    # B. Xu ly nhan vien trong file (moi hoac cap nhat)
-    for code, name in file_employees.items():
-        # Tim theo code (uu tien active)
-        emp = next((e for e in active_emps if str(e.employee_code).lstrip("'") == code), None)
-        if emp:
-            # Cap nhat ten neu khac (de dong bo voi file moi nhat)
-            if emp.full_name != name:
-                emp.full_name = name
-            continue
-            
-        # Neu khong thay trong active, tim trong all (co the da nghi)
-        emp_any = next((e for e in all_emps if str(e.employee_code).lstrip("'") == code), None)
-        if emp_any:
-            emp_any.is_active = True
-            emp_any.leave_date = None
-            emp_any.full_name = name # Cap nhat ten luon
-        else:
-            # Tao moi hoan toan
-            new_emp = Employee(
-                employee_code=code,
-                full_name=name,
-                is_active=True,
-                join_date=ref_date
-            )
-            db.add(new_emp)
-
-    await db.commit()
-
-    # Load lai employee code -> object mapping (chi lay nhung nguoi dang active sau khi sync)
-    emp_result = await db.execute(select(Employee).where(Employee.is_active == True))
-    emp_map = {str(e.employee_code).lstrip("'"): e for e in emp_result.scalars().all()}
-
-    # Load shifts
-    shift_result = await db.execute(select(ShiftTemplate))
-    shifts_by_code = {}
-    shifts_by_id = {}
-    for s in shift_result.scalars().all():
-        shifts_by_code[s.code] = s
-        shifts_by_id[s.id] = s
-
-    # Parse raw scans: (emp_code, datetime) -> deduplicate
-    raw_scans = {}  # emp_code -> set of datetimes
-    skipped_employees = set()
-    total_rows = 0
-
-    for r in range(2, ws.max_row + 1):
-        emp_code_raw = ws.cell(r, 1).value
-        if emp_code_raw is None:
-            continue
-
-        emp_code = str(int(emp_code_raw) if isinstance(emp_code_raw, float) else emp_code_raw).strip().lstrip("'")
-        scan_time = ws.cell(r, 4).value
-        emp_name = ws.cell(r, 2).value
-
-        if emp_code not in emp_map:
-            skipped_employees.add(emp_code)
-            continue
-
-        emp = emp_map[emp_code]
-
-        if scan_time is None:
-            continue
-
-        if isinstance(scan_time, str):
-            try:
-                scan_time = datetime.strptime(scan_time, "%Y-%m-%d %H:%M:%S")
-            except ValueError:
+        content = await file.read()
+        filename = file.filename.lower()
+        
+        # 0. Detect file type and parse data
+        # Standard format: Column 1=Code, 2=Name, 3=Dept, 4=Time
+        data_rows = []
+        
+        if filename.endswith(".xlsx") or filename.endswith(".xls"):
+            import openpyxl
+            wb = openpyxl.load_workbook(BytesIO(content), data_only=True)
+            ws = wb[wb.sheetnames[0]]
+            for r in range(2, ws.max_row + 1):
+                c1 = ws.cell(r, 1).value
+                c2 = ws.cell(r, 2).value
+                c3 = ws.cell(r, 3).value
+                c4 = ws.cell(r, 4).value
+                if c1 is not None:
+                    data_rows.append((c1, c2, c3, c4))
+        elif filename.endswith(".csv"):
+            import csv
+            import io
+            # Try different encodings
+            text_content = ""
+            for encoding in ["utf-8-sig", "utf-8", "latin1", "cp1252"]:
                 try:
-                    scan_time = datetime.strptime(scan_time, "%Y-%m-%d %H:%M")
-                except ValueError:
+                    text_content = content.decode(encoding)
+                    break
+                except UnicodeDecodeError:
                     continue
+            
+            if not text_content:
+                raise HTTPException(400, "Khong the doc file CSV (sai encoding)")
+                
+            # Try different delimiters
+            dialect = None
+            try:
+                # Use a larger sample for sniffer
+                dialect = csv.Sniffer().sniff(text_content[:2048])
+            except:
+                pass
+            
+            reader = csv.reader(io.StringIO(text_content), dialect=dialect or "excel")
+            rows = list(reader)
+            # Skip header if needed (assume header exists if first col is not numeric)
+            start_idx = 0
+            if rows and len(rows[0]) > 0 and not str(rows[0][0]).isdigit():
+                start_idx = 1
+                
+            for r in rows[start_idx:]:
+                if not r: continue
+                if len(r) >= 4:
+                    data_rows.append((r[0], r[1], r[2], r[3]))
+                elif len(r) >= 2: # Min requirement
+                    data_rows.append((r[0], r[1], None, r[2] if len(r) > 2 else None))
+        else:
+            raise HTTPException(400, "Dinh dang file khong duoc ho tro. Vui long dung .xlsx hoặc .csv")
 
-        if not isinstance(scan_time, datetime):
-            continue
+        batch_id = str(uuid.uuid4())[:8]
 
-        total_rows += 1
-        if emp_code not in raw_scans:
-            raw_scans[emp_code] = set()
-        raw_scans[emp_code].add(scan_time)
+        # 1. Thu thap thong tin nhan vien tu du lieu
+        file_employees = {} # code -> name
+        for c_raw, n_raw, _, _ in data_rows:
+            if c_raw is not None and n_raw is not None:
+                c = str(int(c_raw) if isinstance(c_raw, (float, int)) else str(c_raw).split('.')[0] if '.' in str(c_raw) else c_raw).strip().lstrip("'")
+                file_employees[c] = str(n_raw).strip()
 
-        # Also save to AttendanceLog (raw)
-        log = AttendanceLog(
-            employee_code=emp_code,
-            employee_name=str(emp_name or ""),
-            department=emp.department,
-            event_time=scan_time,
-            source_file=file.filename,
-            import_batch=batch_id,
-        )
-        db.add(log)
+        # 2. Dong bo bang Employee
+        all_emps = (await db.execute(select(Employee))).scalars().all()
+        active_emps = [e for e in all_emps if e.is_active]
+        codes_in_file = set(file_employees.keys())
+        
+        # Xac dinh ngay moc (dau thang duoc chon)
+        try:
+            y, m = map(int, month_key.split("-"))
+            ref_date = date(y, m, 1)
+        except:
+            ref_date = date.today().replace(day=1)
 
-    # Process: group by employee + work_date
-    # For night shifts: if scan is before NIGHT_SHIFT_CUTOFF (6am), it belongs to previous day
-    processed = 0
-    updated = 0
-
-    # Load schedule data for night shift detection
-    schedule_result = await db.execute(select(WorkSchedule))
-    schedule_map = {}
-    for ws_rec in schedule_result.scalars().all():
-        schedule_map[(ws_rec.employee_id, ws_rec.work_date)] = ws_rec.shift_id
-
-    for emp_code, scans in raw_scans.items():
-        emp = emp_map[emp_code]
-        default_shift = shifts_by_code.get(emp.default_shift_code)
-
-        # Group scans by work_date
-        daily_scans = {}  # work_date -> list of datetimes
-        for scan_dt in sorted(scans):
-            scan_date = scan_dt.date()
-            scan_t = scan_dt.time()
-
-            # Night shift: if before 6am, assign to previous day
-            work_date = scan_date
-            if scan_t < NIGHT_SHIFT_CUTOFF:
-                # Check if previous day has a night shift
-                prev_date = scan_date - timedelta(days=1)
-                prev_shift_id = schedule_map.get((emp.id, prev_date))
-                prev_shift = shifts_by_id.get(prev_shift_id) if prev_shift_id else default_shift
-                if prev_shift and prev_shift.is_night_shift:
-                    work_date = prev_date
-
-            if work_date not in daily_scans:
-                daily_scans[work_date] = []
-            daily_scans[work_date].append(scan_dt)
-
-        # Save to AttendanceDaily
-        for work_date, day_scans in daily_scans.items():
-            day_scans.sort()
-            first_in = day_scans[0]
-            last_out = day_scans[-1] if len(day_scans) > 1 else None
-            total_hours = 0.0
-            if first_in and last_out and last_out > first_in:
-                total_hours = round((last_out - first_in).total_seconds() / 3600.0, 2)
-
-            # Upsert
-            existing = await db.execute(
-                select(AttendanceDaily).where(
-                    and_(AttendanceDaily.employee_id == emp.id, AttendanceDaily.work_date == work_date)
-                )
-            )
-            att = existing.scalar_one_or_none()
-            if att:
-                att.first_check_in = first_in
-                att.last_check_out = last_out
-                att.total_hours = total_hours
-                att.import_batch = batch_id
-                updated += 1
+        # A. Cho nghi viec nhung nguoi KHONG co trong file
+        for emp in active_emps:
+            if str(emp.employee_code) not in codes_in_file:
+                emp.is_active = False
+                emp.leave_date = ref_date
+                
+        # B. Xu ly nhan vien trong file (moi hoac cap nhat)
+        for code, name in file_employees.items():
+            # Tim theo code (uu tien active)
+            emp = next((e for e in active_emps if str(e.employee_code).lstrip("'") == code), None)
+            if emp:
+                if emp.full_name != name:
+                    emp.full_name = name
+                continue
+                
+            emp_any = next((e for e in all_emps if str(e.employee_code).lstrip("'") == code), None)
+            if emp_any:
+                emp_any.is_active = True
+                emp_any.leave_date = None
+                emp_any.full_name = name
             else:
-                att = AttendanceDaily(
-                    employee_id=emp.id,
-                    work_date=work_date,
-                    first_check_in=first_in,
-                    last_check_out=last_out,
-                    total_hours=total_hours,
-                    import_batch=batch_id,
+                new_emp = Employee(
+                    employee_code=code,
+                    full_name=name,
+                    is_active=True,
+                    join_date=ref_date
                 )
-                db.add(att)
-                processed += 1
+                db.add(new_emp)
 
-    await db.commit()
+        await db.commit()
 
-    # Ghi nhật ký
-    await log_audit(
-        db, "attendance", batch_id, "IMPORT", current_user.username,
-        notes=f"Import {file.filename} - {month_key}. {processed} moi, {updated} cap nhat. {len(raw_scans)} NV."
-    )
-    await db.commit()
+        # Load lai employee code mapping
+        emp_result = await db.execute(select(Employee).where(Employee.is_active == True))
+        emp_map = {str(e.employee_code).lstrip("'"): e for e in emp_result.scalars().all()}
 
-    return {
-        "message": f"Import thanh cong! {processed} moi, {updated} cap nhat",
-        "batch_id": batch_id,
-        "total_raw_rows": total_rows,
-        "employees_processed": len(raw_scans),
-        "days_created": processed,
-        "days_updated": updated,
-        "skipped_employees": list(skipped_employees)[:10] if skipped_employees else [],
-        "filename": file.filename,
-    }
+        # Load shifts
+        shift_result = await db.execute(select(ShiftTemplate))
+        shifts_by_code = {s.code: s for s in shift_result.scalars().all()}
+        shifts_by_id = {s.id: s for s in shift_result.scalars().all()}
+
+        # Parse raw scans
+        raw_scans = {}  # emp_code -> set of datetimes
+        skipped_employees = set()
+        total_rows = 0
+
+        for emp_code_raw, emp_name, _, scan_time in data_rows:
+            if emp_code_raw is None:
+                continue
+
+            emp_code = str(int(emp_code_raw) if isinstance(emp_code_raw, (float, int)) else str(emp_code_raw).split('.')[0] if '.' in str(emp_code_raw) else emp_code_raw).strip().lstrip("'")
+
+            if emp_code not in emp_map:
+                skipped_employees.add(emp_code)
+                continue
+
+            emp = emp_map[emp_code]
+
+            if scan_time is None:
+                continue
+
+            if isinstance(scan_time, str):
+                # Try various formats
+                for fmt in ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M"]:
+                    try:
+                        scan_time = datetime.strptime(scan_time, fmt)
+                        break
+                    except ValueError:
+                        continue
+
+            if not isinstance(scan_time, datetime):
+                continue
+
+            total_rows += 1
+            if emp_code not in raw_scans:
+                raw_scans[emp_code] = set()
+            raw_scans[emp_code].add(scan_time)
+
+            log = AttendanceLog(
+                employee_code=emp_code,
+                employee_name=str(emp_name or ""),
+                department=emp.department,
+                event_time=scan_time,
+                source_file=file.filename,
+                import_batch=batch_id,
+            )
+            db.add(log)
+
+        # Process: group by employee + work_date
+        # For night shifts: if scan is before NIGHT_SHIFT_CUTOFF (6am), it belongs to previous day
+        processed = 0
+        updated = 0
+
+        # Load schedule data for night shift detection
+        schedule_result = await db.execute(select(WorkSchedule))
+        schedule_map = {}
+        for ws_rec in schedule_result.scalars().all():
+            schedule_map[(ws_rec.employee_id, ws_rec.work_date)] = ws_rec.shift_id
+
+        for emp_code, scans in raw_scans.items():
+            emp = emp_map[emp_code]
+            default_shift = shifts_by_code.get(emp.default_shift_code)
+
+            # Group scans by work_date
+            daily_scans = {}  # work_date -> list of datetimes
+            for scan_dt in sorted(scans):
+                scan_date = scan_dt.date()
+                scan_t = scan_dt.time()
+
+                # Night shift: if before 6am, assign to previous day
+                work_date = scan_date
+                if scan_t < NIGHT_SHIFT_CUTOFF:
+                    # For NU shifts, we are more aggressive: if the previous day was NU, it belongs to the previous day
+                    prev_date = scan_date - timedelta(days=1)
+                    prev_shift_id = schedule_map.get((emp.id, prev_date))
+                    prev_shift = shifts_by_id.get(prev_shift_id) if prev_shift_id else default_shift
+                    
+                    if prev_shift:
+                        if prev_shift.is_night_shift or is_nu_dynamic_shift_code(prev_shift.code):
+                            work_date = prev_date
+
+                if work_date not in daily_scans:
+                    daily_scans[work_date] = []
+                daily_scans[work_date].append(scan_dt)
+
+            # Save to AttendanceDaily
+            for work_date, day_scans in daily_scans.items():
+                day_scans.sort()
+                first_in = day_scans[0]
+                last_out = day_scans[-1] if len(day_scans) > 1 else None
+                total_hours = 0.0
+                if first_in and last_out and last_out > first_in:
+                    total_hours = round((last_out - first_in).total_seconds() / 3600.0, 2)
+
+                # Upsert
+                existing = await db.execute(
+                    select(AttendanceDaily).where(
+                        and_(AttendanceDaily.employee_id == emp.id, AttendanceDaily.work_date == work_date)
+                    )
+                )
+                att = existing.scalar_one_or_none()
+                if att:
+                    att.first_check_in = first_in
+                    att.last_check_out = last_out
+                    att.total_hours = total_hours
+                    att.import_batch = batch_id
+                    updated += 1
+                else:
+                    att = AttendanceDaily(
+                        employee_id=emp.id,
+                        work_date=work_date,
+                        first_check_in=first_in,
+                        last_check_out=last_out,
+                        total_hours=total_hours,
+                        import_batch=batch_id,
+                    )
+                    db.add(att)
+                    processed += 1
+
+        await db.commit()
+
+        # Ghi nhật ký
+        await log_audit(
+            db, "attendance", batch_id, "IMPORT", current_user.username,
+            notes=f"Import {file.filename} - {month_key}. {processed} moi, {updated} cap nhat. {len(raw_scans)} NV."
+        )
+        await db.commit()
+
+        return {
+            "message": f"Import thanh cong! {processed} moi, {updated} cap nhat",
+            "batch_id": batch_id,
+            "total_raw_rows": total_rows,
+            "employees_processed": len(raw_scans),
+            "days_created": processed,
+            "days_updated": updated,
+            "skipped_employees": list(skipped_employees)[:10] if skipped_employees else [],
+            "filename": file.filename,
+        }
+    except Exception as e:
+        import traceback
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Internal Server Error during import: {str(e)}")
 
 
 @router.get("/backup")

@@ -41,7 +41,7 @@ const sections = [
     roles: ['admin', 'accountant'],
     items: [
       { key: '/meal-allowance', icon: <DollarOutlined />, label: 'Tiền ăn' },
-      { key: '/salaries', icon: <DollarOutlined />, label: 'Lương chung' },
+      { key: '/salaries', icon: <DollarOutlined />, label: 'Lương cơ bản' },
       { key: '/payslips', icon: <FileTextOutlined />, label: 'Phiếu lương' },
       { key: '/insurance', icon: <SafetyOutlined />, label: 'BHXH / Thuế' },
       { key: '/advances', icon: <BankOutlined />, label: 'Tạm ứng' },

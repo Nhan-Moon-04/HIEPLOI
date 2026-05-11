@@ -19,6 +19,7 @@ import MealAllowance from './pages/MealAllowance';
 import BaseSalary from './pages/BaseSalary';
 import Audit from './pages/Audit';
 import LeaveBalance from './pages/LeaveBalance';
+import Settings from './pages/Settings';
 
 function PrivateRoute({ children }) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -55,6 +56,7 @@ export default function App() {
                   <Route path="/salaries" element={<BaseSalary />} />
                   <Route path="/audit" element={<Audit />} />
                   <Route path="/leave" element={<LeaveBalance />} />
+                  <Route path="/settings" element={<Settings />} />
                 </Routes>
               </MainLayout>
             </PrivateRoute>

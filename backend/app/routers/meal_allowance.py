@@ -13,6 +13,7 @@ from app.models.schedule import WorkSchedule
 from app.models.holiday import CompanyHoliday
 from app.models.user import AppUser
 from app.middleware.auth import get_current_user
+from app.services.nu_shift import is_nu_dynamic_shift_code, calculate_nu_shift_details, detect_nu_modes
 
 router = APIRouter(prefix="/meal-allowance", tags=["Meal Allowance - Tien An"])
 
@@ -126,11 +127,33 @@ async def get_meal_allowance(
     att_result = await db.execute(att_q)
     atts = att_result.scalars().all()
 
+    att_map = {}
     att_by_emp = defaultdict(list)
     for att in atts:
         if att.work_date in holiday_dates:
             continue
+        att_map[(att.employee_id, att.work_date)] = att
         att_by_emp[att.employee_id].append(att.work_date)
+
+    # Load raw logs for NU mode detection
+    from app.models.attendance import AttendanceLog
+    from datetime import datetime, time, timedelta
+    log_q = select(AttendanceLog).where(
+        and_(AttendanceLog.event_time >= datetime.combine(start_date, time(0, 0)), 
+             AttendanceLog.event_time <= datetime.combine(end_date + timedelta(days=1), time(12, 0)))
+    )
+    log_result = await db.execute(log_q)
+    all_logs = log_result.scalars().all()
+    
+    emp_code_to_id = {e.employee_code: e.id for e in employees}
+    logs_with_id = []
+    for l in all_logs:
+        eid = emp_code_to_id.get(l.employee_code)
+        if eid:
+            l.employee_id = eid
+            logs_with_id.append(l)
+            
+    nu_modes = detect_nu_modes(logs_with_id, start_date, end_date)
 
     rows = []
     total_meal = 0.0
@@ -150,24 +173,43 @@ async def get_meal_allowance(
             shift_id = sched_map.get((emp.id, work_date))
             if shift_id:
                 shift = shifts_by_id.get(shift_id)
+            elif default_shift and is_nu_dynamic_shift_code(default_shift.code):
+                shift = default_shift
             else:
                 shift = shifts_by_code.get(emp.default_shift_code)
 
             if not shift or shift.is_leave_code:
                 continue
 
-            meal = to_float(shift.meal_allowance)
-            if meal <= 0:
-                continue
+            if is_nu_dynamic_shift_code(shift.code):
+                att = att_map.get((emp.id, work_date))
+                actual_hours = float(att.total_hours or 0) if att else 0.0
+                
+                # Use detected mode
+                is_night = nu_modes.get((emp.id, work_date), False)
+                nu_calc = calculate_nu_shift_details(shift.code, actual_hours, is_night=is_night, night_allowance_rate=night_allowance)
+                
+                meal = nu_calc["meal_allowance"]
+                total_emp_meal += meal
+                work_days += 1
+                meal_rates[meal] += 1
+                
+                if is_night:
+                    night_shifts += 1
+                    total_emp_meal += nu_calc["night_allowance"]
+            else:
+                meal = to_float(shift.meal_allowance)
+                if meal <= 0:
+                    continue
 
-            total_emp_meal += meal
-            work_days += 1
-            meal_rates[meal] += 1
+                total_emp_meal += meal
+                work_days += 1
+                meal_rates[meal] += 1
 
-            if shift.is_night_shift:
-                night_shifts += 1
-                if night_allowance > 0:
-                    total_emp_meal += night_allowance
+                if shift.is_night_shift:
+                    night_shifts += 1
+                    if night_allowance > 0:
+                        total_emp_meal += night_allowance
 
         day_shifts = max(work_days - night_shifts, 0)
 

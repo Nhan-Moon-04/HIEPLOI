@@ -13,6 +13,7 @@ from app.models.schedule import WorkSchedule
 from app.models.holiday import CompanyHoliday
 from app.models.user import AppUser, UserRole
 from app.middleware.auth import get_current_user, require_roles
+from app.services.nu_shift import is_nu_dynamic_shift_code, calculate_nu_shift_details, detect_nu_modes
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/attendance", tags=["Attendance - Cham Cong"])
@@ -82,7 +83,7 @@ def calc_hours_between(check_in_dt, check_out_dt, break_minutes=60):
     return round(max(diff, 0), 2)
 
 
-def evaluate_attendance(shift, check_in_dt, check_out_dt, work_date, is_sunday, is_holiday):
+def evaluate_attendance(shift, check_in_dt, check_out_dt, work_date, is_sunday, is_holiday, night_allowance_rate=0.0, is_night_override=None):
     """Danh gia cham cong 1 ngay dua tren ma ca"""
     result = {
         "actual_hours": 0.0,
@@ -112,9 +113,14 @@ def evaluate_attendance(shift, check_in_dt, check_out_dt, work_date, is_sunday, 
 
     if not check_in_dt and not check_out_dt:
         # Ko co du lieu cham cong nao
-        result["status"] = "absent"
-        result["deviation"] = -standard
-        result["notes"] = "Vang mat (Khong quet the)"
+        if is_sunday and is_night_override:
+            # Ca dem nghi chu nhat
+            result["status"] = "off"
+            result["notes"] = "Nghi chu nhat (Ca dem)"
+        else:
+            result["status"] = "absent"
+            result["deviation"] = -standard
+            result["notes"] = "Vang mat (Khong quet the)"
         return result
 
     if not check_in_dt or not check_out_dt:
@@ -125,6 +131,13 @@ def evaluate_attendance(shift, check_in_dt, check_out_dt, work_date, is_sunday, 
         result["notes"] = "Quen quet the (Chi co 1 dau)"
         return result
 
+    # Gioi han gio vao (khong cho tinh som hon quy dinh)
+    shift_start_time = parse_time(shift.start_time)
+    if shift_start_time and check_in_dt:
+        expected_start = datetime.combine(work_date, shift_start_time)
+        if check_in_dt < expected_start:
+            check_in_dt = expected_start
+
     # Tinh gio lam thuc te
     break_mins = int(shift.break_minutes or 60)
     actual = calc_hours_between(check_in_dt, check_out_dt, break_mins)
@@ -133,16 +146,17 @@ def evaluate_attendance(shift, check_in_dt, check_out_dt, work_date, is_sunday, 
     # Check ve som
     shift_end_time = parse_time(shift.end_time)
     if shift_end_time and check_out_dt:
+        effective_is_night = is_night_override if is_night_override is not None else shift.is_night_shift
         # For night shift: end_time is next day
-        if shift.is_night_shift:
+        if effective_is_night:
             expected_end = datetime.combine(work_date + timedelta(days=1), shift_end_time)
         else:
             expected_end = datetime.combine(work_date, shift_end_time)
 
         diff_minutes = (check_out_dt - expected_end).total_seconds() / 60.0
 
-        if diff_minutes < -GRACE_MINUTES:
-            # Ve som qua 15p
+        if diff_minutes <= -GRACE_MINUTES:
+            # Ve som tu 15p tro len
             result["status"] = "early_leave"
             result["deviation"] = round(diff_minutes / 60.0, 2)
             result["notes"] = f"Ve som {abs(int(diff_minutes))}p"
@@ -154,20 +168,29 @@ def evaluate_attendance(shift, check_in_dt, check_out_dt, work_date, is_sunday, 
     else:
         result["status"] = "full" if actual >= standard * 0.9 else "short"
 
-    # OT
-    ot = float(shift.default_overtime_hours or 0)
-    if is_sunday and not shift.is_leave_code:
-        ot = max(ot, standard)
-    result["ot_hours"] = ot
+    # Special logic for NU shifts
+    if shift and is_nu_dynamic_shift_code(shift.code):
+        effective_is_night = is_night_override if is_night_override is not None else shift.is_night_shift
+        nu_calc = calculate_nu_shift_details(shift.code, actual, is_night=effective_is_night, night_allowance_rate=night_allowance_rate)
+        result["ot_hours"] = nu_calc["ot_hours"]
+        result["meal_allowance"] = nu_calc["meal_allowance"]
+        result["night_allowance"] = nu_calc["night_allowance"]
+        
+        # If it's a "minus" shift (NU1, NU2, etc.), we should also reflect the adjusted standard hours?
+        # Actually, standard hours are already in the shift template, but nu_calc provides it too.
+        # For evaluation, we mainly care about OT and money.
+    else:
+        # OT
+        ot = float(shift.default_overtime_hours or 0)
+        if is_sunday and not shift.is_leave_code:
+            ot = max(ot, standard)
+        result["ot_hours"] = ot
 
-    # Tiền ăn: Nếu có mặt thì tính meal_allowance * meal_count (hoặc cứ cho mặc định nếu config meal_count)
-    # Tạm thời nếu status in (full, early_leave, short) thì đc hưởng meal_allowance (hoặc theo số h thực tế)
-    if result["status"] in ("full", "early_leave", "short"):
-        meal_val = float(shift.meal_allowance or 0)
-        meal_count = int(shift.meal_count or 1)
-        # Giả sử trong hệ thống hiện tại, nếu check-in thì cho meal_allowance * count
-        # Hoặc nếu là nghỉ phép có lương (paid leave) thì k có ăn.
-        result["meal_allowance"] = meal_val * (meal_count if meal_count > 0 else 1)
+        # Tiền ăn: Nếu có mặt thì tính meal_allowance * meal_count
+        if result["status"] in ("full", "early_leave", "short"):
+            meal_val = float(shift.meal_allowance or 0)
+            meal_count = int(shift.meal_count or 1)
+            result["meal_allowance"] = meal_val * (meal_count if meal_count > 0 else 1)
 
     return result
 
@@ -246,6 +269,25 @@ async def get_attendance(
     for a in att_result.scalars().all():
         att_map[(a.employee_id, a.work_date)] = a
 
+    # Load raw logs for NU mode detection
+    log_q = select(AttendanceLog).where(
+        and_(AttendanceLog.event_time >= datetime.combine(first_day, time(0, 0)), 
+             AttendanceLog.event_time <= datetime.combine(last_day + timedelta(days=1), time(12, 0)))
+    )
+    log_result = await db.execute(log_q)
+    all_logs = log_result.scalars().all()
+    
+    # Map logs to employee_id
+    emp_code_to_id = {e.employee_code: e.id for e in employees}
+    logs_with_id = []
+    for l in all_logs:
+        eid = emp_code_to_id.get(l.employee_code)
+        if eid:
+            l.employee_id = eid
+            logs_with_id.append(l)
+            
+    nu_modes = detect_nu_modes(logs_with_id, first_day, last_day)
+
     # Build rows
     rows = []
     for emp in employees:
@@ -269,6 +311,8 @@ async def get_attendance(
             override_id = override_map.get((emp.id, d))
             if override_id:
                 shift = shifts_by_id.get(override_id)
+            elif default_shift and is_nu_dynamic_shift_code(default_shift.code):
+                shift = default_shift
             else:
                 shift = None if is_sunday else default_shift
 
@@ -276,16 +320,22 @@ async def get_attendance(
             att = att_map.get((emp.id, dt))
             check_in_dt = att.first_check_in if att else None
             check_out_dt = att.last_check_out if att else None
+            
+            # Determine if it's night shift for NU
+            is_nu_night = None
+            if shift and is_nu_dynamic_shift_code(shift.code):
+                is_nu_night = nu_modes.get((emp.id, dt), False)
 
             # Evaluate
-            ev = evaluate_attendance(shift, check_in_dt, check_out_dt, dt, is_sunday, is_holiday)
+            ev = evaluate_attendance(shift, check_in_dt, check_out_dt, dt, is_sunday, is_holiday, night_allowance_rate=night_allowance_rate, is_night_override=is_nu_night)
 
             # Format times
             ci_str = check_in_dt.strftime("%H:%M") if check_in_dt else None
             co_str = check_out_dt.strftime("%H:%M") if check_out_dt else None
 
             # Night allowance
-            if shift and shift.is_night_shift and ev["status"] in ("full", "early_leave", "short"):
+            effective_is_night = is_nu_night if is_nu_night is not None else (shift.is_night_shift if shift else False)
+            if shift and effective_is_night and ev["status"] in ("full", "early_leave", "short"):
                 ev["night_allowance"] = night_allowance_rate
 
             cell = AttendanceCell(
