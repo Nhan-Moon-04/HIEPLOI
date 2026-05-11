@@ -460,6 +460,7 @@ async def export_meal_allowance(
     center = Alignment(horizontal="center", vertical="center", wrap_text=True)
     right = Alignment(horizontal="right", vertical="center")
     gray_fill = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
+    dash_number_format = "#,##0;-#,##0;-;@"
 
     # Row 1-3: Headers
     ws.merge_cells("A1:Q1")
@@ -507,7 +508,8 @@ async def export_meal_allowance(
         
         # Night
         ws.cell(current_row, 7, item.night_shifts).font = normal_font
-        ws.cell(current_row, 8, night_allowance).font = normal_font
+        night_rate = night_allowance if item.night_shifts > 0 else 0
+        ws.cell(current_row, 8, night_rate).font = normal_font
         # Formula: Cell I = G * H
         ws.cell(current_row, 9, f"=G{current_row}*H{current_row}").font = normal_font
         
@@ -533,7 +535,10 @@ async def export_meal_allowance(
         for c in range(1, 18):
             ws.cell(current_row, c).border = border
             if c in [5, 6, 8, 9, 11, 12, 13, 14, 15, 16]:
-                ws.cell(current_row, c).number_format = "#,##0"
+                if c in [8, 9]:
+                    ws.cell(current_row, c).number_format = dash_number_format
+                else:
+                    ws.cell(current_row, c).number_format = "#,##0"
                 ws.cell(current_row, c).alignment = right
             else:
                 ws.cell(current_row, c).alignment = center
