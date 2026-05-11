@@ -244,7 +244,10 @@ async def get_attendance(
     holiday_dates = {h.holiday_date for h in holiday_result.scalars().all()}
 
     # Load employees
-    emp_q = select(Employee).where(and_(Employee.is_active == True, Employee.join_date <= last_day))
+    emp_filters = [Employee.join_date <= last_day]
+    if not employee_id:
+        emp_filters.append(Employee.is_active == True)
+    emp_q = select(Employee).where(and_(*emp_filters))
     if employee_id:
         emp_q = emp_q.where(Employee.id == employee_id)
     if department:

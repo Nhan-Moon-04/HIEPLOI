@@ -1,4 +1,5 @@
 from typing import List, Optional
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, delete
@@ -28,6 +29,16 @@ class BaseSalaryResponse(BaseModel):
     standard_days: float
     is_locked: bool
     rows: List[BaseSalaryRow]
+
+
+class SalaryHistoryRow(BaseModel):
+    month_key: str
+    base_salary: float
+    allowance: float
+    base_daily_wage: float
+    pay_method: Optional[str] = None
+    salary_coefficient: float
+    updated_at: Optional[datetime] = None
 
 
 @router.get("/base", response_model=BaseSalaryResponse)
@@ -66,6 +77,32 @@ async def get_base_salaries(
         is_locked=is_locked,
         rows=rows,
     )
+
+
+@router.get("/history", response_model=List[SalaryHistoryRow])
+async def get_salary_history(
+    employee_id: int = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: AppUser = Depends(get_current_user),
+):
+    """Lịch sử lương theo tháng của 1 nhân viên"""
+    result = await db.execute(
+        select(MonthlySalary)
+        .where(MonthlySalary.employee_id == employee_id)
+        .order_by(MonthlySalary.month_key.desc())
+    )
+    rows = []
+    for sal in result.scalars().all():
+        rows.append(SalaryHistoryRow(
+            month_key=sal.month_key,
+            base_salary=float(sal.base_salary or 0),
+            allowance=float(sal.allowance or 0),
+            base_daily_wage=float(sal.base_daily_wage or 0),
+            pay_method=sal.pay_method,
+            salary_coefficient=float(sal.salary_coefficient or 1),
+            updated_at=sal.updated_at,
+        ))
+    return rows
 
 
 @router.post("/import-base")

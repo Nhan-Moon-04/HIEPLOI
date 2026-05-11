@@ -2,10 +2,12 @@ import { useState } from 'react';
 import { Table, Button, Modal, Form, Input, InputNumber, Select, DatePicker, Switch, Space, message, Tag, Popconfirm, Badge } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined, TeamOutlined, SearchOutlined, CalendarOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import dayjs from 'dayjs';
 import api from '../api/client';
 
 export default function Employees() {
+  const navigate = useNavigate();
   const [modal, setModal] = useState(false);
   const [editing, setEditing] = useState(null);
   const [search, setSearch] = useState('');
@@ -84,7 +86,11 @@ export default function Employees() {
 
   const columns = [
     { title: 'Ma', dataIndex: 'employee_code', width: 50, sorter: (a, b) => Number(a.employee_code) - Number(b.employee_code) },
-    { title: 'Ho ten', dataIndex: 'full_name', width: 180, render: (t) => <span style={{ fontWeight: 500 }}>{t}</span> },
+    { title: 'Ho ten', dataIndex: 'full_name', width: 180, render: (t, r) => (
+      <a onClick={() => navigate(`/employees/${r.id}`)} style={{ fontWeight: 500, color: '#4361ee' }}>
+        {t}
+      </a>
+    ) },
     { title: 'Bo phan', dataIndex: 'department', width: 120, render: (t) => t || '-' },
     { title: 'Ca', dataIndex: 'default_shift_code', width: 50, render: (t) => t ? <Tag color="blue">{t}</Tag> : '-', align: 'center' },
     { 
