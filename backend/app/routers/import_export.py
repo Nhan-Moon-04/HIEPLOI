@@ -16,7 +16,7 @@ from app.models.schedule import WorkSchedule
 from app.models.user import AppUser, UserRole
 from app.middleware.auth import require_roles
 from app.utils.audit_helper import log_audit
-from app.services.nu_shift import is_nu_dynamic_shift_code
+from app.services.nu_shift import is_nu_dynamic_shift_code, build_nu_shift_day_results
 
 router = APIRouter(prefix="/import-export", tags=["Import/Export"])
 
@@ -212,37 +212,88 @@ async def import_attendance(
         for ws_rec in schedule_result.scalars().all():
             schedule_map[(ws_rec.employee_id, ws_rec.work_date)] = ws_rec.shift_id
 
+        # Grouping scans by work_date
+        # For non-NU shifts, use standard 6am cutoff.
+        # For NU shifts, use build_nu_shift_day_results logic.
+        
+        # 1. Identify NU employees and their potential dates
+        nu_emp_ids = []
         for emp_code, scans in raw_scans.items():
             emp = emp_map[emp_code]
-            default_shift = shifts_by_code.get(emp.default_shift_code)
+            if is_nu_dynamic_shift_code(emp.default_shift_code):
+                nu_emp_ids.append(emp.id)
+            else:
+                # Check if they have NU in schedule
+                has_nu_sched = any(is_nu_dynamic_shift_code(shifts_by_id.get(sid).code if sid else "") 
+                                   for (eid, _), sid in schedule_map.items() if eid == emp.id)
+                if has_nu_sched:
+                    nu_emp_ids.append(emp.id)
+        
+        # 2. Get NU results if any
+        nu_results_all = {}
+        if nu_emp_ids:
+            # Prepare logs for build_nu_shift_day_results
+            nu_logs = []
+            nu_code_map = {}
+            for emp_code, scans in raw_scans.items():
+                emp = emp_map[emp_code]
+                if emp.id not in nu_emp_ids: continue
+                
+                for s_dt in scans:
+                    nu_logs.append(type('Log', (), {'employee_id': emp.id, 'event_time': s_dt}))
+                
+                # Determine codes for all dates in scans
+                emp_dates = {s_dt.date() for s_dt in scans}
+                # Also include previous and next day to be safe
+                all_dates = set()
+                for d in emp_dates:
+                    all_dates.add(d)
+                    all_dates.add(d - timedelta(days=1))
+                    all_dates.add(d + timedelta(days=1))
+                
+                for d in all_dates:
+                    sid = schedule_map.get((emp.id, d))
+                    s_code = shifts_by_id.get(sid).code if sid else emp.default_shift_code
+                    if is_nu_dynamic_shift_code(s_code):
+                        nu_code_map[(emp.id, d)] = s_code
+            
+            nu_results_all = build_nu_shift_day_results(nu_code_map, nu_emp_ids, nu_logs)
 
-            # Group scans by work_date
-            daily_scans = {}  # work_date -> list of datetimes
-            for scan_dt in sorted(scans):
-                scan_date = scan_dt.date()
-                scan_t = scan_dt.time()
-
-                # Night shift: if before 6am, assign to previous day
-                work_date = scan_date
-                if scan_t < NIGHT_SHIFT_CUTOFF:
-                    # For NU shifts, we are more aggressive: if the previous day was NU, it belongs to the previous day
-                    prev_date = scan_date - timedelta(days=1)
-                    prev_shift_id = schedule_map.get((emp.id, prev_date))
-                    prev_shift = shifts_by_id.get(prev_shift_id) if prev_shift_id else default_shift
-                    
-                    if prev_shift:
-                        if prev_shift.is_night_shift or is_nu_dynamic_shift_code(prev_shift.code):
+        # 3. Final grouping and upsert
+        for emp_code, scans in raw_scans.items():
+            emp = emp_map[emp_code]
+            
+            # Map scans to work_dates
+            # For NU: use nu_results_all to get the "correct" check times
+            # For others: use 6am cutoff
+            
+            daily_data = {} # work_date -> (first_in, last_out)
+            
+            if emp.id in nu_emp_ids:
+                # Use results from build_nu_shift_day_results
+                emp_results = {k[1]: v for k, v in nu_results_all.items() if k[0] == emp.id}
+                for w_date, res in emp_results.items():
+                    if res.check_in or res.check_out:
+                        daily_data[w_date] = (res.check_in, res.check_out)
+            else:
+                # Standard 6am cutoff
+                daily_scans = defaultdict(list)
+                for scan_dt in scans:
+                    work_date = scan_dt.date()
+                    if scan_dt.time() < NIGHT_SHIFT_CUTOFF:
+                        # Simple rule: if before 6am and not NU, check if yesterday was night shift
+                        prev_date = work_date - timedelta(days=1)
+                        sid = schedule_map.get((emp.id, prev_date))
+                        shift = shifts_by_id.get(sid) if sid else shifts_by_code.get(emp.default_shift_code)
+                        if shift and shift.is_night_shift:
                             work_date = prev_date
+                    daily_scans[work_date].append(scan_dt)
+                
+                for w_date, d_scans in daily_scans.items():
+                    d_scans.sort()
+                    daily_data[w_date] = (d_scans[0], d_scans[-1] if len(d_scans) > 1 else None)
 
-                if work_date not in daily_scans:
-                    daily_scans[work_date] = []
-                daily_scans[work_date].append(scan_dt)
-
-            # Save to AttendanceDaily
-            for work_date, day_scans in daily_scans.items():
-                day_scans.sort()
-                first_in = day_scans[0]
-                last_out = day_scans[-1] if len(day_scans) > 1 else None
+            for work_date, (first_in, last_out) in daily_data.items():
                 total_hours = 0.0
                 if first_in and last_out and last_out > first_in:
                     total_hours = round((last_out - first_in).total_seconds() / 3600.0, 2)

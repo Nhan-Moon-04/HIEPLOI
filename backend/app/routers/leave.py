@@ -86,9 +86,8 @@ async def get_leave_summary(
                     # Ca lam viec binh thuong -> Check cham cong
                     att = att_map.get((emp.id, curr))
                     if not att or (not att.first_check_in and not att.last_check_out):
-                        # Vang mat -> Tru phep nam
+                        # Vang mat (khong tu tru phep)
                         absent += 1
-                        used += 1.0
                     elif not att.first_check_in or not att.last_check_out:
                         forgot += 1
             
@@ -173,7 +172,7 @@ async def get_leave_details(
                     records.append({
                         "work_date": curr,
                         "shift_code": "N",
-                        "notes": "Vang mat (Tru phep nam)"
+                        "notes": "Vang mat (Khong phep)"
                     })
         
         curr += timedelta(days=1)

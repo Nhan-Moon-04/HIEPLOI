@@ -13,10 +13,12 @@ export default function EmployeeDetailModal({ visible, onClose, data }) {
         code: cell.shift_code,
         name: cell.shift_name,
         days: 0,
+        mealCount: 0,
         totalMeal: 0,
       };
     }
     shiftSummary[cell.shift_code].days += 1;
+    shiftSummary[cell.shift_code].mealCount += (cell.meal_count || 0);
     shiftSummary[cell.shift_code].totalMeal += (cell.meal_allowance || 0) + (cell.night_allowance || 0);
   });
 
@@ -32,6 +34,7 @@ export default function EmployeeDetailModal({ visible, onClose, data }) {
     { title: 'Giờ thực', dataIndex: 'actual_hours', key: 'actual_hours', width: 80, align: 'center', render: v => v ? v.toFixed(2) : '0.00' },
     { title: 'Tăng ca', dataIndex: 'ot_hours', key: 'ot_hours', width: 80, align: 'center', render: v => v ? v.toFixed(2) : '0.00' },
     { title: 'Số giờ', dataIndex: 'standard_hours', key: 'standard_hours', width: 80, align: 'center', render: v => v ? v.toFixed(2) : '0.00' },
+    { title: 'Số bữa', dataIndex: 'meal_count', key: 'meal_count', width: 80, align: 'center' },
     { title: 'Tiền ăn', dataIndex: 'meal_allowance', key: 'meal_allowance', width: 100, align: 'right', render: v => formatNumber(v) },
     { title: 'PC Đêm', dataIndex: 'night_allowance', key: 'night_allowance', width: 100, align: 'right', render: v => formatNumber(v) },
     { title: 'Ghi chú', dataIndex: 'notes', key: 'notes' },
@@ -66,6 +69,12 @@ export default function EmployeeDetailModal({ visible, onClose, data }) {
           </Card>
         </Col>
         <Col span={6}>
+          <Card size="small" style={{ background: '#f8f9fc', borderColor: '#e8ecf1' }}>
+            <div style={{ fontSize: 12, color: '#6b7a99' }}>Số bữa</div>
+            <div style={{ fontSize: 24, fontWeight: 600 }}>{data.summary.total_meal_count || '0'}</div>
+          </Card>
+        </Col>
+        <Col span={6}>
           <Card size="small" style={{ background: '#f5f3ff', borderColor: '#ede9fe' }}>
             <div style={{ fontSize: 12, color: '#6d28d9' }}>Phụ cấp ca đêm</div>
             <div style={{ fontSize: 24, fontWeight: 600, color: '#7c3aed' }}>{formatNumber(data.summary.total_night_allowance)}</div>
@@ -90,7 +99,8 @@ export default function EmployeeDetailModal({ visible, onClose, data }) {
           { title: 'Mã ca', dataIndex: 'code', key: 'code', width: 100 },
           { title: 'Tên ca', dataIndex: 'name', key: 'name' },
           { title: 'Số ngày', dataIndex: 'days', key: 'days', width: 100, align: 'center' },
-          { title: 'Tổng (Ăn + PC Đêm)', dataIndex: 'totalMeal', key: 'totalMeal', width: 200, align: 'right', render: v => formatNumber(v) },
+          { title: 'Số bữa', dataIndex: 'mealCount', key: 'mealCount', width: 100, align: 'center' },
+          { title: 'Tổng (Ăn + PC Đêm)', dataIndex: 'totalMeal', key: 'totalMeal', width: 160, align: 'right', render: v => formatNumber(v) },
         ]}
       />
 

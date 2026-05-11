@@ -67,7 +67,7 @@ export default function Attendance() {
           lineHeight: '20px',
           border: hasIssue ? `1px solid ${st.color}30` : 'none',
         }}>
-          {cell.check_in ? cell.check_in.slice(0, 5) : st.icon}
+          {cell.check_in ? dayjs(cell.check_in).format('HH:mm') : st.icon}
         </div>
       </Tooltip>
     );

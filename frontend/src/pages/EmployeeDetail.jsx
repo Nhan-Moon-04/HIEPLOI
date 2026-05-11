@@ -1,18 +1,24 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { DatePicker, Button, Card, Col, Row, Table, Spin } from 'antd';
+import { DatePicker, Button, Card, Col, Row, Table, Spin, Modal, Form, Input, Space, message } from 'antd';
 import { ArrowLeftOutlined, UserOutlined } from '@ant-design/icons';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import dayjs from 'dayjs';
 import api from '../api/client';
+import useAuthStore from '../stores/authStore';
 
 export default function EmployeeDetail() {
+  const { user } = useAuthStore();
+  const isAdmin = user?.role === 'admin';
   const { id } = useParams();
   const navigate = useNavigate();
   const employeeId = Number(id);
 
   const [monthKey, setMonthKey] = useState(dayjs().format('YYYY-MM'));
   const [nightAllowanceRate, setNightAllowanceRate] = useState(0);
+  const [actionModal, setActionModal] = useState(null);
+  const [form] = Form.useForm();
+  const qc = useQueryClient();
 
   useEffect(() => {
     const saved = localStorage.getItem('nightAllowanceRate');
@@ -47,7 +53,7 @@ export default function EmployeeDetail() {
   const days = row?.days || [];
   const summary = row?.summary || {};
 
-  const mealDays = days.filter((d) => (d.meal_allowance || 0) > 0).length;
+  const mealDays = summary.total_meal_count || days.filter((d) => (d.meal_allowance || 0) > 0).length;
   const nightDays = days.filter((d) => (d.night_allowance || 0) > 0).length;
 
   const totalMeal = summary.total_meal_allowance || 0;
@@ -59,6 +65,17 @@ export default function EmployeeDetail() {
   const totalSalary = baseSalary + allowance;
 
   const formatMoney = (v) => Number(v || 0).toLocaleString('vi-VN');
+
+  const actionMut = useMutation({
+    mutationFn: (payload) => api.post('/attendance/manual-action', payload),
+    onSuccess: (res) => {
+      message.success(res.data?.message || 'Da cap nhat');
+      setActionModal(null);
+      form.resetFields();
+      qc.invalidateQueries(['attendance', employeeId, monthKey, nightAllowanceRate]);
+    },
+    onError: (e) => message.error(e.response?.data?.detail || 'Loi cap nhat'),
+  });
 
   const shiftSummaryData = useMemo(() => {
     const shiftSummary = {};
@@ -81,15 +98,39 @@ export default function EmployeeDetail() {
   const dayColumns = [
     { title: 'Ngay', dataIndex: 'work_date', key: 'work_date', width: 110, render: (t) => t ? dayjs(t).format('DD/MM/YYYY') : '-' },
     { title: 'Ma ca', dataIndex: 'shift_code', key: 'shift_code', width: 80 },
-    { title: 'Gio vao', dataIndex: 'check_in', key: 'check_in', width: 120, render: (t, r) => t ? `${r.work_date} ${t}` : '-' },
-    { title: 'Gio ra', dataIndex: 'check_out', key: 'check_out', width: 120, render: (t, r) => t ? `${r.work_date} ${t}` : '-' },
+    { title: 'Gio vao', dataIndex: 'check_in', key: 'check_in', width: 120, render: (t) => t ? dayjs(t).format('DD/MM HH:mm') : '-' },
+    { title: 'Gio ra', dataIndex: 'check_out', key: 'check_out', width: 120, render: (t) => t ? dayjs(t).format('DD/MM HH:mm') : '-' },
     { title: 'Gio thuc', dataIndex: 'actual_hours', key: 'actual_hours', width: 80, align: 'center', render: (v) => v ? v.toFixed(2) : '0.00' },
     { title: 'Tang ca', dataIndex: 'ot_hours', key: 'ot_hours', width: 80, align: 'center', render: (v) => v ? v.toFixed(2) : '0.00' },
     { title: 'So gio', dataIndex: 'standard_hours', key: 'standard_hours', width: 80, align: 'center', render: (v) => v ? v.toFixed(2) : '0.00' },
+    { title: 'So bua', dataIndex: 'meal_count', key: 'meal_count', width: 80, align: 'center' },
     { title: 'Tien an', dataIndex: 'meal_allowance', key: 'meal_allowance', width: 110, align: 'right', render: (v) => formatMoney(v) },
     { title: 'PC Dem', dataIndex: 'night_allowance', key: 'night_allowance', width: 110, align: 'right', render: (v) => formatMoney(v) },
     { title: 'Ghi chu', dataIndex: 'notes', key: 'notes' },
   ];
+
+  const dayColumnsWithActions = isAdmin ? [
+    ...dayColumns,
+    {
+      title: 'Thao tac',
+      key: 'actions',
+      width: 170,
+      render: (_, r) => {
+        const canAdjust = r.status === 'absent' || r.status === 'forgot_scan';
+        if (!canAdjust) return '-';
+        return (
+          <Space size={4}>
+            <Button size="small" onClick={() => { form.resetFields(); setActionModal({ action: 'convert_paid_leave', record: r }); }}>
+              Co phep
+            </Button>
+            <Button size="small" onClick={() => { form.resetFields(); setActionModal({ action: 'mark_worked', record: r }); }}>
+              Di lam
+            </Button>
+          </Space>
+        );
+      }
+    }
+  ] : dayColumns;
 
   const salaryColumns = [
     { title: 'Thang', dataIndex: 'month_key', key: 'month_key', width: 100 },
@@ -195,7 +236,7 @@ export default function EmployeeDetail() {
             pagination={false}
             size="small"
             scroll={{ y: 420 }}
-            columns={dayColumns}
+            columns={dayColumnsWithActions}
             rowClassName={(record) => record.status === 'absent' ? 'row-absent' : ''}
             locale={{ emptyText: 'Chua co du lieu cham cong' }}
           />
@@ -221,6 +262,36 @@ export default function EmployeeDetail() {
       <style>{`
         .row-absent { background-color: #fef2f2; }
       `}</style>
+
+      <Modal
+        title={actionModal?.action === 'convert_paid_leave' ? 'Chuyen sang nghi phep (P)' : 'Danh dau di lam'}
+        open={!!actionModal}
+        onCancel={() => { setActionModal(null); form.resetFields(); }}
+        okText="Xac nhan"
+        onOk={() => form.submit()}
+        confirmLoading={actionMut.isPending}
+      >
+        <div style={{ marginBottom: 12, fontSize: 12, color: '#6b7a99' }}>
+          Ngay: <b>{actionModal?.record?.work_date ? dayjs(actionModal.record.work_date).format('DD/MM/YYYY') : '-'}</b>
+        </div>
+        <Form
+          form={form}
+          layout="vertical"
+          onFinish={(v) => {
+            if (!actionModal) return;
+            actionMut.mutate({
+              employee_id: employeeId,
+              work_date: actionModal.record.work_date,
+              action: actionModal.action,
+              reason: v.reason,
+            });
+          }}
+        >
+          <Form.Item name="reason" label="Ly do" rules={[{ required: true, message: 'Nhap ly do' }]}>
+            <Input.TextArea rows={3} placeholder="Nhap ly do" />
+          </Form.Item>
+        </Form>
+      </Modal>
     </div>
   );
 }

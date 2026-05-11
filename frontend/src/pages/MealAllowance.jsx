@@ -204,6 +204,7 @@ export default function MealAllowance() {
                     </th>
                   );
                 })}
+                <th style={{ ...thStyle, width: 60, background: '#f0f9ff', color: '#0369a1' }}>Số bữa</th>
                 <th style={{ ...thStyle, width: 80, background: '#f5f3ff', color: '#7c3aed' }}>PC Đêm</th>
                 <th style={{ ...thStyle, width: 90, background: '#f0fdf4', color: '#16a34a' }}>Tổng (VND)</th>
               </tr>
@@ -227,6 +228,9 @@ export default function MealAllowance() {
                       </td>
                     );
                   })}
+                  <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 700, color: '#0369a1', background: '#f0f9ff' }}>
+                    {row.summary?.total_meal_count || 0}
+                  </td>
                   <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, color: '#6d28d9', background: '#faf5ff' }}>
                     {row.summary?.total_night_allowance > 0 ? row.summary.total_night_allowance.toLocaleString() : '-'}
                   </td>

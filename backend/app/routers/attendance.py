@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Literal
 from datetime import date, datetime, time, timedelta
 import calendar
 from decimal import Decimal
@@ -13,7 +13,8 @@ from app.models.schedule import WorkSchedule
 from app.models.holiday import CompanyHoliday
 from app.models.user import AppUser, UserRole
 from app.middleware.auth import get_current_user, require_roles
-from app.services.nu_shift import is_nu_dynamic_shift_code, calculate_nu_shift_details, detect_nu_modes
+from app.services.nu_shift import is_nu_dynamic_shift_code, build_nu_shift_day_results, calculate_nu_shift_details
+from app.utils.audit_helper import log_audit
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/attendance", tags=["Attendance - Cham Cong"])
@@ -92,6 +93,7 @@ def evaluate_attendance(shift, check_in_dt, check_out_dt, work_date, is_sunday, 
         "status": "no_data",
         "notes": "",
         "meal_allowance": 0.0,
+        "meal_count": 0,
         "night_allowance": 0.0,
     }
 
@@ -113,10 +115,10 @@ def evaluate_attendance(shift, check_in_dt, check_out_dt, work_date, is_sunday, 
 
     if not check_in_dt and not check_out_dt:
         # Ko co du lieu cham cong nao
-        if is_sunday and is_night_override:
-            # Ca dem nghi chu nhat
+        if is_sunday and (is_night_override or is_nu_dynamic_shift_code(shift.code if shift else None)):
+            # Ca NU nghi chu nhat
             result["status"] = "off"
-            result["notes"] = "Nghi chu nhat (Ca dem)"
+            result["notes"] = "Nghi chu nhat (NU)"
         else:
             result["status"] = "absent"
             result["deviation"] = -standard
@@ -260,8 +262,11 @@ async def get_attendance(
     schedule_q = select(WorkSchedule).where(WorkSchedule.month_key == month_key)
     schedule_result = await db.execute(schedule_q)
     override_map = {}
+    override_notes = {}
     for ws in schedule_result.scalars().all():
         override_map[(ws.employee_id, ws.work_date.day)] = ws.shift_id
+        if ws.notes:
+            override_notes[(ws.employee_id, ws.work_date.day)] = ws.notes
 
     # Load attendance data
     att_q = select(AttendanceDaily).where(
@@ -284,12 +289,35 @@ async def get_attendance(
     emp_code_to_id = {e.employee_code: e.id for e in employees}
     logs_with_id = []
     for l in all_logs:
-        eid = emp_code_to_id.get(l.employee_code)
+        eid = emp_code_to_id.get(str(l.employee_code).lstrip("'"))
         if eid:
             l.employee_id = eid
             logs_with_id.append(l)
-            
-    nu_modes = detect_nu_modes(logs_with_id, first_day, last_day)
+
+    # Prepare NU shift code map for build_nu_shift_day_results
+    nu_shift_code_map = {}
+    emp_id_list = [e.id for e in employees]
+    
+    # We need to know which shift code applies to each (emp, date)
+    # Priority: override > default_shift (if NU)
+    for emp in employees:
+        default_shift = shifts_by_code.get(emp.default_shift_code)
+        for d in range(first_day.day, last_day.day + 1):
+            dt = date(year, month, d)
+            override_id = override_map.get((emp.id, d))
+            if override_id:
+                s = shifts_by_id.get(override_id)
+                if s:
+                    nu_shift_code_map[(emp.id, dt)] = s.code
+            elif default_shift and is_nu_dynamic_shift_code(default_shift.code):
+                nu_shift_code_map[(emp.id, dt)] = default_shift.code
+
+    nu_results = build_nu_shift_day_results(
+        nu_shift_code_map=nu_shift_code_map,
+        employee_id_list=emp_id_list,
+        attendance_log_rows=logs_with_id,
+        night_allowance_rate=night_allowance_rate
+    )
 
     # Build rows
     rows = []
@@ -302,6 +330,8 @@ async def get_attendance(
         total_early = 0
         total_hours = 0.0
         total_ot = 0.0
+        total_meal_count = 0
+        total_meal_allowance = 0.0
 
         for d in range(first_day.day, last_day.day + 1):
             dt = date(year, month, d)
@@ -312,6 +342,7 @@ async def get_attendance(
 
             # Determine shift
             override_id = override_map.get((emp.id, d))
+            override_note = override_notes.get((emp.id, d))
             if override_id:
                 shift = shifts_by_id.get(override_id)
             elif default_shift and is_nu_dynamic_shift_code(default_shift.code):
@@ -324,32 +355,57 @@ async def get_attendance(
             check_in_dt = att.first_check_in if att else None
             check_out_dt = att.last_check_out if att else None
             
-            # Determine if it's night shift for NU
-            is_nu_night = None
-            if shift and is_nu_dynamic_shift_code(shift.code):
-                is_nu_night = nu_modes.get((emp.id, dt), False)
-
-            # Evaluate
-            ev = evaluate_attendance(shift, check_in_dt, check_out_dt, dt, is_sunday, is_holiday, night_allowance_rate=night_allowance_rate, is_night_override=is_nu_night)
+            # Special case for NU results
+            nu_res = nu_results.get((emp.id, dt))
+            
+            if nu_res:
+                check_in_dt = nu_res.check_in
+                check_out_dt = nu_res.check_out
+                shift_name = nu_res.shift_name
+                # Use standard evaluate for some parts but override others
+                ev = evaluate_attendance(shift, check_in_dt, check_out_dt, dt, is_sunday, is_holiday, night_allowance_rate=night_allowance_rate, is_night_override=(nu_res.mode == "night"))
+                ev["ot_hours"] = nu_res.total_ot_hours
+                ev["meal_allowance"] = nu_res.meal_allowance
+                ev["meal_count"] = nu_res.meal_count
+                ev["night_allowance"] = nu_res.night_allowance
+                if nu_res.warning_note:
+                    ev["notes"] = f"{ev['notes']} | {nu_res.warning_note}" if ev["notes"] else nu_res.warning_note
+                
+                # Ensure notes mention morning/night
+                mode_str = "Sáng" if nu_res.mode == "morning" else "Tối"
+                mode_note = f"Ca {mode_str}"
+                ev["notes"] = f"{mode_note} | {ev['notes']}" if ev["notes"] else mode_note
+                
+                cell_shift_code = nu_res.shift_code
+                cell_shift_name = nu_res.shift_name
+            else:
+                ev = evaluate_attendance(shift, check_in_dt, check_out_dt, dt, is_sunday, is_holiday, night_allowance_rate=night_allowance_rate)
+                cell_shift_code = shift.code if shift else None
+                cell_shift_name = shift.name if shift else None
 
             # Format times
-            ci_str = check_in_dt.strftime("%H:%M") if check_in_dt else None
-            co_str = check_out_dt.strftime("%H:%M") if check_out_dt else None
+            ci_str = check_in_dt.strftime("%Y-%m-%d %H:%M") if check_in_dt else None
+            co_str = check_out_dt.strftime("%Y-%m-%d %H:%M") if check_out_dt else None
 
             # Night allowance
-            effective_is_night = is_nu_night if is_nu_night is not None else (shift.is_night_shift if shift else False)
-            if shift and effective_is_night and ev["status"] in ("full", "early_leave", "short"):
-                ev["night_allowance"] = night_allowance_rate
+            if not nu_res:
+                effective_is_night = (shift.is_night_shift if shift else False)
+                if shift and effective_is_night and ev["status"] in ("full", "early_leave", "short"):
+                    ev["night_allowance"] = night_allowance_rate
+
+            cell_notes = ev["notes"]
+            if override_note:
+                cell_notes = f"{cell_notes} | {override_note}" if cell_notes else override_note
 
             cell = AttendanceCell(
                 work_date=str(dt),
                 day=d,
                 dow=dow,
-                shift_code="N" if ev["status"] == "absent" else (shift.code if shift else None),
-                shift_name="Nghi khong phep" if ev["status"] == "absent" else (shift.name if shift else None),
+                shift_code="N" if ev["status"] == "absent" else cell_shift_code,
+                shift_name="Nghi khong phep" if ev["status"] == "absent" else cell_shift_name,
                 shift_start=str(shift.start_time)[:5] if shift and shift.start_time and ev["status"] != "absent" else None,
                 shift_end=str(shift.end_time)[:5] if shift and shift.end_time and ev["status"] != "absent" else None,
-                standard_hours=float(shift.standard_hours) if shift and shift.standard_hours else None,
+                standard_hours=float(nu_res.standard_hours) if nu_res else (float(shift.standard_hours) if shift and shift.standard_hours else None),
                 check_in=ci_str,
                 check_out=co_str,
                 actual_hours=ev["actual_hours"],
@@ -358,8 +414,9 @@ async def get_attendance(
                 status=ev["status"],
                 is_holiday=is_holiday,
                 is_sunday=is_sunday,
-                notes=ev["notes"],
+                notes=cell_notes,
                 meal_allowance=ev["meal_allowance"],
+                meal_count=ev["meal_count"],
                 night_allowance=ev["night_allowance"],
             )
             days_cells.append(cell)
@@ -375,6 +432,7 @@ async def get_attendance(
             if ev["status"] == "early_leave":
                 total_early += 1
             total_ot += ev["ot_hours"]
+            total_meal_count += ev["meal_count"] or 0
 
         rows.append(AttendanceRow(
             employee_id=emp.id,
@@ -390,6 +448,7 @@ async def get_attendance(
                 "total_early_leave": total_early,
                 "total_hours": round(total_hours, 2),
                 "total_ot": round(total_ot, 2),
+                "total_meal_count": total_meal_count,
                 "total_meal_allowance": sum(c.meal_allowance for c in days_cells),
                 "total_night_allowance": sum(c.night_allowance for c in days_cells),
                 "total_paid_leave": len([c for c in days_cells if c.status == "off" and c.notes and "Nghi" not in c.notes]) # Gian luoc
@@ -401,3 +460,206 @@ async def get_attendance(
         days_in_month=days_in_month,
         rows=rows,
     )
+
+
+class ManualAttendanceAction(BaseModel):
+    employee_id: int
+    work_date: date
+    action: Literal["convert_paid_leave", "mark_worked"]
+    reason: Optional[str] = None
+
+
+@router.post("/manual-action")
+async def manual_attendance_action(
+    request: ManualAttendanceAction,
+    db: AsyncSession = Depends(get_db),
+    current_user: AppUser = Depends(require_roles(UserRole.ADMIN)),
+):
+    emp = await db.get(Employee, request.employee_id)
+    if not emp:
+        raise HTTPException(status_code=404, detail="Nhan vien khong ton tai")
+
+    work_date = request.work_date
+    reason = request.reason.strip() if request.reason else None
+
+    shift_result = await db.execute(select(ShiftTemplate))
+    all_shifts = shift_result.scalars().all()
+    shifts_by_id = {s.id: s for s in all_shifts}
+    shifts_by_code = {s.code: s for s in all_shifts}
+
+    ws_result = await db.execute(select(WorkSchedule).where(and_(
+        WorkSchedule.employee_id == emp.id,
+        WorkSchedule.work_date == work_date,
+    )))
+    ws = ws_result.scalar_one_or_none()
+    ws_before = {c.name: getattr(ws, c.name) for c in ws.__table__.columns} if ws else None
+
+    if request.action == "convert_paid_leave":
+        paid_shift = shifts_by_code.get("P")
+        if not paid_shift or not paid_shift.is_paid_leave:
+            raise HTTPException(status_code=400, detail="Khong tim thay ca phep (P)")
+
+        if ws and ws.shift_id == paid_shift.id:
+            if reason is not None:
+                ws.notes = reason
+                await log_audit(
+                    db,
+                    "work_schedules",
+                    f"{emp.id}:{work_date}",
+                    "UPDATE",
+                    current_user.username,
+                    ws_before,
+                    {c.name: getattr(ws, c.name) for c in ws.__table__.columns},
+                    notes="Update leave note",
+                )
+                await db.commit()
+            return {"message": "Da la nghi phep"}
+
+        # Check remaining leave for the year
+        year = work_date.year
+        year_start = date(year, 1, 1)
+        year_end = date(year, 12, 31)
+
+        sched_q = select(WorkSchedule).where(and_(
+            WorkSchedule.employee_id == emp.id,
+            WorkSchedule.work_date >= year_start,
+            WorkSchedule.work_date <= year_end,
+        ))
+        sched_res = await db.execute(sched_q)
+        override_map = {s.work_date: s.shift_id for s in sched_res.scalars().all()}
+
+        holiday_q = select(CompanyHoliday.holiday_date).where(and_(
+            CompanyHoliday.holiday_date >= year_start,
+            CompanyHoliday.holiday_date <= year_end,
+            CompanyHoliday.is_active == True,
+        ))
+        holiday_res = await db.execute(holiday_q)
+        holiday_dates = set(holiday_res.scalars().all())
+
+        default_shift = shifts_by_code.get(emp.default_shift_code) if emp.default_shift_code else None
+
+        used = 0.0
+        today = date.today()
+        last_date = year_end if today.year > year else today
+        curr = year_start
+        while curr <= last_date:
+            is_sunday = curr.weekday() == 6
+            is_holiday = curr in holiday_dates
+            sid = override_map.get(curr)
+            shift = shifts_by_id.get(sid) if sid else (None if (is_sunday or is_holiday) else default_shift)
+
+            if shift and shift.is_leave_code and shift.is_paid_leave:
+                if shift.code == "P":
+                    used += 1.0
+                elif shift.code in ["S", "C"]:
+                    used += 0.5
+
+            curr += timedelta(days=1)
+
+        entitlement = 12.0
+        remaining = entitlement - used
+        if remaining < 1:
+            raise HTTPException(status_code=400, detail="Khong con phep nam")
+
+        if ws:
+            ws.shift_id = paid_shift.id
+            ws.notes = reason
+        else:
+            ws = WorkSchedule(
+                employee_id=emp.id,
+                work_date=work_date,
+                month_key=work_date.strftime("%Y-%m"),
+                shift_id=paid_shift.id,
+                notes=reason,
+            )
+            db.add(ws)
+
+        await log_audit(
+            db,
+            "work_schedules",
+            f"{emp.id}:{work_date}",
+            "UPDATE" if ws_before else "CREATE",
+            current_user.username,
+            ws_before,
+            {c.name: getattr(ws, c.name) for c in ws.__table__.columns},
+            notes="Convert to paid leave",
+        )
+        await db.commit()
+        return {"message": "Da chuyen sang nghi phep"}
+
+    if request.action == "mark_worked":
+        default_shift = shifts_by_code.get(emp.default_shift_code) if emp.default_shift_code else None
+        if not default_shift or default_shift.is_leave_code:
+            raise HTTPException(status_code=400, detail="Khong co ca mac dinh hop le")
+        if not default_shift.start_time or not default_shift.end_time:
+            raise HTTPException(status_code=400, detail="Ca mac dinh thieu gio bat dau/ket thuc")
+
+        if ws:
+            ws.shift_id = default_shift.id
+            ws.notes = reason
+        else:
+            ws = WorkSchedule(
+                employee_id=emp.id,
+                work_date=work_date,
+                month_key=work_date.strftime("%Y-%m"),
+                shift_id=default_shift.id,
+                notes=reason,
+            )
+            db.add(ws)
+
+        att_result = await db.execute(select(AttendanceDaily).where(and_(
+            AttendanceDaily.employee_id == emp.id,
+            AttendanceDaily.work_date == work_date,
+        )))
+        att = att_result.scalar_one_or_none()
+        att_before = {c.name: getattr(att, c.name) for c in att.__table__.columns} if att else None
+
+        check_in_dt = datetime.combine(work_date, default_shift.start_time)
+        if default_shift.is_night_shift:
+            check_out_dt = datetime.combine(work_date + timedelta(days=1), default_shift.end_time)
+        else:
+            check_out_dt = datetime.combine(work_date, default_shift.end_time)
+
+        break_mins = int(default_shift.break_minutes or 60)
+        total_hours = calc_hours_between(check_in_dt, check_out_dt, break_mins)
+
+        if att:
+            att.first_check_in = check_in_dt
+            att.last_check_out = check_out_dt
+            att.total_hours = total_hours
+            att.import_batch = "manual"
+        else:
+            att = AttendanceDaily(
+                employee_id=emp.id,
+                work_date=work_date,
+                first_check_in=check_in_dt,
+                last_check_out=check_out_dt,
+                total_hours=total_hours,
+                import_batch="manual",
+            )
+            db.add(att)
+
+        await log_audit(
+            db,
+            "work_schedules",
+            f"{emp.id}:{work_date}",
+            "UPDATE" if ws_before else "CREATE",
+            current_user.username,
+            ws_before,
+            {c.name: getattr(ws, c.name) for c in ws.__table__.columns},
+            notes="Mark worked (manual)",
+        )
+        await log_audit(
+            db,
+            "attendance_daily",
+            f"{emp.id}:{work_date}",
+            "UPDATE" if att_before else "CREATE",
+            current_user.username,
+            att_before,
+            {c.name: getattr(att, c.name) for c in att.__table__.columns},
+            notes="Manual attendance",
+        )
+        await db.commit()
+        return {"message": "Da danh dau di lam"}
+
+    raise HTTPException(status_code=400, detail="Hanh dong khong hop le")
