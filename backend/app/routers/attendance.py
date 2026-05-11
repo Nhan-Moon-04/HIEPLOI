@@ -100,18 +100,24 @@ def evaluate_attendance(shift, check_in_dt, check_out_dt, work_date, is_sunday, 
     if is_holiday:
         result["status"] = "holiday"
         result["notes"] = "Ngay le/nghi"
-        return result
+        if not check_in_dt or not check_out_dt:
+            return result
+        # Neu co cham cong ngay le => tiep tuc de tinh tang ca
 
     if not shift:
-        result["status"] = "no_data"
-        return result
+        if (is_sunday or is_holiday) and (check_in_dt or check_out_dt):
+            # Tu dong dung default_shift hoac gia dinh ca 8h de tinh tang ca
+            result["notes"] = "Lam viec ngay nghi/le"
+        else:
+            result["status"] = "no_data"
+            return result
 
-    if shift.is_leave_code:
+    if shift and shift.is_leave_code:
         result["status"] = "off"
         result["notes"] = shift.name or "Nghi"
         return result
 
-    standard = float(shift.standard_hours or 8)
+    standard = float(shift.standard_hours or 8) if shift else 8.0
 
     if not check_in_dt and not check_out_dt:
         # Ko co du lieu cham cong nao
@@ -134,21 +140,21 @@ def evaluate_attendance(shift, check_in_dt, check_out_dt, work_date, is_sunday, 
         return result
 
     # Gioi han gio vao (khong cho tinh som hon quy dinh)
-    shift_start_time = parse_time(shift.start_time)
+    shift_start_time = parse_time(shift.start_time) if shift else None
     if shift_start_time and check_in_dt:
         expected_start = datetime.combine(work_date, shift_start_time)
         if check_in_dt < expected_start:
             check_in_dt = expected_start
 
     # Tinh gio lam thuc te
-    break_mins = int(shift.break_minutes or 60)
+    break_mins = int(shift.break_minutes or 60) if shift else 60
     actual = calc_hours_between(check_in_dt, check_out_dt, break_mins)
     result["actual_hours"] = actual
 
     # Check ve som
-    shift_end_time = parse_time(shift.end_time)
+    shift_end_time = parse_time(shift.end_time) if shift else None
     if shift_end_time and check_out_dt:
-        effective_is_night = is_night_override if is_night_override is not None else shift.is_night_shift
+        effective_is_night = is_night_override if is_night_override is not None else (shift.is_night_shift if shift else False)
         # For night shift: end_time is next day
         if effective_is_night:
             expected_end = datetime.combine(work_date + timedelta(days=1), shift_end_time)
@@ -157,7 +163,8 @@ def evaluate_attendance(shift, check_in_dt, check_out_dt, work_date, is_sunday, 
 
         diff_minutes = (check_out_dt - expected_end).total_seconds() / 60.0
 
-        if diff_minutes <= -GRACE_MINUTES:
+        is_nu = is_nu_dynamic_shift_code(shift.code if shift else None)
+        if diff_minutes <= -GRACE_MINUTES and not is_nu:
             # Ve som tu 15p tro len
             result["status"] = "early_leave"
             result["deviation"] = round(diff_minutes / 60.0, 2)
@@ -183,15 +190,18 @@ def evaluate_attendance(shift, check_in_dt, check_out_dt, work_date, is_sunday, 
         # For evaluation, we mainly care about OT and money.
     else:
         # OT
-        ot = float(shift.default_overtime_hours or 0)
-        if is_sunday and not shift.is_leave_code:
-            ot = max(ot, standard)
-        result["ot_hours"] = ot
+        if is_sunday or is_holiday:
+            # Ngay nghi/le: Tat ca gio lam deu tinh vao tang ca
+            result["ot_hours"] = actual
+        else:
+            # Ngay thuong
+            ot = float(shift.default_overtime_hours or 0) if shift else 0.0
+            result["ot_hours"] = ot
 
         # Tiền ăn: Nếu có mặt thì tính meal_allowance * meal_count
-        if result["status"] in ("full", "early_leave", "short"):
-            meal_val = float(shift.meal_allowance or 0)
-            meal_count = int(shift.meal_count or 1)
+        if result["status"] in ("full", "early_leave", "short") or ((is_sunday or is_holiday) and actual > 0):
+            meal_val = float(shift.meal_allowance or 35000) if shift else 35000.0
+            meal_count = int(shift.meal_count or 1) if shift else 1
             result["meal_allowance"] = meal_val * (meal_count if meal_count > 0 else 1)
 
     return result

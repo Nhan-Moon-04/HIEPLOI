@@ -190,12 +190,27 @@ def normalize_nu_overtime_hours(raw_overtime_hours):
     return min(normalized, NU_MAX_OT_HOURS)
 
 
-def _compute_dynamic_nu_overtime_hours(check_in, check_out):
-    worked_hours = _hours_between(check_in, check_out)
+def _compute_dynamic_nu_overtime_hours(check_in, check_out, mode):
+    if not check_in or not check_out:
+        return None
+        
+    # Cap check-in at 06:00 for Morning mode calculation
+    calc_check_in = check_in
+    if mode == NU_MORNING_MODE:
+        start_6am = check_in.replace(hour=6, minute=0, second=0, microsecond=0)
+        if calc_check_in < start_6am:
+            calc_check_in = start_6am
+
+    worked_hours = _hours_between(calc_check_in, check_out)
     if worked_hours <= 0:
         return None
 
     raw_overtime_hours = max(worked_hours - NU_STANDARD_HOURS, 0.0)
+    
+    # Morning shift has 0.5h break deducted from OT
+    if mode == NU_MORNING_MODE and raw_overtime_hours >= 0.5:
+        raw_overtime_hours -= 0.5
+        
     return normalize_nu_overtime_hours(raw_overtime_hours)
 
 
@@ -208,7 +223,7 @@ def _build_result(mode, week_mode, shift_code, has_midday_check, warning_note, c
     base_overtime = (
         NU_NIGHT_DEFAULT_OT_HOURS if mode == NU_NIGHT_MODE else NU_MORNING_DEFAULT_OT_HOURS
     )
-    dynamic_overtime = _compute_dynamic_nu_overtime_hours(check_in, check_out)
+    dynamic_overtime = _compute_dynamic_nu_overtime_hours(check_in, check_out, mode)
     
     if not check_in and not check_out:
         overtime_hours = 0.0

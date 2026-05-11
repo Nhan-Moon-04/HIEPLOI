@@ -1,3 +1,4 @@
+from collections import defaultdict
 from typing import Optional
 from datetime import datetime, date, time, timedelta
 import calendar
@@ -484,7 +485,7 @@ async def restore_database(
 async def export_meal_allowance(
     start_date: date = Query(...),
     end_date: date = Query(...),
-    night_allowance: float = Query(0),
+    night_allowance: float = Query(100000),
     department: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current_user: AppUser = Depends(require_roles(UserRole.ADMIN, UserRole.ACCOUNTANT)),
@@ -528,41 +529,71 @@ async def export_meal_allowance(
     ws["A3"].font = title_font
     ws["A3"].alignment = center
 
-    # Row 5: Header table
-    headers = [
+    ws.merge_cells("A4:Q4")
+    zh_date_str = f"由 {start_date.year}年 {start_date.month}月 {start_date.day} 日 至 {end_date.year}年 {end_date.month}月 {end_date.day}日"
+    ws["A4"] = f"廠房員工伙食費與晚班補貼費{zh_date_str}"
+    ws["A4"].font = Font(name="Times New Roman", bold=True, size=12)
+    ws["A4"].alignment = center
+
+    # Row 6: Vietnamese Header
+    headers_vn = [
         "STT", "MSNV", "HỌ VÀ TÊN", "Số Bữa", "Tiền Cơm", "Cộng Tiền cơm",
         "Số Đêm", "Bồi Dưỡng Ca Đêm", "Cộng tiền bồi dưỡng Đêm", "Số Bữa",
-        "Tiền BD Đi Phụ Xe", "Cộng tiền bồi dưỡng", "TIỀN ĐIỆN", "TIỀN THỰC LÃNH",
+        "Tiền BD Đi Phụ Xe Tải 30.000đ /Bửa- Đi nối sợi 70.000đ /ngày", "Cộng tiền bồi dưỡng", "TIỀN ĐIỆN", "TIỀN THỰC LÃNH",
         "SỐ TIỀN THIẾU", "SỐ TIỀN DƯ", "KÍ NHẬN"
     ]
-    for col_idx, header in enumerate(headers, 1):
-        cell = ws.cell(row=5, column=col_idx)
+    # Row 7: Chinese Header
+    headers_zh = [
+        "次序", "MSNV", "姓名", "餐數", "每餐,餐費", "小計", 
+        "晚數", "大晚班補貼", "小計", "餐數", 
+        "補貼跟車 / 穿扣", "小計", "NaN", "合計",
+        "NaN", "NaN", "簽名"
+    ]
+    
+    for col_idx, header in enumerate(headers_vn, 1):
+        cell = ws.cell(row=6, column=col_idx)
         cell.value = header
         cell.font = header_font
         cell.alignment = center
         cell.border = border
         cell.fill = gray_fill
+        
+    for col_idx, header in enumerate(headers_zh, 1):
+        cell = ws.cell(row=7, column=col_idx)
+        if header != "NaN" and header != "MSNV":
+            cell.value = header
+        cell.font = header_font
+        cell.alignment = center
+        cell.border = border
+        cell.fill = gray_fill
 
-    # Row 6+: Data
-    current_row = 6
-    for idx, item in enumerate(data.rows, 1):
+    # Row 8+: Data
+    current_row = 8
+    # Sort by employee_code numerically
+    sorted_rows = sorted(data.rows, key=lambda x: int(x.employee_code) if str(x.employee_code).isdigit() else 999999)
+    
+    for idx, item in enumerate(sorted_rows, 1):
         # STT, MSNV, Name
         ws.cell(current_row, 1, idx).font = normal_font
         ws.cell(current_row, 2, item.employee_code).font = normal_font
         ws.cell(current_row, 3, item.full_name).font = normal_font
         
         # Meal
-        ws.cell(current_row, 4, item.work_days).font = normal_font
+        ws.cell(current_row, 4, item.meal_count).font = normal_font
         ws.cell(current_row, 5, item.meal_rate).font = normal_font
         # Formula: Cell F = D * E
         ws.cell(current_row, 6, f"=D{current_row}*E{current_row}").font = normal_font
         
         # Night
         ws.cell(current_row, 7, item.night_shifts).font = normal_font
-        night_rate = night_allowance if item.night_shifts > 0 else 0
-        ws.cell(current_row, 8, night_rate).font = normal_font
+        if item.night_shifts > 0:
+            ws.cell(current_row, 8, night_allowance).font = normal_font
+        else:
+            ws.cell(current_row, 8, "-").font = normal_font
+            
         # Formula: Cell I = G * H
-        ws.cell(current_row, 9, f"=G{current_row}*H{current_row}").font = normal_font
+        # Since H might be "-", we use a formula that treats non-numeric as 0
+        ws.cell(current_row, 9, f"=G{current_row}*IF(ISNUMBER(H{current_row}),H{current_row},0)").font = normal_font
         
         # Phụ xe (Empty with formula)
         ws.cell(current_row, 10, None).font = normal_font
@@ -574,8 +605,8 @@ async def export_meal_allowance(
         ws.cell(current_row, 13, None).font = normal_font
         
         # Thực lãnh
-        # Formula: Cell N = F + I + L + P - O - M
-        ws.cell(current_row, 14, f"=F{current_row}+I{current_row}+L{current_row}+P{current_row}-O{current_row}-M{current_row}").font = Font(name="Times New Roman", bold=True)
+        # Formula: Cell N = F + I + L - M + O - P
+        ws.cell(current_row, 14, f"=F{current_row}+I{current_row}+L{current_row}-M{current_row}+O{current_row}-P{current_row}").font = Font(name="Times New Roman", bold=True)
         
         # Thiếu, Dư, Kí nhận
         ws.cell(current_row, 15, None).font = normal_font

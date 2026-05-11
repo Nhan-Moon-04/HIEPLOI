@@ -25,11 +25,24 @@ export default function Overtime() {
     if (!cell || !cell.ot || cell.ot === 0) return <span style={{ color: '#e0e0e0' }}>-</span>;
 
     const isSunday = cell.is_sunday;
-    const bg = isSunday ? '#fff7ed' : '#f0f5ff';
-    const color = isSunday ? '#f59e0b' : '#4361ee';
+    const isHoliday = cell.is_holiday;
+    
+    let bg = '#f0f5ff';
+    let color = '#4361ee';
+    let label = '(x1.5)';
+    
+    if (isHoliday) {
+      bg = '#f5f3ff';
+      color = '#8b5cf6';
+      label = '(Le x3.0)';
+    } else if (isSunday) {
+      bg = '#fff7ed';
+      color = '#f59e0b';
+      label = '(CN x2.0)';
+    }
 
     return (
-      <Tooltip title={`${cell.shift} - ${cell.ot}h ${isSunday ? '(CN x2.0)' : '(x1.5)'}`}>
+      <Tooltip title={`${cell.shift || 'OT'} - ${cell.ot}h ${label}`}>
         <div style={{
           background: bg, color, borderRadius: 4, padding: '1px 0',
           fontSize: 11, fontWeight: 700, textAlign: 'center', minWidth: 28, lineHeight: '20px',
@@ -59,7 +72,7 @@ export default function Overtime() {
       </div>
 
       {/* Summary cards */}
-      <div className="stats-row" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
+      <div className="stats-row" style={{ gridTemplateColumns: 'repeat(5, 1fr)' }}>
         <div className="stat-card">
           <div className="accent accent-blue" />
           <div className="label">TONG GIO OT</div>
@@ -67,13 +80,18 @@ export default function Overtime() {
         </div>
         <div className="stat-card">
           <div className="accent accent-green" />
-          <div className="label">OT NGAY THUONG (x1.5)</div>
+          <div className="label">OT THUONG (x1.5)</div>
           <div className="value">{(sum.total_ot_normal || 0).toFixed(1)}h</div>
         </div>
         <div className="stat-card">
           <div className="accent accent-orange" />
-          <div className="label">OT CHU NHAT (x2.0)</div>
+          <div className="label">OT CN (x2.0)</div>
           <div className="value">{(sum.total_ot_sunday || 0).toFixed(1)}h</div>
+        </div>
+        <div className="stat-card">
+          <div className="accent accent-purple" style={{ background: '#8b5cf6' }} />
+          <div className="label">OT LE (x3.0)</div>
+          <div className="value">{(sum.total_ot_holiday || 0).toFixed(1)}h</div>
         </div>
         <div className="stat-card">
           <div className="accent accent-red" />
@@ -98,18 +116,24 @@ export default function Overtime() {
               <tr style={{ position: 'sticky', top: 0, zIndex: 2, background: '#f8f9fc' }}>
                 <th style={{ ...thStyle, width: 40, position: 'sticky', left: 0, zIndex: 3, background: '#f8f9fc' }}>Ma</th>
                 <th style={{ ...thStyle, width: 130, position: 'sticky', left: 40, zIndex: 3, background: '#f8f9fc', textAlign: 'left' }}>Ho ten</th>
-                {days.map((d) => (
-                  <th key={d} style={{
-                    ...thStyle, minWidth: 30,
-                    background: s.weekdays[d] === 'CN' ? '#fff7ed' : '#f8f9fc',
-                    color: s.weekdays[d] === 'CN' ? '#f59e0b' : '#6b7a99',
-                  }}>
-                    <div>{d}</div>
-                    <div style={{ fontSize: 9, fontWeight: 400 }}>{s.weekdays[d]}</div>
-                  </th>
-                ))}
-                <th style={{ ...thStyle, width: 55, background: '#f0f5ff', color: '#4361ee' }}>x1.5</th>
-                <th style={{ ...thStyle, width: 55, background: '#fff7ed', color: '#f59e0b' }}>x2.0</th>
+                {days.map((d) => {
+                  const isSun = s.weekdays[d] === 'CN';
+                  const firstRow = s.rows?.[0];
+                  const isHoliday = firstRow?.days?.[d]?.is_holiday;
+                  return (
+                    <th key={d} style={{
+                      ...thStyle, minWidth: 30,
+                      background: isHoliday ? '#f5f3ff' : isSun ? '#fff7ed' : '#f8f9fc',
+                      color: isHoliday ? '#8b5cf6' : isSun ? '#f59e0b' : '#6b7a99',
+                    }}>
+                      <div>{d}</div>
+                      <div style={{ fontSize: 9, fontWeight: 400 }}>{s.weekdays[d]}</div>
+                    </th>
+                  );
+                })}
+                <th style={{ ...thStyle, width: 45, background: '#f0f5ff', color: '#4361ee' }}>x1.5</th>
+                <th style={{ ...thStyle, width: 45, background: '#fff7ed', color: '#f59e0b' }}>x2.0</th>
+                <th style={{ ...thStyle, width: 45, background: '#f5f3ff', color: '#8b5cf6' }}>x3.0</th>
                 <th style={{ ...thStyle, width: 55, background: '#f0fdf4', color: '#22c55e', fontWeight: 700 }}>Tong</th>
               </tr>
             </thead>
@@ -129,6 +153,9 @@ export default function Overtime() {
                   <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 600, color: '#f59e0b', background: '#fffcf5' }}>
                     {row.total_ot_sunday > 0 ? row.total_ot_sunday.toFixed(1) : '-'}
                   </td>
+                  <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 600, color: '#8b5cf6', background: '#f5f3ff' }}>
+                    {row.total_ot_holiday > 0 ? row.total_ot_holiday.toFixed(1) : '-'}
+                  </td>
                   <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 700, color: '#22c55e', background: '#f5fff9' }}>
                     {row.total_ot_hours.toFixed(1)}
                   </td>
@@ -145,6 +172,9 @@ export default function Overtime() {
                 </td>
                 <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 700, color: '#f59e0b' }}>
                   {sum.total_ot_sunday?.toFixed(1)}
+                </td>
+                <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 700, color: '#8b5cf6' }}>
+                  {sum.total_ot_holiday?.toFixed(1)}
                 </td>
                 <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 800, color: '#22c55e', fontSize: 13 }}>
                   {sum.total_ot_hours?.toFixed(1)}

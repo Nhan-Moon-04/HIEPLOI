@@ -64,7 +64,7 @@ async def get_meal_allowance(
     )
     if department:
         emp_q = emp_q.where(Employee.department == department)
-    emp_q = emp_q.order_by(Employee.employee_code)
+    emp_q = emp_q.order_by(cast(Employee.employee_code, Integer))
     emp_result = await db.execute(emp_q)
     employees = emp_result.scalars().all()
 

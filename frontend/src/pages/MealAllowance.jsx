@@ -22,6 +22,7 @@ export default function MealAllowance() {
   useEffect(() => {
     const saved = localStorage.getItem('nightAllowanceRate');
     if (saved) setNightAllowanceRate(Number(saved));
+    else setNightAllowanceRate(100000);
   }, []);
 
   const handleSaveNightAllowance = (val) => {
