@@ -22,6 +22,7 @@ router = APIRouter(prefix="/attendance", tags=["Attendance - Cham Cong"])
 DOW_VN = ["T2", "T3", "T4", "T5", "T6", "T7", "CN"]
 
 GRACE_MINUTES = 15  # Cho phep ve som 15p
+DRIVER_AUTO_OT_SHIFT_CODES = {"TX1", "TX2"}
 
 
 class AttendanceCell(BaseModel):
@@ -141,6 +142,7 @@ def evaluate_attendance(shift, check_in_dt, check_out_dt, work_date, is_sunday, 
 
     # Gioi han gio vao (khong cho tinh som hon quy dinh)
     shift_start_time = parse_time(shift.start_time) if shift else None
+    original_check_in = check_in_dt
     if shift_start_time and check_in_dt:
         expected_start = datetime.combine(work_date, shift_start_time)
         if check_in_dt < expected_start:
@@ -193,6 +195,23 @@ def evaluate_attendance(shift, check_in_dt, check_out_dt, work_date, is_sunday, 
         if is_sunday or is_holiday:
             # Ngay nghi/le: Tat ca gio lam deu tinh vao tang ca
             result["ot_hours"] = actual
+        elif shift and (shift.code or "").upper() in DRIVER_AUTO_OT_SHIFT_CODES:
+            # Tinh OT cho tai xe: checkout tre hon gio ra + vao som >= 1h
+            ot = 0.0
+            shift_end_time = parse_time(shift.end_time)
+            if shift_end_time and check_out_dt:
+                expected_end = datetime.combine(work_date, shift_end_time)
+                if check_out_dt > expected_end:
+                    ot = (check_out_dt - expected_end).total_seconds() / 3600.0
+            
+            # Bonus 1h OT neu vao som >= 1h
+            if original_check_in and shift_start_time:
+                expected_start = datetime.combine(work_date, shift_start_time)
+                early_hours = (expected_start - original_check_in).total_seconds() / 3600.0
+                if early_hours >= 1.0:
+                    ot += 1.0
+            
+            result["ot_hours"] = round(max(ot, 0), 2)
         else:
             # Ngay thuong
             ot = float(shift.default_overtime_hours or 0) if shift else 0.0
@@ -202,7 +221,14 @@ def evaluate_attendance(shift, check_in_dt, check_out_dt, work_date, is_sunday, 
         if result["status"] in ("full", "early_leave", "short") or ((is_sunday or is_holiday) and actual > 0):
             meal_val = float(shift.meal_allowance or 35000) if shift else 35000.0
             meal_count = int(shift.meal_count or 1) if shift else 1
+            
+            # Special rule for drivers: if work past 6 PM, add 1 more meal (total 2)
+            if shift and (shift.code or "").upper() in DRIVER_AUTO_OT_SHIFT_CODES:
+                if check_out_dt and check_out_dt.hour >= 18:
+                    meal_count += 1
+            
             result["meal_allowance"] = meal_val * (meal_count if meal_count > 0 else 1)
+            result["meal_count"] = meal_count
 
     return result
 
