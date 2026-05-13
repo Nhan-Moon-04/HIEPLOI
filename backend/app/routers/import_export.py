@@ -146,6 +146,29 @@ async def import_attendance(
 
         await db.commit()
 
+        # 2.5 Clear old data for this month
+        y, m = map(int, month_key.split("-"))
+        days_in_month = calendar.monthrange(y, m)[1]
+        month_start = date(y, m, 1)
+        month_end = date(y, m, days_in_month)
+        
+        # Delete Daily records
+        await db.execute(delete(AttendanceDaily).where(and_(
+            AttendanceDaily.work_date >= month_start,
+            AttendanceDaily.work_date <= month_end
+        )))
+        
+        # Delete Raw Logs
+        # Include a bit of buffer for night shifts (up to 12:00 on the 1st of the next month)
+        log_start = datetime.combine(month_start, time(0, 0))
+        log_end = datetime.combine(month_end + timedelta(days=1), time(12, 0))
+        await db.execute(delete(AttendanceLog).where(and_(
+            AttendanceLog.event_time >= log_start,
+            AttendanceLog.event_time <= log_end
+        )))
+        
+        await db.commit()
+
         # Load lai employee code mapping
         emp_result = await db.execute(select(Employee).where(Employee.is_active == True))
         emp_map = {str(e.employee_code).lstrip("'"): e for e in emp_result.scalars().all()}
@@ -202,6 +225,21 @@ async def import_attendance(
             )
             db.add(log)
 
+        # 1.5 Validate months in file against month_key
+        # We check if the majority of scans or at least a significant portion match the month_key
+        # For simplicity and according to user request: if month_key is not in the set of months found, error out.
+        file_months = set()
+        for emp_code, scans in raw_scans.items():
+            for s_dt in scans:
+                file_months.add(s_dt.strftime("%Y-%m"))
+        
+        if file_months and month_key not in file_months:
+            sorted_months = sorted(list(file_months))
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Dữ liệu trong file thuộc tháng {', '.join(sorted_months)}, không khớp với tháng {month_key} đã chọn. Vui lòng kiểm tra lại!"
+            )
+
         # Process: group by employee + work_date
         # For night shifts: if scan is before NIGHT_SHIFT_CUTOFF (6am), it belongs to previous day
         processed = 0
@@ -225,8 +263,10 @@ async def import_attendance(
                 nu_emp_ids.append(emp.id)
             else:
                 # Check if they have NU in schedule
-                has_nu_sched = any(is_nu_dynamic_shift_code(shifts_by_id.get(sid).code if sid else "") 
-                                   for (eid, _), sid in schedule_map.items() if eid == emp.id)
+                has_nu_sched = any(
+                    is_nu_dynamic_shift_code(shifts_by_id[sid].code if sid in shifts_by_id else "") 
+                    for (eid, _), sid in schedule_map.items() if eid == emp.id
+                )
                 if has_nu_sched:
                     nu_emp_ids.append(emp.id)
         
@@ -254,7 +294,10 @@ async def import_attendance(
                 
                 for d in all_dates:
                     sid = schedule_map.get((emp.id, d))
-                    s_code = shifts_by_id.get(sid).code if sid else emp.default_shift_code
+                    s_code = emp.default_shift_code
+                    if sid and sid in shifts_by_id:
+                        s_code = shifts_by_id[sid].code
+                    
                     if is_nu_dynamic_shift_code(s_code):
                         nu_code_map[(emp.id, d)] = s_code
             

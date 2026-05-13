@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { DatePicker, Button, Card, Col, Row, Table, Spin, Modal, Form, Input, Space, message } from 'antd';
+import { DatePicker, Button, Card, Col, Row, Table, Spin, Modal, Form, Input, Space, message, Select } from 'antd';
 import { ArrowLeftOutlined, UserOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import dayjs from 'dayjs';
@@ -47,6 +47,11 @@ export default function EmployeeDetail() {
     queryKey: ['salary-history', employeeId],
     queryFn: () => api.get('/salaries/history', { params: { employee_id: employeeId } }).then((r) => r.data),
     enabled: Number.isFinite(employeeId),
+  });
+
+  const { data: shifts = [] } = useQuery({
+    queryKey: ['shifts'],
+    queryFn: () => api.get('/shifts').then((r) => r.data),
   });
 
   const row = attendance?.rows?.[0];
@@ -125,6 +130,13 @@ export default function EmployeeDetail() {
             </Button>
             <Button size="small" onClick={() => { form.resetFields(); setActionModal({ action: 'mark_worked', record: r }); }}>
               Di lam
+            </Button>
+            <Button size="small" type="primary" ghost onClick={() => { 
+              form.resetFields(); 
+              form.setFieldsValue({ shift_code: r.shift_code });
+              setActionModal({ action: 'change_shift', record: r }); 
+            }}>
+              Doi ca
             </Button>
           </Space>
         );
@@ -264,7 +276,11 @@ export default function EmployeeDetail() {
       `}</style>
 
       <Modal
-        title={actionModal?.action === 'convert_paid_leave' ? 'Chuyen sang nghi phep (P)' : 'Danh dau di lam'}
+        title={
+          actionModal?.action === 'convert_paid_leave' ? 'Chuyen sang nghi phep (P)' : 
+          actionModal?.action === 'change_shift' ? 'Thay doi ma ca lam viec' :
+          'Danh dau di lam'
+        }
         open={!!actionModal}
         onCancel={() => { setActionModal(null); form.resetFields(); }}
         okText="Xac nhan"
@@ -284,9 +300,21 @@ export default function EmployeeDetail() {
               work_date: actionModal.record.work_date,
               action: actionModal.action,
               reason: v.reason,
+              shift_code: v.shift_code,
             });
           }}
         >
+          {actionModal?.action === 'change_shift' && (
+            <Form.Item name="shift_code" label="Ma ca moi" rules={[{ required: true, message: 'Chon ma ca' }]}>
+              <Select placeholder="Chon ma ca" showSearch optionFilterProp="children">
+                {shifts.map(s => (
+                  <Select.Option key={s.id} value={s.code}>
+                    {s.code} - {s.name}
+                  </Select.Option>
+                ))}
+              </Select>
+            </Form.Item>
+          )}
           <Form.Item name="reason" label="Ly do" rules={[{ required: true, message: 'Nhap ly do' }]}>
             <Input.TextArea rows={3} placeholder="Nhap ly do" />
           </Form.Item>

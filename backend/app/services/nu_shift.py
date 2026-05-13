@@ -245,6 +245,7 @@ def _build_result(mode, week_mode, shift_code, has_midday_check, warning_note, c
             meal_allowance = NU_MORNING_MEAL_ALLOWANCE
             meal_count = 1
             night_allowance = 0.0
+            # 2nd meal bonus if OT >= 3.0h (after break deduction)
             if overtime_hours >= 3.0:
                 meal_allowance += NU_MORNING_MEAL_ALLOWANCE_OT_BONUS
                 meal_count = 2
@@ -397,6 +398,11 @@ def calculate_nu_shift_details(shift_code: str, actual_hours: float, is_night: b
     standard_hours = max(NU_STANDARD_HOURS - NU_STANDARD_HOURS_DEDUCTION_BY_CODE.get(code, 0.0), 0.0)
     
     raw_ot = max(actual_hours - NU_STANDARD_HOURS, 0.0)
+    
+    # Morning shift has 0.5h break deducted from OT
+    if not is_night and raw_ot >= 0.5:
+        raw_ot -= 0.5
+        
     normalized_ot = normalize_nu_overtime_hours(raw_ot)
     extra_ot = NU_EXTRA_OT_BY_CODE.get(code, 0.0)
     total_ot = normalized_ot + extra_ot
@@ -407,6 +413,7 @@ def calculate_nu_shift_details(shift_code: str, actual_hours: float, is_night: b
     else:
         meal_allowance = NU_MORNING_MEAL_ALLOWANCE
         night_allowance = 0.0
+        # Threshold for 2nd meal bonus: 3.0h OT (after break)
         if total_ot >= 3.0:
             meal_allowance += NU_MORNING_MEAL_ALLOWANCE_OT_BONUS
             

@@ -4,10 +4,12 @@ import calendar
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy import select, func, or_, and_, cast, Integer, Numeric
+from sqlalchemy import select, func, or_, and_, cast, Integer, Numeric, delete
 from app.database import get_db
 from app.models.employee import Employee
 from app.models.salary import MonthlySalary
+from app.models.attendance import AttendanceDaily, AttendanceDetail
+from app.models.schedule import WorkSchedule
 from app.models.user import AppUser, UserRole
 from app.schemas.employee import EmployeeCreate, EmployeeUpdate, EmployeeResponse
 from app.middleware.auth import get_current_user, require_roles
@@ -190,13 +192,20 @@ async def delete_employee(
     await log_audit(db, "employees", employee_id, "DELETE", current_user.username, before_data, None)
 
     try:
+        # Xóa dữ liệu liên quan trước
+        await db.execute(delete(AttendanceDaily).where(AttendanceDaily.employee_id == employee_id))
+        await db.execute(delete(AttendanceDetail).where(AttendanceDetail.employee_id == employee_id))
+        await db.execute(delete(WorkSchedule).where(WorkSchedule.employee_id == employee_id))
+        await db.execute(delete(MonthlySalary).where(MonthlySalary.employee_id == employee_id))
+        
+        # Xóa nhân viên
         await db.delete(emp)
         await db.commit() # Commit cả việc xóa và việc ghi log
-    except IntegrityError:
+    except Exception as e:
         await db.rollback()
         raise HTTPException(
-            status_code=400, 
-            detail="Không thể xóa nhân viên này vì đã có dữ liệu chấm công hoặc lương liên quan. Vui lòng chuyển trạng thái sang 'Nghỉ việc' thay vì xóa."
+            status_code=500, 
+            detail=f"Lỗi khi xóa nhân viên: {str(e)}"
         )
 
     return {"message": f"Đã xóa nhân viên '{emp.full_name}'"}

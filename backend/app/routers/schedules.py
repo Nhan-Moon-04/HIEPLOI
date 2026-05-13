@@ -219,8 +219,6 @@ async def import_schedule(
             sc = str(cell_val).strip().upper()
             if sc in ("O", "OFF"):
                 sc = "OFF"
-            elif sc == "VP40":
-                sc = "XVP"
 
             if sc not in shift_map:
                 unknown_shifts.add(sc)
