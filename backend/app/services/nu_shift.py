@@ -86,25 +86,51 @@ def _detect_daily_mode(today_events, next_day_events, is_sunday=False, shift_cod
     is_xnu = (shift_code == XNU_SHIFT_CODE)
     
     if is_xnu:
+        if not today_events and not next_day_events:
+            return None, False
+
+        # XNU: detect by A/B/C segments (A: 06-10, B: 10-18, C: 18-24; next-day A for shift 3)
+        has_a_today = any(6 <= item.hour < 10 for item in today_events)
+        has_b_today = any(10 <= item.hour < 18 for item in today_events)
+        has_c_today = any(item.hour >= 18 for item in today_events)
+        has_a_next = any(item.hour < 10 for item in next_day_events)
+
+        if has_c_today and has_a_next and not has_b_today:
+            return XNU_MODE_3, False
+        if has_b_today and has_c_today and not has_a_today:
+            return XNU_MODE_2, False
+        if has_a_today and has_b_today and not has_c_today:
+            has_midday = any(10 <= item.hour <= 13 for item in today_events)
+            return XNU_MODE_1, has_midday
+
+        # Relaxed match when a punch is missing
+        if has_c_today and has_a_next:
+            return XNU_MODE_3, False
+        if has_b_today and has_c_today:
+            return XNU_MODE_2, False
+        if has_a_today and has_b_today:
+            has_midday = any(10 <= item.hour <= 13 for item in today_events)
+            return XNU_MODE_1, has_midday
+
         if not today_events:
             return None, False
-            
+
         first_event = today_events[0]
         first_hour = first_event.hour
-        
+
         # XNU Shift 3: 22:00 - 06:00 (starts late)
-        if first_hour >= 20:
+        if first_hour >= 18:
             return XNU_MODE_3, False
-            
+
         # XNU Shift 1: 06:00 - 14:00 (starts early)
         if first_hour <= 10:
             has_midday = any(10 <= item.hour <= 13 for item in today_events)
             return XNU_MODE_1, has_midday
-            
+
         # XNU Shift 2: 14:00 - 22:00 (starts afternoon)
-        if 12 <= first_hour <= 18:
+        if 10 <= first_hour < 18:
             return XNU_MODE_2, False
-            
+
         return None, False
 
     # Standard NU logic

@@ -13,7 +13,14 @@ from app.models.schedule import WorkSchedule
 from app.models.holiday import CompanyHoliday
 from app.models.user import AppUser, UserRole
 from app.middleware.auth import get_current_user, require_roles
-from app.services.nu_shift import is_nu_dynamic_shift_code, build_nu_shift_day_results, calculate_nu_shift_details
+from app.services.nu_shift import (
+    is_nu_dynamic_shift_code,
+    build_nu_shift_day_results,
+    calculate_nu_shift_details,
+    XNU_MODE_1,
+    XNU_MODE_2,
+    XNU_MODE_3,
+)
 from app.utils.audit_helper import log_audit
 from pydantic import BaseModel
 
@@ -409,9 +416,16 @@ async def get_attendance(
                 if nu_res.warning_note:
                     ev["notes"] = f"{ev['notes']} | {nu_res.warning_note}" if ev["notes"] else nu_res.warning_note
                 
-                # Ensure notes mention morning/night
-                mode_str = "Sáng" if nu_res.mode == "morning" else "Tối"
-                mode_note = f"Ca {mode_str}"
+                # Ensure notes mention correct shift mode
+                if nu_res.mode in (XNU_MODE_1, XNU_MODE_2, XNU_MODE_3):
+                    mode_note = {
+                        XNU_MODE_1: "Ca 1",
+                        XNU_MODE_2: "Ca 2",
+                        XNU_MODE_3: "Ca 3",
+                    }[nu_res.mode]
+                else:
+                    mode_str = "Sáng" if nu_res.mode == "morning" else "Tối"
+                    mode_note = f"Ca {mode_str}"
                 ev["notes"] = f"{mode_note} | {ev['notes']}" if ev["notes"] else mode_note
                 
                 cell_shift_code = nu_res.shift_code

@@ -1,13 +1,14 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { DatePicker, Select, Spin, Tag, Tooltip, Button, Space, Modal, InputNumber, Form, message } from 'antd';
+import { DatePicker, Select, Spin, Tag, Tooltip, Button, Space, Modal, Input, InputNumber, Form, message } from 'antd';
 import { 
   DollarCircleOutlined, 
   DownloadOutlined, 
   CalendarOutlined, 
   SettingOutlined,
   TeamOutlined,
-  ArrowRightOutlined
+  ArrowRightOutlined,
+  SearchOutlined
 } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
 import dayjs from 'dayjs';
@@ -22,6 +23,7 @@ export default function MealAllowance() {
   const [monthKey, setMonthKey] = useState(dayjs().format('YYYY-MM'));
   const [dept, setDept] = useState(null);
   const [selectedRow, setSelectedRow] = useState(null);
+  const [searchTerm, setSearchTerm] = useState('');
   
   const [dateRange, setDateRange] = useState([dayjs().startOf('month'), dayjs().endOf('month')]);
   const [nightModal, setNightModal] = useState(false);
@@ -99,6 +101,28 @@ export default function MealAllowance() {
   const totalMealAll = s.rows?.reduce((sum, r) => sum + (r.summary?.total_meal_allowance || 0), 0) || 0;
   const totalNightAll = s.rows?.reduce((sum, r) => sum + (r.summary?.total_night_allowance || 0), 0) || 0;
 
+  const normalizedSearch = searchTerm.trim().toLowerCase();
+  const filteredRows = (s.rows || []).filter((row) => {
+    if (!normalizedSearch) return true;
+
+    const code = String(row.employee_code || '').toLowerCase();
+    const name = String(row.full_name || '').toLowerCase();
+
+    if (code.includes(normalizedSearch) || name.includes(normalizedSearch)) return true;
+
+    const numericNeedle = normalizedSearch.replace(/[^0-9]/g, '');
+    if (!numericNeedle) return false;
+
+    const mealTotal = row.summary?.total_meal_allowance || 0;
+    const nightTotal = row.summary?.total_night_allowance || 0;
+    const totalAll = mealTotal + nightTotal;
+
+    const mealStr = String(Math.round(mealTotal));
+    const totalStr = String(Math.round(totalAll));
+
+    return mealStr.includes(numericNeedle) || totalStr.includes(numericNeedle);
+  });
+
   return (
     <div className="meal-allowance-page">
       <div className="page-header-premium">
@@ -148,6 +172,15 @@ export default function MealAllowance() {
               onChange={setDept}
               options={departments.map((d) => ({ value: d, label: d }))} 
               suffixIcon={<TeamOutlined />}
+            />
+
+            <Input
+              placeholder="Tìm ID / Họ tên / Tổng tiền ăn"
+              allowClear
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              prefix={<SearchOutlined style={{ color: '#94a3b8' }} />}
+              style={{ width: 220 }}
             />
 
             {user?.role === 'admin' && (
@@ -243,7 +276,7 @@ export default function MealAllowance() {
                 </tr>
               </thead>
               <tbody>
-                {s.rows?.map((row) => (
+                {filteredRows.map((row) => (
                   <tr key={row.employee_id}>
                     <td className="sticky-col col-code">{row.employee_code}</td>
                     <td className="sticky-col col-name">
