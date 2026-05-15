@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { DatePicker, Select, Spin, Tag, Tooltip, Button, Space, Modal, InputNumber, Form, message } from 'antd';
 import { 
   DollarCircleOutlined, 
@@ -11,12 +12,12 @@ import {
 import { useQuery } from '@tanstack/react-query';
 import dayjs from 'dayjs';
 import api from '../api/client';
-import EmployeeDetailModal from '../components/Attendance/EmployeeDetailModal';
 import useAuthStore from '../stores/authStore';
 
 const { RangePicker } = DatePicker;
 
 export default function MealAllowance() {
+  const navigate = useNavigate();
   const { user } = useAuthStore();
   const [monthKey, setMonthKey] = useState(dayjs().format('YYYY-MM'));
   const [dept, setDept] = useState(null);
@@ -115,7 +116,7 @@ export default function MealAllowance() {
 
         <div className="actions-section">
           <Space size={8}>
-            <Button.Group>
+            <Space.Compact>
               <Button onClick={() => {
                 const start = dayjs(monthKey).startOf('month');
                 setDateRange([start, start.add(14, 'day')]);
@@ -125,7 +126,7 @@ export default function MealAllowance() {
                 const end = dayjs(monthKey).endOf('month');
                 setDateRange([start, end]);
               }}>Đợt 2 (16-cuối)</Button>
-            </Button.Group>
+            </Space.Compact>
 
             <RangePicker 
               value={dateRange}
@@ -246,7 +247,18 @@ export default function MealAllowance() {
                   <tr key={row.employee_id}>
                     <td className="sticky-col col-code">{row.employee_code}</td>
                     <td className="sticky-col col-name">
-                      <a onClick={() => setSelectedRow(row)} className="emp-link">
+                      <a 
+                        onClick={() => {
+                          const params = new URLSearchParams({
+                            month_key: monthKey,
+                            start_date: dateRange[0]?.format('YYYY-MM-DD'),
+                            end_date: dateRange[1]?.format('YYYY-MM-DD'),
+                            night_rate: nightAllowanceRate
+                          });
+                          navigate(`/meal-allowance/${row.employee_id}?${params.toString()}`);
+                        }} 
+                        className="emp-link"
+                      >
                         {row.full_name}
                       </a>
                     </td>
@@ -279,11 +291,7 @@ export default function MealAllowance() {
         </div>
       </div>
 
-      <EmployeeDetailModal
-        visible={!!selectedRow}
-        onClose={() => setSelectedRow(null)}
-        data={selectedRow}
-      />
+
 
       <Modal
         title="Cấu hình phụ cấp ca đêm"

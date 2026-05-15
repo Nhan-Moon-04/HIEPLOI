@@ -17,6 +17,7 @@ import Overtime from './pages/Overtime';
 import Attendance from './pages/Attendance';
 import ImportExport from './pages/ImportExport';
 import MealAllowance from './pages/MealAllowance';
+import MealAllowanceDetail from './pages/MealAllowanceDetail';
 import BaseSalary from './pages/BaseSalary';
 import Audit from './pages/Audit';
 import LeaveBalance from './pages/LeaveBalance';
@@ -63,6 +64,14 @@ export default function App() {
               </MainLayout>
             </PrivateRoute>
           }
+        />
+        <Route 
+          path="/meal-allowance/:id" 
+          element={
+            <PrivateRoute>
+              <MealAllowanceDetail />
+            </PrivateRoute>
+          } 
         />
       </Routes>
     </ConfigProvider>

@@ -136,7 +136,7 @@ export default function AttendanceDetailModal({ visible, onClose, data }) {
       width={1200}
       centered
       className="premium-modal"
-      bodyStyle={{ padding: '20px 24px 24px' }}
+      styles={{ body: { padding: '20px 24px 24px' } }}
     >
       <div className="stats-grid">
         <div className="stat-p-card">

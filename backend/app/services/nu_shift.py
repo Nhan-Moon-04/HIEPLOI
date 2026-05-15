@@ -5,10 +5,16 @@ from typing import Optional
 
 
 NU_SHIFT_CODE = "NU"
+XNU_SHIFT_CODE = "XNU"
+
 NU_MORNING_MODE = "morning"
 NU_NIGHT_MODE = "night"
 
-NU_DYNAMIC_SHIFT_CODES = {"NU", "NUT1", "NUT2", "NU1", "NU2", "NU3", "NUN"}
+XNU_MODE_1 = "xnu_shift1"
+XNU_MODE_2 = "xnu_shift2"
+XNU_MODE_3 = "xnu_shift3"
+
+NU_DYNAMIC_SHIFT_CODES = {"NU", "NUT1", "NUT2", "NU1", "NU2", "NU3", "NUN", "XNU"}
 
 NU_STANDARD_HOURS = 8.0
 NU_MAX_OT_HOURS = 4.0  # Ca NU tối đa 12h = 8h standard + 4h OT
@@ -76,7 +82,32 @@ def _is_morning_check(event_time):
     return hour <= 8
 
 
-def _detect_daily_mode(today_events, next_day_events, is_sunday=False):
+def _detect_daily_mode(today_events, next_day_events, is_sunday=False, shift_code=None):
+    is_xnu = (shift_code == XNU_SHIFT_CODE)
+    
+    if is_xnu:
+        if not today_events:
+            return None, False
+            
+        first_event = today_events[0]
+        first_hour = first_event.hour
+        
+        # XNU Shift 3: 22:00 - 06:00 (starts late)
+        if first_hour >= 20:
+            return XNU_MODE_3, False
+            
+        # XNU Shift 1: 06:00 - 14:00 (starts early)
+        if first_hour <= 10:
+            has_midday = any(10 <= item.hour <= 13 for item in today_events)
+            return XNU_MODE_1, has_midday
+            
+        # XNU Shift 2: 14:00 - 22:00 (starts afternoon)
+        if 12 <= first_hour <= 18:
+            return XNU_MODE_2, False
+            
+        return None, False
+
+    # Standard NU logic
     has_midday = any(_is_midday_check(item) for item in today_events)
     if has_midday:
         return NU_MORNING_MODE, has_midday
@@ -110,6 +141,24 @@ def _fallback_mode(today_events, is_sunday=False):
 
 
 def _pick_check_times(mode, today_events, next_day_events, is_sunday=False):
+    if mode == XNU_MODE_1:
+        # 06:00 - 14:00
+        check_in = next((item for item in today_events if item.hour < 10), (today_events[0] if today_events else None))
+        check_out = next((item for item in reversed(today_events) if item.hour >= 13), (today_events[-1] if today_events else None))
+        return check_in, check_out
+        
+    if mode == XNU_MODE_2:
+        # 14:00 - 22:00
+        check_in = next((item for item in today_events if 12 <= item.hour < 17), (today_events[0] if today_events else None))
+        check_out = next((item for item in reversed(today_events) if item.hour >= 20), (today_events[-1] if today_events else None))
+        return check_in, check_out
+        
+    if mode == XNU_MODE_3:
+        # 22:00 - 06:00 (next day)
+        check_in = next((item for item in today_events if item.hour >= 20), (today_events[0] if today_events else None))
+        check_out = next((item for item in next_day_events if item.hour < 10), None)
+        return check_in, check_out
+
     if mode == NU_MORNING_MODE:
         morning_candidates = [item for item in today_events if item.hour < 14]
         evening_candidates = [item for item in today_events if item.hour >= 14]
@@ -147,6 +196,12 @@ def _pick_check_times(mode, today_events, next_day_events, is_sunday=False):
 
 
 def _build_shift_name(mode, shift_code):
+    if shift_code == XNU_SHIFT_CODE:
+        if mode == XNU_MODE_1: return "Ca XNU - Ca 1 (06:00-14:00)"
+        if mode == XNU_MODE_2: return "Ca XNU - Ca 2 (14:00-22:00)"
+        if mode == XNU_MODE_3: return "Ca XNU - Ca 3 (22:00-06:00)"
+        return "Ca XNU (XNU)"
+
     mode_label = "sang" if mode == NU_MORNING_MODE else "toi"
     code = (shift_code or NU_SHIFT_CODE).upper()
 
@@ -237,7 +292,15 @@ def _build_result(mode, week_mode, shift_code, has_midday_check, warning_note, c
         )
         overtime_hours += NU_EXTRA_OT_BY_CODE.get(code, 0.0)
         
-        if mode == NU_NIGHT_MODE:
+        if mode == XNU_MODE_3:
+            meal_allowance = 35000.0
+            meal_count = 1
+            night_allowance = night_allowance_rate if night_allowance_rate > 0 else NU_NIGHT_PCCD
+        elif mode in [XNU_MODE_1, XNU_MODE_2]:
+            meal_allowance = 35000.0
+            meal_count = 1
+            night_allowance = 0.0
+        elif mode == NU_NIGHT_MODE:
             meal_allowance = NU_NIGHT_MEAL_ALLOWANCE
             meal_count = 1
             night_allowance = night_allowance_rate if night_allowance_rate > 0 else NU_NIGHT_PCCD
@@ -309,7 +372,8 @@ def build_nu_shift_day_results(
             next_day_events = events_by_employee_date.get((employee_id, work_date + timedelta(days=1)), [])
 
             is_sun = (work_date.weekday() == 6)
-            detected_mode, has_midday = _detect_daily_mode(today_events, next_day_events, is_sunday=is_sun)
+            shift_code = str(nu_shift_code_map.get((employee_id, work_date), NU_SHIFT_CODE)).upper()
+            detected_mode, has_midday = _detect_daily_mode(today_events, next_day_events, is_sunday=is_sun, shift_code=shift_code)
             fallback_mode = _fallback_mode(today_events, is_sunday=is_sun)
             day_mode_candidates[work_date] = {
                 "detected_mode": detected_mode,
