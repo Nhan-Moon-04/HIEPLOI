@@ -31,6 +31,7 @@ DOW_VN = ["T2", "T3", "T4", "T5", "T6", "T7", "CN"]
 
 GRACE_MINUTES = 15  # Cho phep ve som 15p
 DRIVER_AUTO_OT_SHIFT_CODES = {"TX1", "TX2"}
+X_OT_SHIFT_CODES = {"X", "X40"}  # Ca hỗ trợ tăng ca theo ngày
 
 
 class AttendanceCell(BaseModel):
@@ -461,8 +462,8 @@ async def get_attendance(
             if override_note:
                 cell_notes = f"{cell_notes} | {override_note}" if cell_notes else override_note
 
-            # Cộng thêm tiền ăn OT ca X nếu có config cho ngày này
-            if (cell_shift_code == 'X' or (shift and shift.code == 'X')) and ev["status"] in ("full", "early_leave", "short", "forgot_scan"):
+            # Cộng thêm tiền ăn OT ca X/X40 nếu có config cho ngày này
+            if (cell_shift_code in X_OT_SHIFT_CODES or (shift and shift.code in X_OT_SHIFT_CODES)) and ev["status"] in ("full", "early_leave", "short", "forgot_scan"):
                 xot = xot_map.get((emp.id, dt))
                 if xot and xot.meal_count and xot.meal_count > 0:
                     x_meal_rate = float(shift.meal_allowance) if shift and shift.meal_allowance else 35000.0

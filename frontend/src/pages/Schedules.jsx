@@ -11,6 +11,9 @@ const SHIFT_COLORS = {
   N: '#ef4444', OFF: '#94a3b8', L: '#ec4899',
 };
 
+// Các ca hỗ trợ tùy chỉnh tăng ca (cùng cơ chế)
+const X_OT_SHIFTS = ['X', 'X40'];
+
 export default function Schedules() {
   const [monthKey, setMonthKey] = useState(dayjs().format('YYYY-MM'));
   const [editingCell, setEditingCell] = useState(null); // {empId, day} – đổi ca
@@ -146,8 +149,8 @@ export default function Schedules() {
     const dow = s.weekdays[day];
     const isSunday = dow === 'CN';
 
-    // Chỉ hiện OT option khi ca là X (mặc định hoặc override)
-    const isXShift = code === 'X';
+    // Chỉ hiện OT option khi ca trong danh sách X_OT_SHIFTS
+    const isXShift = X_OT_SHIFTS.includes(code);
     const otKey = `${row.employee_id}_${workDate}`;
     const hasOt = !!xOtMap[otKey];
 

@@ -262,8 +262,8 @@ async def get_meal_allowance(
                     if night_allowance > 0:
                         total_emp_meal += night_allowance
 
-                # Cộng thêm tiền ăn OT ca X nếu có config
-                if shift.code == 'X':
+                # Cộng thêm tiền ăn OT ca X/X40 nếu có config
+                if shift.code in ('X', 'X40'):
                     xot = xot_map.get((emp.id, work_date))
                     if xot and xot.meal_count and xot.meal_count > 0:
                         ot_meal = meal_rate_val * int(xot.meal_count)

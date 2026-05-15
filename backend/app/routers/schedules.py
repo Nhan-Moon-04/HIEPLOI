@@ -354,3 +354,58 @@ async def delete_x_overtime_config(
         await db.delete(cfg)
         await db.commit()
     return {"message": "Da xoa"}
+
+
+@router.get("/x-overtime/range-preview")
+async def preview_x_overtime_range(
+    start_date: date = Query(...),
+    end_date: date = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: AppUser = Depends(require_roles(UserRole.ADMIN, UserRole.ACCOUNTANT)),
+):
+    """Xem trước số lượng config tăng ca X trong khoảng ngày"""
+    result = await db.execute(
+        select(XOvertimeConfig).where(
+            XOvertimeConfig.work_date >= start_date,
+            XOvertimeConfig.work_date <= end_date,
+        )
+    )
+    cfgs = result.scalars().all()
+    return {
+        "count": len(cfgs),
+        "start_date": start_date,
+        "end_date": end_date,
+        "items": [
+            {
+                "employee_id": c.employee_id,
+                "work_date": str(c.work_date),
+                "ot_hours": float(c.ot_hours) if c.ot_hours else 0,
+                "meal_count": c.meal_count,
+            } for c in cfgs
+        ]
+    }
+
+
+@router.delete("/x-overtime/range")
+async def delete_x_overtime_range(
+    start_date: date = Query(...),
+    end_date: date = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: AppUser = Depends(require_roles(UserRole.ADMIN, UserRole.ACCOUNTANT)),
+):
+    """Xóa tất cả config tăng ca X trong khoảng ngày"""
+    from sqlalchemy import delete as sa_delete
+    result = await db.execute(
+        sa_delete(XOvertimeConfig).where(
+            XOvertimeConfig.work_date >= start_date,
+            XOvertimeConfig.work_date <= end_date,
+        )
+    )
+    await db.commit()
+    return {
+        "message": f"Da xoa {result.rowcount} config tang ca X",
+        "deleted_count": result.rowcount,
+        "start_date": str(start_date),
+        "end_date": str(end_date),
+    }
+
