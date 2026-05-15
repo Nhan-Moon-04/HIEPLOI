@@ -261,20 +261,24 @@ async def get_attendance(
     except ValueError:
         raise HTTPException(400, "month_key phai la YYYY-MM")
 
-    days_in_month = calendar.monthrange(year, month)[1]
-    first_day = date(year, month, 1)
-    last_day = date(year, month, days_in_month)
+    month_days = calendar.monthrange(year, month)[1]
+    month_start = date(year, month, 1)
+    month_end = date(year, month, month_days)
+
+    range_start = month_start
+    range_end = month_end
 
     if start_date:
-        sd = date.fromisoformat(start_date)
-        first_day = max(first_day, sd)
+        range_start = date.fromisoformat(start_date)
     if end_date:
-        ed = date.fromisoformat(end_date)
-        last_day = min(last_day, ed)
+        range_end = date.fromisoformat(end_date)
 
-    if first_day > last_day:
-        # Invalid range or no days in range for this month
-        return AttendanceMonthResponse(month_key=month_key, days_in_month=days_in_month, rows=[])
+    if range_start > range_end:
+        # Invalid range or no days in range
+        return AttendanceMonthResponse(month_key=month_key, days_in_month=0, rows=[])
+
+    range_days = (range_end - range_start).days + 1
+    range_dates = [range_start + timedelta(days=i) for i in range(range_days)]
 
 
     # Load shifts
@@ -287,13 +291,13 @@ async def get_attendance(
 
     # Load holidays
     holiday_q = select(CompanyHoliday).where(
-        and_(CompanyHoliday.holiday_date >= first_day, CompanyHoliday.holiday_date <= last_day, CompanyHoliday.is_active == True)
+        and_(CompanyHoliday.holiday_date >= range_start, CompanyHoliday.holiday_date <= range_end, CompanyHoliday.is_active == True)
     )
     holiday_result = await db.execute(holiday_q)
     holiday_dates = {h.holiday_date for h in holiday_result.scalars().all()}
 
     # Load employees
-    emp_filters = [Employee.join_date <= last_day]
+    emp_filters = [Employee.join_date <= range_end]
     if not employee_id:
         emp_filters.append(Employee.is_active == True)
     emp_q = select(Employee).where(and_(*emp_filters))
@@ -305,20 +309,27 @@ async def get_attendance(
     emp_result = await db.execute(emp_q)
     employees = emp_result.scalars().all()
 
-    # Load schedule overrides
-    schedule_q = select(WorkSchedule).where(WorkSchedule.month_key == month_key)
+    # Load schedule overrides for date range
+    emp_id_list = [e.id for e in employees]
+    schedule_q = select(WorkSchedule).where(
+        and_(WorkSchedule.work_date >= range_start, WorkSchedule.work_date <= range_end)
+    )
+    if emp_id_list:
+        schedule_q = schedule_q.where(WorkSchedule.employee_id.in_(emp_id_list))
     schedule_result = await db.execute(schedule_q)
     override_map = {}
     override_notes = {}
     for ws in schedule_result.scalars().all():
-        override_map[(ws.employee_id, ws.work_date.day)] = ws.shift_id
+        override_map[(ws.employee_id, ws.work_date)] = ws.shift_id
         if ws.notes:
-            override_notes[(ws.employee_id, ws.work_date.day)] = ws.notes
+            override_notes[(ws.employee_id, ws.work_date)] = ws.notes
 
     # Load attendance data
     att_q = select(AttendanceDaily).where(
-        and_(AttendanceDaily.work_date >= first_day, AttendanceDaily.work_date <= last_day)
+        and_(AttendanceDaily.work_date >= range_start, AttendanceDaily.work_date <= range_end)
     )
+    if emp_id_list:
+        att_q = att_q.where(AttendanceDaily.employee_id.in_(emp_id_list))
     att_result = await db.execute(att_q)
     att_map = {}
     for a in att_result.scalars().all():
@@ -326,8 +337,8 @@ async def get_attendance(
 
     # Load raw logs for NU mode detection
     log_q = select(AttendanceLog).where(
-        and_(AttendanceLog.event_time >= datetime.combine(first_day, time(0, 0)), 
-             AttendanceLog.event_time <= datetime.combine(last_day + timedelta(days=1), time(12, 0)))
+        and_(AttendanceLog.event_time >= datetime.combine(range_start, time(0, 0)), 
+             AttendanceLog.event_time <= datetime.combine(range_end + timedelta(days=1), time(12, 0)))
     )
     log_result = await db.execute(log_q)
     all_logs = log_result.scalars().all()
@@ -343,15 +354,12 @@ async def get_attendance(
 
     # Prepare NU shift code map for build_nu_shift_day_results
     nu_shift_code_map = {}
-    emp_id_list = [e.id for e in employees]
-    
     # We need to know which shift code applies to each (emp, date)
     # Priority: override > default_shift (if NU)
     for emp in employees:
         default_shift = shifts_by_code.get(emp.default_shift_code)
-        for d in range(first_day.day, last_day.day + 1):
-            dt = date(year, month, d)
-            override_id = override_map.get((emp.id, d))
+        for dt in range_dates:
+            override_id = override_map.get((emp.id, dt))
             if override_id:
                 s = shifts_by_id.get(override_id)
                 if s and is_nu_dynamic_shift_code(s.code):
@@ -369,8 +377,8 @@ async def get_attendance(
     # Load X overtime configs cho tháng
     xot_q = select(XOvertimeConfig).where(
         and_(
-            XOvertimeConfig.work_date >= first_day,
-            XOvertimeConfig.work_date <= last_day,
+            XOvertimeConfig.work_date >= range_start,
+            XOvertimeConfig.work_date <= range_end,
             XOvertimeConfig.employee_id.in_(emp_id_list),
         )
     )
@@ -391,16 +399,16 @@ async def get_attendance(
         total_meal_count = 0
         total_meal_allowance = 0.0
 
-        for d in range(first_day.day, last_day.day + 1):
-            dt = date(year, month, d)
+        for dt in range_dates:
+            d = dt.day
             dow_idx = dt.weekday()
             dow = DOW_VN[dow_idx]
             is_sunday = dow == "CN"
             is_holiday = dt in holiday_dates
 
             # Determine shift
-            override_id = override_map.get((emp.id, d))
-            override_note = override_notes.get((emp.id, d))
+            override_id = override_map.get((emp.id, dt))
+            override_note = override_notes.get((emp.id, dt))
             if override_id:
                 shift = shifts_by_id.get(override_id)
             elif default_shift and is_nu_dynamic_shift_code(default_shift.code):
@@ -532,7 +540,7 @@ async def get_attendance(
 
     return AttendanceMonthResponse(
         month_key=month_key,
-        days_in_month=days_in_month,
+        days_in_month=range_days,
         rows=rows,
     )
 

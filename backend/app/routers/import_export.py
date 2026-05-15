@@ -530,10 +530,59 @@ async def export_meal_allowance(
     """Xuat file Excel tien com + boi duong ca dem theo format mau"""
     import openpyxl
     from openpyxl.styles import Border, Side, Alignment, Font, PatternFill
+    from calendar import monthrange
 
-    # 1. Lay du lieu (giong ben meal_allowance.py nhung goi truc tiep)
-    from app.routers.meal_allowance import get_meal_allowance
-    data = await get_meal_allowance(start_date, end_date, department, night_allowance, db, current_user)
+    # 1. Lay du lieu tu cham cong de dong bo voi man hinh
+    from app.routers.attendance import get_attendance
+
+    def iter_month_starts(start: date, end: date):
+        year, month = start.year, start.month
+        while (year, month) <= (end.year, end.month):
+            yield date(year, month, 1)
+            if month == 12:
+                year += 1
+                month = 1
+            else:
+                month += 1
+
+    row_map = {}
+    for month_start in iter_month_starts(start_date, end_date):
+        month_end = date(month_start.year, month_start.month, monthrange(month_start.year, month_start.month)[1])
+        seg_start = start_date if start_date > month_start else month_start
+        seg_end = end_date if end_date < month_end else month_end
+        month_key = month_start.strftime('%Y-%m')
+
+        res = await get_attendance(
+            month_key=month_key,
+            employee_id=None,
+            department=department,
+            start_date=seg_start.isoformat(),
+            end_date=seg_end.isoformat(),
+            night_allowance_rate=night_allowance,
+            db=db,
+            current_user=current_user,
+        )
+
+        for row in res.rows:
+            night_days = sum(1 for c in row.days if (c.night_allowance or 0) > 0)
+            entry = row_map.get(row.employee_id)
+            if not entry:
+                entry = {
+                    "employee_id": row.employee_id,
+                    "employee_code": row.employee_code,
+                    "full_name": row.full_name,
+                    "department": row.department,
+                    "meal_count": 0,
+                    "total_meal_allowance": 0.0,
+                    "total_night_allowance": 0.0,
+                    "night_shifts": 0,
+                }
+                row_map[row.employee_id] = entry
+
+            entry["meal_count"] += row.summary.get("total_meal_count", 0) or 0
+            entry["total_meal_allowance"] += row.summary.get("total_meal_allowance", 0) or 0.0
+            entry["total_night_allowance"] += row.summary.get("total_night_allowance", 0) or 0.0
+            entry["night_shifts"] += night_days
     
     # 2. Tao Workbook
     wb = openpyxl.Workbook()
@@ -607,23 +656,28 @@ async def export_meal_allowance(
     # Row 8+: Data
     current_row = 8
     # Sort by employee_code numerically
-    sorted_rows = sorted(data.rows, key=lambda x: int(x.employee_code) if str(x.employee_code).isdigit() else 999999)
+    sorted_rows = sorted(row_map.values(), key=lambda x: int(x["employee_code"]) if str(x["employee_code"]).isdigit() else 999999)
     
     for idx, item in enumerate(sorted_rows, 1):
         # STT, MSNV, Name
         ws.cell(current_row, 1, idx).font = normal_font
-        ws.cell(current_row, 2, item.employee_code).font = normal_font
-        ws.cell(current_row, 3, item.full_name).font = normal_font
+        ws.cell(current_row, 2, item["employee_code"]).font = normal_font
+        ws.cell(current_row, 3, item["full_name"]).font = normal_font
+
+        meal_count = int(item["meal_count"] or 0)
+        total_meal_allowance = float(item["total_meal_allowance"] or 0.0)
+        meal_rate = round(total_meal_allowance / meal_count, 2) if meal_count > 0 else 0.0
+        night_shifts = int(item["night_shifts"] or 0)
         
         # Meal
-        ws.cell(current_row, 4, item.meal_count).font = normal_font
-        ws.cell(current_row, 5, item.meal_rate).font = normal_font
+        ws.cell(current_row, 4, meal_count).font = normal_font
+        ws.cell(current_row, 5, meal_rate).font = normal_font
         # Formula: Cell F = D * E
         ws.cell(current_row, 6, f"=D{current_row}*E{current_row}").font = normal_font
         
         # Night
-        ws.cell(current_row, 7, item.night_shifts).font = normal_font
-        if item.night_shifts > 0:
+        ws.cell(current_row, 7, night_shifts).font = normal_font
+        if night_shifts > 0:
             ws.cell(current_row, 8, night_allowance).font = normal_font
         else:
             ws.cell(current_row, 8, "-").font = normal_font

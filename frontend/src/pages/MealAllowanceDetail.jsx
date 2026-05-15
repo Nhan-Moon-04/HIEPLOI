@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeftOutlined,
@@ -16,6 +17,76 @@ import { Spin, Button } from 'antd';
 import dayjs from 'dayjs';
 import api from '../api/client';
 
+const DOW_VN = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
+const SUMMARY_KEYS = [
+  'total_present',
+  'total_absent',
+  'total_forgot_scan',
+  'total_early_leave',
+  'total_hours',
+  'total_ot',
+  'total_meal_count',
+  'total_meal_allowance',
+  'total_night_allowance',
+  'total_paid_leave',
+];
+
+const buildDateList = (start, end) => {
+  if (!start || !end) return [];
+  const list = [];
+  let cursor = start.startOf('day');
+  const last = end.startOf('day');
+  while (cursor.isBefore(last, 'day') || cursor.isSame(last, 'day')) {
+    list.push(cursor);
+    cursor = cursor.add(1, 'day');
+  }
+  return list;
+};
+
+const buildMonthList = (start, end) => {
+  if (!start || !end) return [];
+  const months = [];
+  let cursor = start.startOf('month');
+  const last = end.startOf('month');
+  while (cursor.isBefore(last, 'month') || cursor.isSame(last, 'month')) {
+    months.push(cursor);
+    cursor = cursor.add(1, 'month');
+  }
+  return months;
+};
+
+const mergeAttendanceResponses = (responses) => {
+  const rowMap = new Map();
+
+  (responses || []).forEach((res) => {
+    (res?.rows || []).forEach((row) => {
+      const existing = rowMap.get(row.employee_id);
+      if (!existing) {
+        const cellsByDate = {};
+        (row.days || []).forEach((cell) => {
+          cellsByDate[cell.work_date] = cell;
+        });
+        rowMap.set(row.employee_id, {
+          ...row,
+          summary: { ...(row.summary || {}) },
+          cellsByDate,
+        });
+        return;
+      }
+
+      (row.days || []).forEach((cell) => {
+        existing.cellsByDate[cell.work_date] = cell;
+      });
+
+      SUMMARY_KEYS.forEach((key) => {
+        existing.summary[key] = (existing.summary[key] || 0) + (row.summary?.[key] || 0);
+      });
+    });
+  });
+
+  return { rows: Array.from(rowMap.values()) };
+};
+
 export default function MealAllowanceDetail() {
   const { id } = useParams();
   const [searchParams] = useSearchParams();
@@ -25,23 +96,73 @@ export default function MealAllowanceDetail() {
   const startDate = searchParams.get('start_date');
   const endDate = searchParams.get('end_date');
   const nightRate = Number(searchParams.get('night_rate') || 0);
+  const isMultiMonth = startDate && endDate
+    ? !dayjs(startDate).isSame(dayjs(endDate), 'month')
+    : false;
+
+  const rangeStart = startDate
+    ? dayjs(startDate)
+    : (monthKey ? dayjs(monthKey).startOf('month') : dayjs().startOf('month'));
+  const rangeEnd = endDate
+    ? dayjs(endDate)
+    : (monthKey ? dayjs(monthKey).endOf('month') : dayjs().endOf('month'));
+
+  const dateList = useMemo(
+    () => buildDateList(rangeStart, rangeEnd),
+    [rangeStart?.valueOf(), rangeEnd?.valueOf()],
+  );
 
   const { data: attResponse, isLoading } = useQuery({
-    queryKey: ['attendance', id, monthKey, startDate, endDate, nightRate],
-    queryFn: () =>
-      api.get('/attendance', {
-        params: {
-          employee_id: id,
-          month_key: monthKey,
-          start_date: startDate,
-          end_date: endDate,
-          night_allowance_rate: nightRate,
-        },
-      }).then((r) => r.data),
+    queryKey: ['attendance-range', id, rangeStart?.format('YYYY-MM-DD'), rangeEnd?.format('YYYY-MM-DD'), nightRate],
+    queryFn: async () => {
+      if (!id || !rangeStart || !rangeEnd) return { rows: [] };
+
+      const months = buildMonthList(rangeStart, rangeEnd);
+      const responses = await Promise.all(months.map((m) => {
+        const monthKey = m.format('YYYY-MM');
+        const monthStart = m.startOf('month');
+        const monthEnd = m.endOf('month');
+        const start = rangeStart.isAfter(monthStart) ? rangeStart : monthStart;
+        const end = rangeEnd.isBefore(monthEnd) ? rangeEnd : monthEnd;
+
+        return api.get('/attendance', {
+          params: {
+            employee_id: id,
+            month_key: monthKey,
+            start_date: start.format('YYYY-MM-DD'),
+            end_date: end.format('YYYY-MM-DD'),
+            night_allowance_rate: nightRate,
+          },
+        }).then((r) => r.data);
+      }));
+
+      return mergeAttendanceResponses(responses);
+    },
     enabled: !!id,
   });
 
   const data = attResponse?.rows?.[0];
+  const cellsByDate = data?.cellsByDate || {};
+  const displayDays = useMemo(() => {
+    if (!data) return [];
+    return dateList.map((d) => {
+      const dateKey = d.format('YYYY-MM-DD');
+      const cell = cellsByDate[dateKey];
+      if (cell) return cell;
+      return {
+        work_date: dateKey,
+        day: d.date(),
+        dow: DOW_VN[d.day()],
+        status: 'no_data',
+        is_holiday: false,
+        is_sunday: d.day() === 0,
+        meal_allowance: 0,
+        night_allowance: 0,
+        meal_count: 0,
+        actual_hours: 0,
+      };
+    });
+  }, [data, dateList, cellsByDate]);
 
   if (isLoading) {
     return <div className="mad-loading"><Spin size="large" /></div>;
@@ -60,7 +181,7 @@ export default function MealAllowanceDetail() {
   }
 
   const totalAll = (data.summary.total_meal_allowance || 0) + (data.summary.total_night_allowance || 0);
-  const activeDays = data.days.filter((d) => d.status !== 'no_data').length;
+  const activeDays = displayDays.filter((d) => d.status !== 'no_data').length;
 
   return (
     <div className="mad-page">
@@ -87,7 +208,7 @@ export default function MealAllowanceDetail() {
             )}
             <div className="emp-stat-chip">
               <CalendarOutlined style={{ fontSize: 10 }} />
-              {dayjs(startDate).format('DD/MM')} – {dayjs(endDate).format('DD/MM/YYYY')}
+              {rangeStart.format('DD/MM')} – {rangeEnd.format('DD/MM/YYYY')}
             </div>
           </div>
         </div>
@@ -151,7 +272,7 @@ export default function MealAllowanceDetail() {
               </tr>
             </thead>
             <tbody>
-              {data.days.map((cell, idx) => {
+              {displayDays.map((cell, idx) => {
                 const isSun = cell.dow === 'CN';
                 const isHol = cell.is_holiday;
                 const isAbsent = cell.status === 'absent';
@@ -164,7 +285,9 @@ export default function MealAllowanceDetail() {
                     className={`mad-row ${idx % 2 === 1 ? 'mad-row--alt' : ''} ${isSun || isHol ? 'mad-row--sun' : ''}`}
                   >
                     <td className="mad-td mad-td--day">
-                      <span className={isSun || isHol ? 'mad-day--red' : ''}>{cell.day}</span>
+                      <span className={isSun || isHol ? 'mad-day--red' : ''}>
+                        {isMultiMonth && cell.work_date ? dayjs(cell.work_date).format('DD/MM') : cell.day}
+                      </span>
                     </td>
                     <td className="mad-td">
                       <span className={`mad-dow ${isSun || isHol ? 'mad-dow--red' : ''}`}>{cell.dow}</span>
