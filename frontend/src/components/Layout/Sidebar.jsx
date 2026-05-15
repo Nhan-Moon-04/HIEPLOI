@@ -1,21 +1,8 @@
-import { Menu, Tooltip } from 'antd';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
-  AppstoreOutlined,
-  TeamOutlined,
-  ClockCircleOutlined,
-  ScheduleOutlined,
-  CalendarOutlined,
-  DollarOutlined,
-  FileTextOutlined,
-  SafetyOutlined,
-  BankOutlined,
-  ImportOutlined,
-  AuditOutlined,
-  SettingOutlined,
-  UserOutlined,
-  LogoutOutlined,
-  RiseOutlined,
+  AppstoreOutlined, TeamOutlined, ClockCircleOutlined, ScheduleOutlined,
+  CalendarOutlined, DollarOutlined, FileTextOutlined, SafetyOutlined,
+  BankOutlined, ImportOutlined, AuditOutlined, SettingOutlined, RiseOutlined,
 } from '@ant-design/icons';
 import useAuthStore from '../../stores/authStore';
 
@@ -62,86 +49,43 @@ const sections = [
 export default function Sidebar({ collapsed }) {
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, hasRole } = useAuthStore();
-
-  const menuItems = [];
-  sections.forEach((sec) => {
-    if (sec.roles && !sec.roles.some((r) => hasRole(r))) return;
-    menuItems.push({
-      key: `g-${sec.group}`,
-      type: 'group',
-      label: !collapsed ? (
-        <span className="menu-group-label" style={{ padding: 0 }}>{sec.group}</span>
-      ) : null,
-      children: sec.items.map((it) => ({
-        key: it.key,
-        icon: it.icon,
-        label: it.label,
-      })),
-    });
-  });
+  const { hasRole } = useAuthStore();
 
   return (
-    <div className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
-      <div className="sidebar-header">
-        {!collapsed ? (
-          <>
-            <div className="logo-text">Hiep Loi</div>
-            <div className="logo-sub">QUAN LY NHAN SU</div>
-          </>
-        ) : (
-          <div className="logo-text" style={{ fontSize: 14, textAlign: 'center' }}>HL</div>
+    <div className={`sb ${collapsed ? 'sb--col' : ''}`}>
+      <div className="sb-logo" onClick={() => navigate('/dashboard')}>
+        <div className="sb-logo-badge">HL</div>
+        {!collapsed && (
+          <div className="sb-logo-text">
+            <div className="sb-logo-name">Hiep Loi</div>
+            <div className="sb-logo-sub">Quản lý nhân sự</div>
+          </div>
         )}
       </div>
 
-      <div className="sidebar-menu-wrap">
-        <Menu
-          mode="inline"
-          theme="dark"
-          selectedKeys={[location.pathname]}
-          onClick={({ key }) => {
-            if (!key.startsWith('g-')) navigate(key);
-          }}
-          items={menuItems}
-          style={{ background: 'transparent', border: 'none' }}
-          inlineCollapsed={collapsed}
-        />
-      </div>
-
-      <div className="sidebar-footer">
-        <Menu
-          mode="inline"
-          theme="dark"
-          selectable={false}
-          onClick={({ key }) => {
-            if (key === 'logout') {
-              useAuthStore.getState().logout();
-              navigate('/login');
-            }
-          }}
-          items={[
-            {
-              key: 'user-info',
-              icon: <UserOutlined />,
-              label: !collapsed ? (
-                <span style={{ fontSize: 12 }}>
-                  {user?.full_name || user?.username}
-                  <span style={{ display: 'block', fontSize: 10, opacity: 0.5, marginTop: -2 }}>
-                    {user?.role?.toUpperCase()}
-                  </span>
-                </span>
-              ) : null,
-            },
-            {
-              key: 'logout',
-              icon: <LogoutOutlined />,
-              label: !collapsed ? 'Dang xuat' : null,
-              danger: true,
-            },
-          ]}
-          style={{ background: 'transparent', border: 'none' }}
-          inlineCollapsed={collapsed}
-        />
+      <div className="sb-nav">
+        {sections.map((sec) => {
+          if (sec.roles && !sec.roles.some((r) => hasRole(r))) return null;
+          return (
+            <div key={sec.group} className="sb-section">
+              {!collapsed && <div className="sb-group">{sec.group}</div>}
+              {sec.items.map((item) => {
+                const active = location.pathname === item.key || location.pathname.startsWith(item.key + '/');
+                return (
+                  <div
+                    key={item.key}
+                    className={`sb-item ${active ? 'sb-item--active' : ''}`}
+                    onClick={() => navigate(item.key)}
+                    title={collapsed ? item.label : undefined}
+                  >
+                    <span className="sb-item-icon">{item.icon}</span>
+                    {!collapsed && <span className="sb-item-label">{item.label}</span>}
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

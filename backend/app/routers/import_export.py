@@ -8,7 +8,7 @@ from io import BytesIO
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, text, delete
+from sqlalchemy import select, and_, or_, text, delete
 from app.database import get_db
 from app.models.attendance import AttendanceLog, AttendanceDaily
 from app.models.employee import Employee
@@ -105,8 +105,7 @@ async def import_attendance(
 
         # 2. Dong bo bang Employee
         all_emps = (await db.execute(select(Employee))).scalars().all()
-        active_emps = [e for e in all_emps if e.is_active]
-        codes_in_file = set(file_employees.keys())
+        emp_by_code = {str(e.employee_code).lstrip("'"): e for e in all_emps}
         
         # Xac dinh ngay moc (dau thang duoc chon)
         try:
@@ -115,26 +114,14 @@ async def import_attendance(
         except:
             ref_date = date.today().replace(day=1)
 
-        # A. Cho nghi viec nhung nguoi KHONG co trong file
-        for emp in active_emps:
-            if str(emp.employee_code) not in codes_in_file:
-                emp.is_active = False
-                emp.leave_date = ref_date
-                
-        # B. Xu ly nhan vien trong file (moi hoac cap nhat)
+        # Xu ly nhan vien trong file (moi hoac cap nhat)
         for code, name in file_employees.items():
-            # Tim theo code (uu tien active)
-            emp = next((e for e in active_emps if str(e.employee_code).lstrip("'") == code), None)
+            emp = emp_by_code.get(code)
             if emp:
                 if emp.full_name != name:
                     emp.full_name = name
-                continue
-                
-            emp_any = next((e for e in all_emps if str(e.employee_code).lstrip("'") == code), None)
-            if emp_any:
-                emp_any.is_active = True
-                emp_any.leave_date = None
-                emp_any.full_name = name
+                if emp.join_date is None or emp.join_date > ref_date:
+                    emp.join_date = ref_date
             else:
                 new_emp = Employee(
                     employee_code=code,
@@ -170,7 +157,14 @@ async def import_attendance(
         await db.commit()
 
         # Load lai employee code mapping
-        emp_result = await db.execute(select(Employee).where(Employee.is_active == True))
+        emp_result = await db.execute(
+            select(Employee).where(
+                and_(
+                    or_(Employee.join_date.is_(None), Employee.join_date <= month_end),
+                    or_(Employee.leave_date.is_(None), Employee.leave_date >= month_start),
+                )
+            )
+        )
         emp_map = {str(e.employee_code).lstrip("'"): e for e in emp_result.scalars().all()}
 
         # Load shifts

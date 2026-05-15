@@ -1,6 +1,15 @@
 import { useState } from 'react';
 import { DatePicker, Button, Table, Tag } from 'antd';
-import { DownloadOutlined } from '@ant-design/icons';
+import {
+  DownloadOutlined,
+  TeamOutlined,
+  BankOutlined,
+  SafetyCertificateOutlined,
+  FileTextOutlined,
+  BarChartOutlined,
+  ArrowUpOutlined,
+  CalendarOutlined,
+} from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
 import ReactECharts from 'echarts-for-react';
 import dayjs from 'dayjs';
@@ -85,12 +94,59 @@ export default function Dashboard() {
     { title: 'Trang thai', key: 'status', render: () => <Tag color="green">Da tra</Tag>, align: 'center' },
   ];
 
+  const statCards = [
+    {
+      label: 'NHAN VIEN',
+      value: s.total_employees || 0,
+      sub: '+2 so thang truoc',
+      icon: <TeamOutlined />,
+      color: '#4361ee',
+      bg: '#eef1fd',
+      showArrow: true,
+    },
+    {
+      label: 'TONG LUONG',
+      value: '462,5tr',
+      sub: 'VND',
+      icon: <BankOutlined />,
+      color: '#10b981',
+      bg: '#ecfdf5',
+    },
+    {
+      label: 'BHXH 21,5%',
+      value: '40,5tr',
+      sub: 'DN dong',
+      icon: <SafetyCertificateOutlined />,
+      color: '#f59e0b',
+      bg: '#fffbeb',
+    },
+    {
+      label: 'THUE TNCN',
+      value: '6,4tr',
+      sub: 'Phai nop',
+      icon: <FileTextOutlined />,
+      color: '#ef4444',
+      bg: '#fef2f2',
+    },
+  ];
+
   return (
     <div>
-      <div className="page-head">
-        <div>
-          <h1>Dashboard thang {month.format('M/YYYY')}</h1>
-          <div className="sub">Tong quan cham cong va luong van phong</div>
+      <div className="dash-hd">
+        <div className="dash-hd-left">
+          <div className="dash-hd-icon">
+            <BarChartOutlined />
+          </div>
+          <div>
+            <h1 className="dash-hd-title">
+              Dashboard
+              <span className="dash-month-badge">{month.format('MM/YYYY')}</span>
+            </h1>
+            <div className="dash-hd-sub">
+              <CalendarOutlined style={{ marginRight: 4 }} />
+              Tong quan cham cong va luong thang {month.format('M/YYYY')}
+            </div>
+          </div>
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
           <DatePicker
@@ -100,39 +156,29 @@ export default function Dashboard() {
             format="[Thang] M / YYYY"
             style={{ width: 160 }}
           />
-          <Button icon={<DownloadOutlined />}>Xuat Excel</Button>
+          <Button icon={<DownloadOutlined />} type="primary" ghost>Xuat Excel</Button>
         </div>
       </div>
 
-      {/* Stats */}
-      <div className="stats-row">
-        <div className="stat-card">
-          <div className="accent accent-blue" />
-          <div className="label">NHAN VIEN</div>
-          <div className="value">{s.total_employees || 0}</div>
-          <div className="sub">+2 so thang truoc</div>
-        </div>
-        <div className="stat-card">
-          <div className="accent accent-green" />
-          <div className="label">TONG LUONG</div>
-          <div className="value">462,5tr</div>
-          <div className="sub">VND</div>
-        </div>
-        <div className="stat-card">
-          <div className="accent accent-orange" />
-          <div className="label">BHXH 21,5%</div>
-          <div className="value">40,5tr</div>
-          <div className="sub">DN dong</div>
-        </div>
-        <div className="stat-card">
-          <div className="accent accent-red" />
-          <div className="label">THUE TNCN</div>
-          <div className="value">6,4tr</div>
-          <div className="sub">Phai nop</div>
-        </div>
+      <div className="dash-stats-grid">
+        {statCards.map((card) => (
+          <div key={card.label} className="dash-stat-card">
+            <div className="dsc-icon" style={{ background: card.bg, color: card.color }}>
+              {card.icon}
+            </div>
+            <div className="dsc-content">
+              <div className="dsc-label">{card.label}</div>
+              <div className="dsc-value" style={{ color: card.color }}>{card.value}</div>
+              <div className="dsc-sub">
+                {card.showArrow && <ArrowUpOutlined style={{ fontSize: 10, marginRight: 2 }} />}
+                {card.sub}
+              </div>
+            </div>
+            <div className="dsc-accent" style={{ background: card.color }} />
+          </div>
+        ))}
       </div>
 
-      {/* Charts */}
       <div className="charts-row">
         <div className="card">
           <div className="card-title">Hach toan theo bo phan</div>
@@ -149,7 +195,6 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Recent salary table */}
       <div className="card">
         <div className="flex-between" style={{ marginBottom: 12 }}>
           <div className="card-title" style={{ marginBottom: 0 }}>Bang luong gan nhat</div>

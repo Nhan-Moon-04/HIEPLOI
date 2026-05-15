@@ -56,6 +56,7 @@ export default function App() {
                   <Route path="/overtime" element={<Overtime />} />
                   <Route path="/attendance" element={<Attendance />} />
                   <Route path="/meal-allowance" element={<MealAllowance />} />
+                  <Route path="/meal-allowance/:id" element={<MealAllowanceDetail />} />
                   <Route path="/salaries" element={<BaseSalary />} />
                   <Route path="/audit" element={<Audit />} />
                   <Route path="/leave" element={<LeaveBalance />} />
@@ -64,14 +65,6 @@ export default function App() {
               </MainLayout>
             </PrivateRoute>
           }
-        />
-        <Route 
-          path="/meal-allowance/:id" 
-          element={
-            <PrivateRoute>
-              <MealAllowanceDetail />
-            </PrivateRoute>
-          } 
         />
       </Routes>
     </ConfigProvider>

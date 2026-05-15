@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Path \"d:\\\\CODE\\\\HIEPLOI\" -Recurse -Directory)",
+      "Bash(Select-Object -ExpandProperty FullName)",
+      "Bash(xargs grep -l \"AttendanceLog\\\\|attendance_logs\")",
+      "Bash(node -e ' *)",
+      "Bash(Get-ChildItem -Path \"d:\\\\CODE\\\\HIEPLOI\\\\backend\\\\app\\\\services\\\\\" -Filter \"*.py\" | Select-Object FullName)",
+      "Bash(ls -la \"d:\\\\CODE\\\\HIEPLOI\\\\backend\\\\app\\\\services\\\\\" 2>/dev/null | grep -E '\\\\.py$')",
+      "Read(//d/CODE/HIEPLOI/backend/app/services\" 2>/dev/null | grep -E '/**)"
+    ]
+  }
+}

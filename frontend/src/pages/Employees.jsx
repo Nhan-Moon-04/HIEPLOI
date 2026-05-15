@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { Table, Button, Modal, Form, Input, InputNumber, Select, DatePicker, Switch, Space, message, Tag, Popconfirm, Badge } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined, TeamOutlined, SearchOutlined, CalendarOutlined } from '@ant-design/icons';
+import { Table, Button, Modal, Form, Input, InputNumber, Select, DatePicker, Switch, Space, message, Tag, Popconfirm } from 'antd';
+import { PlusOutlined, EditOutlined, DeleteOutlined, SearchOutlined, CalendarOutlined, UserOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import dayjs from 'dayjs';
@@ -59,16 +59,12 @@ export default function Employees() {
     setModal(true);
   };
 
-  // Check if employee is actively working in the selected month
   const getMonthStatus = (emp) => {
     if (!monthKey) return null;
-    const [y, m] = monthKey.split('-').map(Number);
     const monthStart = dayjs(`${monthKey}-01`);
     const monthEnd = monthStart.endOf('month');
-
     const joined = emp.join_date ? dayjs(emp.join_date) : null;
     const left = emp.leave_date ? dayjs(emp.leave_date) : null;
-
     if (left && left.isBefore(monthStart)) return 'left';
     if (joined && joined.isAfter(monthEnd)) return 'not_yet';
     if (left && left.isBefore(monthEnd)) return 'leaving';
@@ -77,133 +73,232 @@ export default function Employees() {
   };
 
   const statusMap = {
-    active: { color: 'green', text: 'Dang lam' },
-    new: { color: 'blue', text: 'Moi vao' },
-    leaving: { color: 'orange', text: 'Se nghi' },
-    left: { color: 'red', text: 'Da nghi' },
-    not_yet: { color: 'default', text: 'Chua vao' },
+    active:  { color: 'success',   text: 'Đang làm' },
+    new:     { color: 'processing', text: 'Mới vào' },
+    leaving: { color: 'warning',   text: 'Sắp nghỉ' },
+    left:    { color: 'error',     text: 'Đã nghỉ' },
+    not_yet: { color: 'default',   text: 'Chưa vào' },
   };
 
+  const items = data?.items || [];
+  const activeCount = items.filter((e) => { const st = getMonthStatus(e); return st === 'active' || st === 'new'; }).length;
+  const leftCount = items.filter((e) => getMonthStatus(e) === 'left').length;
+  const newCount = items.filter((e) => getMonthStatus(e) === 'new').length;
+
   const columns = [
-    { title: 'Ma', dataIndex: 'employee_code', width: 50, sorter: (a, b) => Number(a.employee_code) - Number(b.employee_code) },
-    { title: 'Ho ten', dataIndex: 'full_name', width: 180, render: (t, r) => (
-      <a onClick={() => navigate(`/employees/${r.id}`)} style={{ fontWeight: 500, color: '#4361ee' }}>
-        {t}
-      </a>
-    ) },
-    { title: 'Bo phan', dataIndex: 'department', width: 120, render: (t) => t || '-' },
-    { title: 'Ca', dataIndex: 'default_shift_code', width: 50, render: (t) => t ? <Tag color="blue">{t}</Tag> : '-', align: 'center' },
-    { 
-      title: 'Luong co ban', 
-      key: 'salary', 
-      width: 115, 
-      align: 'right', 
+    {
+      title: 'Mã NV',
+      dataIndex: 'employee_code',
+      width: 72,
+      sorter: (a, b) => Number(a.employee_code) - Number(b.employee_code),
+      render: (t) => <span className="emp-code">{t}</span>,
+    },
+    {
+      title: 'Họ tên',
+      dataIndex: 'full_name',
+      width: 200,
+      render: (t, r) => (
+        <div className="emp-name-cell" onClick={() => navigate(`/employees/${r.id}`)}>
+          <div className="emp-avatar">{(t || '?')[0].toUpperCase()}</div>
+          <div>
+            <div className="emp-name">{t}</div>
+            {r.position && <div className="emp-pos">{r.position}</div>}
+          </div>
+        </div>
+      ),
+    },
+    {
+      title: 'Bộ phận',
+      dataIndex: 'department',
+      width: 130,
+      render: (t) => t ? <span className="emp-dept">{t}</span> : <span className="emp-dash">—</span>,
+    },
+    {
+      title: 'Ca',
+      dataIndex: 'default_shift_code',
+      width: 60,
+      align: 'center',
+      render: (t) => t ? <Tag color="blue" style={{ margin: 0, borderRadius: 4, fontSize: 11 }}>{t}</Tag> : <span className="emp-dash">—</span>,
+    },
+    {
+      title: 'Lương cơ bản',
+      key: 'salary',
+      width: 130,
+      align: 'right',
       render: (_, r) => {
         const val = r.month_salary !== null ? r.month_salary : r.base_salary;
         return val ? (
-          <span style={{ fontWeight: r.month_salary !== null ? 600 : 400, color: r.month_salary !== null ? '#059669' : 'inherit' }}>
+          <span style={{ fontWeight: r.month_salary !== null ? 600 : 400, color: r.month_salary !== null ? '#059669' : '#374151', fontSize: 12 }}>
             {Number(val).toLocaleString('vi-VN')}
           </span>
-        ) : '-';
-      }
-    },
-    { title: 'Ngay vao', dataIndex: 'join_date', width: 95, render: (d) => d ? dayjs(d).format('DD/MM/YYYY') : '-' },
-    { title: 'Ngay nghi', dataIndex: 'leave_date', width: 95, render: (d) => d ? dayjs(d).format('DD/MM/YYYY') : '-' },
-    {
-      title: `T${dayjs(monthKey).format('M/YY')}`,
-      key: 'month_status',
-      width: 80,
-      align: 'center',
-      render: (_, r) => {
-        const st = getMonthStatus(r);
-        if (!st) return '-';
-        const { color, text } = statusMap[st];
-        return <Tag color={color} style={{ fontSize: 11 }}>{text}</Tag>;
+        ) : <span className="emp-dash">—</span>;
       },
     },
     {
-      title: '', width: 70, fixed: 'right', render: (_, r) => (
-        <Space size={0}>
-          <Button type="text" size="small" icon={<EditOutlined />} onClick={() => openEdit(r)} />
-          <Popconfirm title="Xoa nhan vien nay?" onConfirm={() => del.mutate(r.id)} okText="Xoa" cancelText="Huy">
-            <Button type="text" size="small" icon={<DeleteOutlined />} danger />
+      title: 'Ngày vào',
+      dataIndex: 'join_date',
+      width: 100,
+      render: (d) => d ? <span style={{ fontSize: 12, color: '#6b7280' }}>{dayjs(d).format('DD/MM/YYYY')}</span> : <span className="emp-dash">—</span>,
+    },
+    {
+      title: 'Ngày nghỉ',
+      dataIndex: 'leave_date',
+      width: 100,
+      render: (d) => d ? <span style={{ fontSize: 12, color: '#ef4444' }}>{dayjs(d).format('DD/MM/YYYY')}</span> : <span className="emp-dash">—</span>,
+    },
+    {
+      title: `T.${dayjs(monthKey).format('M/YY')}`,
+      key: 'month_status',
+      width: 90,
+      align: 'center',
+      render: (_, r) => {
+        const st = getMonthStatus(r);
+        if (!st) return '—';
+        const { color, text } = statusMap[st];
+        return <Tag color={color} style={{ margin: 0, fontSize: 11, borderRadius: 4 }}>{text}</Tag>;
+      },
+    },
+    {
+      title: '',
+      width: 72,
+      fixed: 'right',
+      render: (_, r) => (
+        <Space size={2}>
+          <Button type="text" size="small" icon={<EditOutlined />} onClick={() => openEdit(r)} className="emp-act-btn" />
+          <Popconfirm title="Xóa nhân viên này?" onConfirm={() => del.mutate(r.id)} okText="Xóa" cancelText="Hủy" okButtonProps={{ danger: true }}>
+            <Button type="text" size="small" icon={<DeleteOutlined />} danger className="emp-act-btn" />
           </Popconfirm>
         </Space>
       ),
     },
   ];
 
-  // Count active vs inactive this month
-  const items = data?.items || [];
-  const activeCount = items.filter((e) => {
-    const st = getMonthStatus(e);
-    return st === 'active' || st === 'new';
-  }).length;
-
   return (
-    <div>
-      <div className="page-head">
-        <div>
-          <h1><TeamOutlined style={{ marginRight: 6 }} />Nhan vien</h1>
-          <div className="sub">
-            Thang {dayjs(monthKey).format('M/YYYY')}: <b>{activeCount}</b> dang lam / <b>{data?.total || 0}</b> tong
+    <div className="emp-page">
+      {/* Title bar */}
+      <div className="emp-titlebar">
+        <div className="emp-titlebar-left">
+          <h2 className="emp-title">Nhân viên</h2>
+          <div className="emp-stats">
+            <div className="emp-stat-chip">
+              <span className="emp-stat-dot emp-stat-dot--blue" />
+              Tổng <strong>{data?.total || 0}</strong>
+            </div>
+            <div className="emp-stat-chip">
+              <span className="emp-stat-dot emp-stat-dot--green" />
+              Đang làm <strong>{activeCount}</strong>
+            </div>
+            <div className="emp-stat-chip">
+              <span className="emp-stat-dot emp-stat-dot--red" />
+              Đã nghỉ <strong>{leftCount}</strong>
+            </div>
+            {newCount > 0 && (
+              <div className="emp-stat-chip">
+                <span className="emp-stat-dot emp-stat-dot--orange" />
+                Mới vào <strong>{newCount}</strong>
+              </div>
+            )}
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 10 }}>
-          <DatePicker
-            picker="month"
-            value={dayjs(monthKey)}
-            onChange={(d) => { if (d) { setMonthKey(d.format('YYYY-MM')); setPage(1); } }}
-            format="[Thang] M / YYYY"
-            style={{ width: 155 }}
-            suffixIcon={<CalendarOutlined />}
-          />
-          <Input placeholder="Tim ma NV, ho ten..." prefix={<SearchOutlined />} style={{ width: 200 }}
-            value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} allowClear />
-          <Button type="primary" icon={<PlusOutlined />}
-            onClick={() => { setEditing(null); form.resetFields(); setModal(true); }}>
-            Them NV
-          </Button>
-        </div>
+        <Button
+          type="primary" icon={<PlusOutlined />}
+          className="emp-add-btn"
+          onClick={() => { setEditing(null); form.resetFields(); setModal(true); }}
+        >
+          Thêm nhân viên
+        </Button>
       </div>
 
-      <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-        <Table columns={columns} dataSource={items} rowKey="id" loading={isLoading}
-          size="small" scroll={{ x: 900 }}
-          pagination={{ current: page, pageSize: 50, total: data?.total || 0, onChange: setPage, showTotal: (t) => `Tong ${t}`, size: 'small' }} />
+      {/* Filter bar */}
+      <div className="emp-filterbar">
+        <DatePicker
+          picker="month"
+          value={dayjs(monthKey)}
+          onChange={(d) => { if (d) { setMonthKey(d.format('YYYY-MM')); setPage(1); } }}
+          format="[Tháng] M/YYYY"
+          style={{ width: 140 }}
+          suffixIcon={<CalendarOutlined style={{ color: '#9ca3af' }} />}
+          size="middle"
+        />
+        <Input
+          placeholder="Tìm mã NV, họ tên..."
+          prefix={<SearchOutlined style={{ color: '#9ca3af' }} />}
+          style={{ width: 220 }}
+          value={search}
+          onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+          allowClear
+          size="middle"
+        />
       </div>
 
-      <Modal title={editing ? 'Sua nhan vien' : 'Them nhan vien moi'} open={modal} onCancel={() => setModal(false)}
-        onOk={() => form.submit()} confirmLoading={save.isPending} width={640} okText="Luu" cancelText="Huy">
-        <Form form={form} layout="vertical" onFinish={(v) => save.mutate(v)} style={{ marginTop: 16 }}
-          initialValues={{ is_active: true, base_salary: 0 }}>
+      {/* Table card */}
+      <div className="emp-table-card">
+        <Table
+          columns={columns}
+          dataSource={items}
+          rowKey="id"
+          loading={isLoading}
+          size="middle"
+          scroll={{ x: 900 }}
+          className="emp-table"
+          pagination={{
+            current: page,
+            pageSize: 50,
+            total: data?.total || 0,
+            onChange: setPage,
+            showTotal: (t) => `Tổng ${t} nhân viên`,
+            size: 'small',
+            showSizeChanger: false,
+          }}
+        />
+      </div>
+
+      {/* Modal */}
+      <Modal
+        title={
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <UserOutlined style={{ color: '#276EF1' }} />
+            {editing ? 'Chỉnh sửa nhân viên' : 'Thêm nhân viên mới'}
+          </div>
+        }
+        open={modal}
+        onCancel={() => setModal(false)}
+        onOk={() => form.submit()}
+        confirmLoading={save.isPending}
+        width={640}
+        okText="Lưu"
+        cancelText="Hủy"
+        okButtonProps={{ style: { background: '#276EF1', borderColor: '#276EF1' } }}
+      >
+        <Form form={form} layout="vertical" onFinish={(v) => save.mutate(v)}
+          style={{ marginTop: 16 }} initialValues={{ is_active: true, base_salary: 0 }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 16px' }}>
-            <Form.Item name="employee_code" label="Ma NV" rules={[{ required: true }]}>
+            <Form.Item name="employee_code" label="Mã NV" rules={[{ required: true }]}>
               <Input disabled={!!editing} />
             </Form.Item>
-            <Form.Item name="full_name" label="Ho ten" rules={[{ required: true }]}>
+            <Form.Item name="full_name" label="Họ tên" rules={[{ required: true }]}>
               <Input />
             </Form.Item>
-            <Form.Item name="department" label="Bo phan">
-              <Select allowClear showSearch placeholder="Chon bo phan"
+            <Form.Item name="department" label="Bộ phận">
+              <Select allowClear showSearch placeholder="Chọn bộ phận"
                 options={departments.map((d) => ({ value: d, label: d }))} />
             </Form.Item>
-            <Form.Item name="position" label="Chuc vu"><Input /></Form.Item>
-            <Form.Item name="default_shift_code" label="Ca mac dinh">
-              <Select allowClear options={shifts.map((s) => ({ value: s.code, label: `${s.code} - ${s.name}` }))} />
+            <Form.Item name="position" label="Chức vụ"><Input /></Form.Item>
+            <Form.Item name="default_shift_code" label="Ca mặc định">
+              <Select allowClear options={shifts.map((s) => ({ value: s.code, label: `${s.code} — ${s.name}` }))} />
             </Form.Item>
-            <Form.Item name="base_salary" label="Luong co ban">
+            <Form.Item name="base_salary" label="Lương cơ bản">
               <InputNumber min={0} step={100000} style={{ width: '100%' }}
                 formatter={(v) => `${v}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')} />
             </Form.Item>
-            <Form.Item name="join_date" label="Ngay vao"><DatePicker style={{ width: '100%' }} format="DD/MM/YYYY" /></Form.Item>
-            <Form.Item name="leave_date" label="Ngay nghi"><DatePicker style={{ width: '100%' }} format="DD/MM/YYYY" /></Form.Item>
-            <Form.Item name="gender" label="Gioi tinh">
-              <Select options={[{ value: 'Nam' }, { value: 'Nu' }]} allowClear />
+            <Form.Item name="join_date" label="Ngày vào"><DatePicker style={{ width: '100%' }} format="DD/MM/YYYY" /></Form.Item>
+            <Form.Item name="leave_date" label="Ngày nghỉ"><DatePicker style={{ width: '100%' }} format="DD/MM/YYYY" /></Form.Item>
+            <Form.Item name="gender" label="Giới tính">
+              <Select options={[{ value: 'Nam' }, { value: 'Nữ' }]} allowClear />
             </Form.Item>
-            <Form.Item name="is_active" label="Dang lam" valuePropName="checked"><Switch size="small" /></Form.Item>
+            <Form.Item name="is_active" label="Đang làm" valuePropName="checked"><Switch size="small" /></Form.Item>
           </div>
-          <Form.Item name="notes" label="Ghi chu"><Input.TextArea rows={2} /></Form.Item>
+          <Form.Item name="notes" label="Ghi chú"><Input.TextArea rows={2} /></Form.Item>
         </Form>
       </Modal>
     </div>

@@ -4,12 +4,12 @@
 
 ## Tech Stack
 
-| Layer | Công nghệ |
-|-------|-----------|
-| **Frontend** | React 19 + Vite + Ant Design 5 |
-| **Backend** | Python 3.12 + FastAPI + SQLAlchemy 2.0 |
-| **Database** | PostgreSQL 16 (Docker) |
-| **Auth** | JWT (python-jose + bcrypt) |
+| Layer        | Công nghệ                              |
+| ------------ | -------------------------------------- |
+| **Frontend** | React 19 + Vite + Ant Design 5         |
+| **Backend**  | Python 3.12 + FastAPI + SQLAlchemy 2.0 |
+| **Database** | PostgreSQL 16 (Docker)                 |
+| **Auth**     | JWT (python-jose + bcrypt)             |
 
 ---
 
@@ -31,6 +31,7 @@ docker compose up -d
 ```
 
 Kiểm tra database đã chạy:
+
 ```bash
 docker ps
 # Phải thấy container "hieploi_db" đang chạy
@@ -76,6 +77,7 @@ python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 **Health check:** http://localhost:8000/api/health
 
 > Khi khởi động lần đầu, hệ thống tự động:
+>
 > - Tạo tất cả bảng trong database
 > - Seed dữ liệu mặc định: 2 users, 11 mã ca, 37 nhân viên
 
@@ -100,10 +102,10 @@ npm run dev
 
 ## Tài Khoản Đăng Nhập Mặc Định
 
-| Username | Password | Vai trò |
-|----------|----------|---------|
-| `admin` | `admin123` | Admin (toàn quyền) |
-| `ketoan` | `ketoan123` | Kế toán |
+| Username | Password    | Vai trò            |
+| -------- | ----------- | ------------------ |
+| `admin`  | `admin123`  | Admin (toàn quyền) |
+| `ketoan` | `ketoan123` | Kế toán            |
 
 ---
 
@@ -146,22 +148,22 @@ D:\CODE\HIEPLOI\
 
 ## API Endpoints
 
-| Method | Endpoint | Mô tả | Auth |
-|--------|----------|-------|------|
-| `POST` | `/api/auth/login` | Đăng nhập | No |
-| `POST` | `/api/auth/refresh` | Refresh token | No |
-| `GET` | `/api/auth/me` | Thông tin user hiện tại | Yes |
-| `POST` | `/api/auth/users` | Tạo user mới | Admin |
-| `GET` | `/api/shifts` | Danh sách mã ca | Yes |
-| `POST` | `/api/shifts` | Tạo mã ca | Admin/KT |
-| `PUT` | `/api/shifts/{id}` | Sửa mã ca | Admin/KT |
-| `DELETE` | `/api/shifts/{id}` | Xóa mã ca | Admin |
-| `GET` | `/api/employees` | Danh sách NV (phân trang) | Yes |
-| `POST` | `/api/employees` | Thêm NV | Admin/KT |
-| `PUT` | `/api/employees/{id}` | Sửa NV | Admin/KT |
-| `DELETE` | `/api/employees/{id}` | Xóa NV | Admin |
-| `GET` | `/api/employees/departments` | DS bộ phận | Yes |
-| `GET` | `/api/dashboard/stats` | Thống kê dashboard | Yes |
+| Method   | Endpoint                     | Mô tả                     | Auth     |
+| -------- | ---------------------------- | ------------------------- | -------- |
+| `POST`   | `/api/auth/login`            | Đăng nhập                 | No       |
+| `POST`   | `/api/auth/refresh`          | Refresh token             | No       |
+| `GET`    | `/api/auth/me`               | Thông tin user hiện tại   | Yes      |
+| `POST`   | `/api/auth/users`            | Tạo user mới              | Admin    |
+| `GET`    | `/api/shifts`                | Danh sách mã ca           | Yes      |
+| `POST`   | `/api/shifts`                | Tạo mã ca                 | Admin/KT |
+| `PUT`    | `/api/shifts/{id}`           | Sửa mã ca                 | Admin/KT |
+| `DELETE` | `/api/shifts/{id}`           | Xóa mã ca                 | Admin    |
+| `GET`    | `/api/employees`             | Danh sách NV (phân trang) | Yes      |
+| `POST`   | `/api/employees`             | Thêm NV                   | Admin/KT |
+| `PUT`    | `/api/employees/{id}`        | Sửa NV                    | Admin/KT |
+| `DELETE` | `/api/employees/{id}`        | Xóa NV                    | Admin    |
+| `GET`    | `/api/employees/departments` | DS bộ phận                | Yes      |
+| `GET`    | `/api/dashboard/stats`       | Thống kê dashboard        | Yes      |
 
 ---
 
@@ -186,10 +188,13 @@ docker logs hieploi_db
 ## Xử Lý Lỗi Thường Gặp
 
 ### IDE báo "Cannot find module fastapi"
+
 → Chọn đúng Python interpreter: `Ctrl+Shift+P` → "Python: Select Interpreter" → chọn `D:\CODE\HIEPLOI\backend\venv\Scripts\python.exe`
 
 ### Backend lỗi UnicodeEncodeError trên Windows
+
 → Đây chỉ là lỗi logging hiển thị, không ảnh hưởng chức năng. Có thể set `echo=False` trong `database.py`.
 
 ### Port 5432 đã bị chiếm
+
 → Dừng PostgreSQL local nếu có, hoặc đổi port trong `docker-compose.yml`.

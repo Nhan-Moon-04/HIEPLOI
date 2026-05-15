@@ -413,8 +413,32 @@ def build_nu_shift_day_results(
             week_start = work_date - timedelta(days=(work_date.weekday() + 1) % 7)
             week_key = week_start
             week_to_days[week_key].append(work_date)
-            if detected_mode:
-                week_to_modes[week_key].append(detected_mode)
+
+        # XNU Ca3 checkouts (before 7h) on day N+1 must not be mistaken for Ca1 check-ins.
+        xnu3_dates = {d for d, data in day_mode_candidates.items() if data["detected_mode"] == XNU_MODE_3}
+        for work_date in sorted_dates:
+            if work_date - timedelta(days=1) not in xnu3_dates:
+                continue
+            data = day_mode_candidates[work_date]
+            filtered = [e for e in data["today_events"] if e.hour >= 7]
+            if len(filtered) == len(data["today_events"]):
+                continue
+            is_sun = (work_date.weekday() == 6)
+            sc = str(nu_shift_code_map.get((employee_id, work_date), NU_SHIFT_CODE)).upper()
+            new_detected, new_midday = _detect_daily_mode(filtered, data["next_day_events"], is_sunday=is_sun, shift_code=sc)
+            day_mode_candidates[work_date] = {
+                "detected_mode": new_detected,
+                "fallback_mode": _fallback_mode(filtered, is_sunday=is_sun),
+                "has_midday": new_midday,
+                "today_events": filtered,
+                "next_day_events": data["next_day_events"],
+            }
+
+        # Build week_to_modes from corrected candidates
+        for work_date in sorted_dates:
+            week_start = work_date - timedelta(days=(work_date.weekday() + 1) % 7)
+            if day_mode_candidates[work_date]["detected_mode"]:
+                week_to_modes[week_start].append(day_mode_candidates[work_date]["detected_mode"])
 
         week_mode_map = {}
         previous_week_mode = None
