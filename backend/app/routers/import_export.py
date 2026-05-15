@@ -657,16 +657,17 @@ async def export_meal_allowance(
         ws.cell(current_row, 17, None).font = normal_font
 
         # Borders for all cells in row
+        numeric_cols = {4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
+        right_align_cols = {5, 6, 8, 9, 11, 12, 13, 14, 15, 16}
         for c in range(1, 18):
-            ws.cell(current_row, c).border = border
-            if c in [5, 6, 8, 9, 11, 12, 13, 14, 15, 16]:
-                if c in [8, 9]:
-                    ws.cell(current_row, c).number_format = dash_number_format
-                else:
-                    ws.cell(current_row, c).number_format = "#,##0"
-                ws.cell(current_row, c).alignment = right
+            cell = ws.cell(current_row, c)
+            cell.border = border
+            if c in numeric_cols:
+                cell.number_format = dash_number_format
+            if c in right_align_cols:
+                cell.alignment = right
             else:
-                ws.cell(current_row, c).alignment = center
+                cell.alignment = center
 
         current_row += 1
 

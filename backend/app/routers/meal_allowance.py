@@ -214,7 +214,7 @@ async def get_meal_allowance(
                 work_days += 1
                 meal_rates[meal] += 1
                 
-                if nu_res.mode == "night":
+                if nu_res.night_allowance and nu_res.night_allowance > 0:
                     night_shifts += 1
                     total_emp_meal += nu_res.night_allowance
                 
