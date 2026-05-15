@@ -11,6 +11,7 @@ from app.models.employee import Employee
 from app.models.shift import ShiftTemplate
 from app.models.schedule import WorkSchedule
 from app.models.holiday import CompanyHoliday
+from app.models.x_overtime import XOvertimeConfig
 from app.models.user import AppUser
 from app.middleware.auth import get_current_user
 from app.services.nu_shift import is_nu_dynamic_shift_code, build_nu_shift_day_results, calculate_nu_shift_details
@@ -178,6 +179,19 @@ async def get_meal_allowance(
         night_allowance_rate=night_allowance
     )
 
+    # Load X overtime configs cho date range
+    xot_q = select(XOvertimeConfig).where(
+        and_(
+            XOvertimeConfig.work_date >= start_date,
+            XOvertimeConfig.work_date <= end_date,
+            XOvertimeConfig.employee_id.in_(emp_ids),
+        )
+    )
+    xot_result = await db.execute(xot_q)
+    xot_configs = xot_result.scalars().all()
+    # Map: (employee_id, work_date) -> XOvertimeConfig
+    xot_map = {(c.employee_id, c.work_date): c for c in xot_configs}
+
     rows = []
     total_meal = 0.0
     total_work_days = 0
@@ -232,19 +246,29 @@ async def get_meal_allowance(
                 emp_meal_count += 1 if meal > 0 else 0
                 if meal > 35000: emp_meal_count += 1
             else:
-                meal = to_float(shift.meal_allowance)
-                if meal <= 0:
+                meal_rate_val = to_float(shift.meal_allowance)
+                day_meal_count = int(shift.meal_count or 1)  # số bữa mặc định của ca
+                if meal_rate_val <= 0:
                     continue
 
-                total_emp_meal += meal
+                day_meal_total = meal_rate_val * day_meal_count  # tiền ăn = đơn giá × số bữa
+                total_emp_meal += day_meal_total
                 work_days += 1
-                meal_rates[meal] += 1
-                emp_meal_count += 1
+                meal_rates[meal_rate_val] += 1
+                emp_meal_count += day_meal_count
 
                 if shift.is_night_shift:
                     night_shifts += 1
                     if night_allowance > 0:
                         total_emp_meal += night_allowance
+
+                # Cộng thêm tiền ăn OT ca X nếu có config
+                if shift.code == 'X':
+                    xot = xot_map.get((emp.id, work_date))
+                    if xot and xot.meal_count and xot.meal_count > 0:
+                        ot_meal = meal_rate_val * int(xot.meal_count)
+                        total_emp_meal += ot_meal
+                        emp_meal_count += int(xot.meal_count)
 
         day_shifts = max(work_days - night_shifts, 0)
 

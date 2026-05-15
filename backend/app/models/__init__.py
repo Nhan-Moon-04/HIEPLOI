@@ -7,6 +7,7 @@ from app.models.salary import MonthlySalary, MonthlyWorkdayConfig, PayrollPaymen
 from app.models.schedule import WorkSchedule
 from app.models.audit import AuditLog
 from app.models.holiday import CompanyHoliday
+from app.models.x_overtime import XOvertimeConfig
 
 __all__ = [
     "AppUser",
@@ -22,4 +23,5 @@ __all__ = [
     "WorkSchedule",
     "AuditLog",
     "CompanyHoliday",
+    "XOvertimeConfig",
 ]

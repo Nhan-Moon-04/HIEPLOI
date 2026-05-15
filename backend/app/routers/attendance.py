@@ -11,6 +11,7 @@ from app.models.employee import Employee
 from app.models.shift import ShiftTemplate
 from app.models.schedule import WorkSchedule
 from app.models.holiday import CompanyHoliday
+from app.models.x_overtime import XOvertimeConfig
 from app.models.user import AppUser, UserRole
 from app.middleware.auth import get_current_user, require_roles
 from app.services.nu_shift import (
@@ -364,6 +365,17 @@ async def get_attendance(
         night_allowance_rate=night_allowance_rate
     )
 
+    # Load X overtime configs cho tháng
+    xot_q = select(XOvertimeConfig).where(
+        and_(
+            XOvertimeConfig.work_date >= first_day,
+            XOvertimeConfig.work_date <= last_day,
+            XOvertimeConfig.employee_id.in_(emp_id_list),
+        )
+    )
+    xot_result = await db.execute(xot_q)
+    xot_map = {(c.employee_id, c.work_date): c for c in xot_result.scalars().all()}
+
     # Build rows
     rows = []
     for emp in employees:
@@ -448,6 +460,16 @@ async def get_attendance(
             cell_notes = ev["notes"]
             if override_note:
                 cell_notes = f"{cell_notes} | {override_note}" if cell_notes else override_note
+
+            # Cộng thêm tiền ăn OT ca X nếu có config cho ngày này
+            if (cell_shift_code == 'X' or (shift and shift.code == 'X')) and ev["status"] in ("full", "early_leave", "short", "forgot_scan"):
+                xot = xot_map.get((emp.id, dt))
+                if xot and xot.meal_count and xot.meal_count > 0:
+                    x_meal_rate = float(shift.meal_allowance) if shift and shift.meal_allowance else 35000.0
+                    ot_meal = x_meal_rate * int(xot.meal_count)
+                    ev["meal_allowance"] = (ev["meal_allowance"] or 0) + ot_meal
+                    ev["meal_count"] = (ev["meal_count"] or 0) + int(xot.meal_count)
+                    ev["ot_hours"] = float(xot.ot_hours) if xot.ot_hours else ev["ot_hours"]
 
             cell = AttendanceCell(
                 work_date=str(dt),

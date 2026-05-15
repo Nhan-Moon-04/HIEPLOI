@@ -10,9 +10,11 @@ from app.database import get_db
 from app.models.schedule import WorkSchedule
 from app.models.employee import Employee
 from app.models.shift import ShiftTemplate
+from app.models.x_overtime import XOvertimeConfig
 from app.models.user import AppUser, UserRole
 from app.middleware.auth import get_current_user, require_roles
 from pydantic import BaseModel
+from decimal import Decimal
 
 router = APIRouter(prefix="/schedules", tags=["Schedules"])
 
@@ -254,3 +256,101 @@ async def import_schedule(
         "skipped": skipped,
         "unknown_shifts": list(unknown_shifts),
     }
+
+
+# ─── X Overtime Config ────────────────────────────────────────────────────────
+
+class XOvertimeConfigRequest(BaseModel):
+    employee_id: int
+    work_date: date
+    ot_end_time: Optional[str] = None
+    ot_hours: Optional[Decimal] = None
+    meal_count: Optional[int] = None
+
+
+@router.get("/x-overtime")
+async def get_x_overtime_config(
+    month_key: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: AppUser = Depends(get_current_user),
+):
+    year, month = map(int, month_key.split("-"))
+    start_date = date(year, month, 1)
+    end_date = date(year, month, calendar.monthrange(year, month)[1])
+    
+    result = await db.execute(
+        select(XOvertimeConfig).where(
+            XOvertimeConfig.work_date >= start_date,
+            XOvertimeConfig.work_date <= end_date,
+        )
+    )
+    cfgs = result.scalars().all()
+    return [
+        {
+            "employee_id": c.employee_id,
+            "work_date": c.work_date,
+            "ot_end_time": c.ot_end_time.strftime("%H:%M") if c.ot_end_time else None,
+            "ot_hours": c.ot_hours,
+            "meal_count": c.meal_count,
+        } for c in cfgs
+    ]
+
+
+@router.put("/x-overtime")
+async def upsert_x_overtime_config(
+    request: XOvertimeConfigRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: AppUser = Depends(require_roles(UserRole.ADMIN, UserRole.ACCOUNTANT)),
+):
+    from datetime import time as dt_time
+
+    result = await db.execute(
+        select(XOvertimeConfig).where(
+            XOvertimeConfig.employee_id == request.employee_id,
+            XOvertimeConfig.work_date == request.work_date,
+        )
+    )
+    cfg = result.scalar_one_or_none()
+
+    parsed_end_time = None
+    if request.ot_end_time:
+        parts = request.ot_end_time.split(":")
+        parsed_end_time = dt_time(int(parts[0]), int(parts[1]))
+
+    if cfg:
+        cfg.ot_end_time = parsed_end_time
+        cfg.ot_hours = request.ot_hours
+        cfg.meal_count = request.meal_count or 0
+    else:
+        cfg = XOvertimeConfig(
+            employee_id=request.employee_id,
+            work_date=request.work_date,
+            ot_end_time=parsed_end_time,
+            ot_hours=request.ot_hours,
+            meal_count=request.meal_count or 0,
+        )
+        db.add(cfg)
+
+    await db.commit()
+    return {"message": "Da luu config tang ca X", "employee_id": request.employee_id, "work_date": request.work_date}
+
+
+@router.delete("/x-overtime")
+async def delete_x_overtime_config(
+    employee_id: int = Query(...),
+    work_date: date = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: AppUser = Depends(require_roles(UserRole.ADMIN, UserRole.ACCOUNTANT)),
+):
+    """Xóa config tăng ca X của nhân viên theo ngày"""
+    result = await db.execute(
+        select(XOvertimeConfig).where(
+            XOvertimeConfig.employee_id == employee_id,
+            XOvertimeConfig.work_date == work_date,
+        )
+    )
+    cfg = result.scalar_one_or_none()
+    if cfg:
+        await db.delete(cfg)
+        await db.commit()
+    return {"message": "Da xoa"}
