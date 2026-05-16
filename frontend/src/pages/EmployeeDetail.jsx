@@ -121,16 +121,25 @@ export default function EmployeeDetail() {
       key: 'actions',
       width: 170,
       render: (_, r) => {
-        const canAdjust = r.status === 'absent' || r.status === 'forgot_scan';
-        if (!canAdjust) return '-';
+        const hasMissingScan = (!!r.check_in && !r.check_out) || (!r.check_in && !!r.check_out);
+        const sameScan = r.check_in && r.check_out && dayjs(r.check_in).isSame(dayjs(r.check_out));
+        const isForgotScan = r.status === 'forgot_scan' || hasMissingScan || sameScan;
+        const isAbsent = r.status === 'absent';
+
+        if (!isAbsent && !isForgotScan) return '-';
+
         return (
           <Space size={4}>
-            <Button size="small" onClick={() => { form.resetFields(); setActionModal({ action: 'convert_paid_leave', record: r }); }}>
-              Co phep
-            </Button>
-            <Button size="small" onClick={() => { form.resetFields(); setActionModal({ action: 'mark_worked', record: r }); }}>
-              Di lam
-            </Button>
+            {isAbsent && (
+              <>
+                <Button size="small" onClick={() => { form.resetFields(); setActionModal({ action: 'convert_paid_leave', record: r }); }}>
+                  Co phep
+                </Button>
+                <Button size="small" onClick={() => { form.resetFields(); setActionModal({ action: 'mark_worked', record: r }); }}>
+                  Di lam
+                </Button>
+              </>
+            )}
             <Button size="small" type="primary" ghost onClick={() => { 
               form.resetFields(); 
               form.setFieldsValue({ shift_code: r.shift_code });

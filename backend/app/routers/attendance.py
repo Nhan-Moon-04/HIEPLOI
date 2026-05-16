@@ -188,7 +188,8 @@ def evaluate_attendance(shift, check_in_dt, check_out_dt, work_date, is_sunday, 
             result["deviation"] = round(actual - standard, 2)
             result["status"] = "full" if abs(result["deviation"]) <= 0.25 else "short"
     else:
-        result["status"] = "full" if actual >= standard * 0.9 else "short"
+        if result["status"] != "forgot_scan":
+            result["status"] = "full" if actual >= standard * 0.9 else "short"
 
     # Special logic for NU shifts
     if shift and is_nu_dynamic_shift_code(shift.code):
@@ -414,7 +415,12 @@ async def get_attendance(
             elif default_shift and is_nu_dynamic_shift_code(default_shift.code):
                 shift = default_shift
             else:
-                shift = None if is_sunday else default_shift
+                # Ngày CN: chỉ áp dụng ca mặc định cho tài xế (TX1/TX2) vì họ làm cả tuần
+                # Các ca khác ngày CN mặc định là nghỉ
+                if is_sunday:
+                    shift = default_shift if (default_shift and (default_shift.code or "").upper() in DRIVER_AUTO_OT_SHIFT_CODES) else None
+                else:
+                    shift = default_shift
 
             # Get attendance record
             att = att_map.get((emp.id, dt))
