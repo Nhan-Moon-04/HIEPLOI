@@ -7,7 +7,17 @@
       "Bash(node -e ' *)",
       "Bash(Get-ChildItem -Path \"d:\\\\CODE\\\\HIEPLOI\\\\backend\\\\app\\\\services\\\\\" -Filter \"*.py\" | Select-Object FullName)",
       "Bash(ls -la \"d:\\\\CODE\\\\HIEPLOI\\\\backend\\\\app\\\\services\\\\\" 2>/dev/null | grep -E '\\\\.py$')",
-      "Read(//d/CODE/HIEPLOI/backend/app/services\" 2>/dev/null | grep -E '/**)"
+      "Read(//d/CODE/HIEPLOI/backend/app/services\" 2>/dev/null | grep -E '/**)",
+      "Bash(cd /d \"d:\\\\CODE\\\\HIEPLOI\\\\backend\")",
+      "Bash(python -c ' *)",
+      "Bash(python -m uvicorn app.main:app --version)",
+      "Bash(venvScriptspython.exe -c ' *)",
+      "PowerShell(Get-Process -Name python -ErrorAction SilentlyContinue)",
+      "PowerShell($r = Invoke-RestMethod \"http://localhost:8000/attendance?month_key=2026-05&employee_id=164&start_date=2026-05-10&end_date=2026-05-10\" -Headers @{Authorization=\"Bearer $\\(Invoke-RestMethod 'http://localhost:8000/auth/token' -Method POST -Body 'username=admin&password=admin123' -ContentType 'application/x-www-form-urlencoded'\\).access_token\"}; $r.rows[0].days | Select-Object work_date, day, shift_code, check_in, check_out, meal_count, meal_allowance, status)",
+      "PowerShell(Get-Process -Name uvicorn -ErrorAction SilentlyContinue)",
+      "PowerShell(Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue)",
+      "PowerShell(Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue })",
+      "PowerShell(Get-Process -Id 28148)"
     ]
   }
 }

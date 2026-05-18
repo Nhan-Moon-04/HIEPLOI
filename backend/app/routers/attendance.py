@@ -53,7 +53,9 @@ class AttendanceCell(BaseModel):
     is_sunday: bool = False
     notes: Optional[str] = None
     meal_allowance: float = 0.0
+    meal_count: Optional[int] = None
     night_allowance: float = 0.0
+    ot_eligible: bool = False
 
 
 class AttendanceRow(BaseModel):
@@ -232,14 +234,27 @@ def evaluate_attendance(shift, check_in_dt, check_out_dt, work_date, is_sunday, 
         # Tiền ăn: Nếu có mặt (hoặc có ít nhất 1 đầu quẹt) thì tính meal_allowance * meal_count
         if result["status"] in ("full", "early_leave", "short", "forgot_scan") or ((is_sunday or is_holiday) and actual > 0):
             meal_val = float(shift.meal_allowance or 35000) if shift else 35000.0
-            meal_count = int(shift.meal_count or 1) if shift else 1
-            
-            # Special rule for drivers: if work past 6 PM, add 1 more meal (total 2)
-            if shift and (shift.code or "").upper() in DRIVER_AUTO_OT_SHIFT_CODES:
-                if check_out_dt and check_out_dt.hour >= 18:
-                    meal_count += 1
-            
-            result["meal_allowance"] = meal_val * (meal_count if meal_count > 0 else 1)
+            shift_code_upper = (shift.code or "").upper() if shift else ""
+            is_auto = shift_code_upper in DRIVER_AUTO_OT_SHIFT_CODES or is_nu_dynamic_shift_code(shift_code_upper)
+
+            if is_auto:
+                # Quy tắc thời gian cho ca tự động (TX1, TX2, NU, XNU):
+                #   Bữa sáng : check-in trước 9h
+                #   Bữa tối  : check-out >= 18h HOẶC check-in >= 18h HOẶC OT >= 3h
+                ci = original_check_in or check_in_dt
+                ot = result.get("ot_hours") or 0.0
+                has_morning = bool(ci and ci.hour < 9)
+                has_late = bool(
+                    (check_out_dt and check_out_dt.hour >= 18)
+                    or (ci and ci.hour >= 18)
+                    or (ot >= 3)
+                )
+                meal_count = (1 if has_morning else 0) + (1 if has_late else 0)
+            else:
+                # Ca không-tự-động: dùng meal_count cố định từ cấu hình ca
+                meal_count = int(shift.meal_count or 0) if shift else 0
+
+            result["meal_allowance"] = meal_val * meal_count if meal_count > 0 else 0.0
             result["meal_count"] = meal_count
 
     return result
@@ -476,8 +491,10 @@ async def get_attendance(
             if override_note:
                 cell_notes = f"{cell_notes} | {override_note}" if cell_notes else override_note
 
-            # Cộng thêm tiền ăn OT ca X/X40 nếu có config cho ngày này
-            if (cell_shift_code in X_OT_SHIFT_CODES or (shift and shift.code in X_OT_SHIFT_CODES)) and ev["status"] in ("full", "early_leave", "short", "forgot_scan"):
+            # Cộng thêm tiền ăn OT cho mọi ca không-tự-động nếu có config xot, hoặc đánh dấu ot_eligible
+            is_auto_shift = nu_res is not None or (cell_shift_code or "").upper() in DRIVER_AUTO_OT_SHIFT_CODES
+            ot_eligible_val = False
+            if not is_auto_shift and ev["status"] in ("full", "early_leave", "short", "forgot_scan"):
                 xot = xot_map.get((emp.id, dt))
                 if xot and xot.meal_count and xot.meal_count > 0:
                     x_meal_rate = float(shift.meal_allowance) if shift and shift.meal_allowance else 35000.0
@@ -485,6 +502,14 @@ async def get_attendance(
                     ev["meal_allowance"] = (ev["meal_allowance"] or 0) + ot_meal
                     ev["meal_count"] = (ev["meal_count"] or 0) + int(xot.meal_count)
                     ev["ot_hours"] = float(xot.ot_hours) if xot.ot_hours else ev["ot_hours"]
+                elif shift and shift.end_time and check_out_dt:
+                    shift_end_t = parse_time(shift.end_time)
+                    shift_end_dt_elig = datetime.combine(dt, shift_end_t)
+                    actual_ot_h = max(0.0, (check_out_dt - shift_end_dt_elig).total_seconds() / 3600.0)
+                    ot_eligible_val = bool(
+                        (check_out_dt.hour >= 18 and shift_end_t.hour < 18)
+                        or (actual_ot_h >= 3)
+                    )
 
             cell = AttendanceCell(
                 work_date=str(dt),
@@ -507,6 +532,7 @@ async def get_attendance(
                 meal_allowance=ev["meal_allowance"],
                 meal_count=ev["meal_count"],
                 night_allowance=ev["night_allowance"],
+                ot_eligible=ot_eligible_val,
             )
             days_cells.append(cell)
 

@@ -4,7 +4,8 @@ import dayjs from 'dayjs';
 import {
   UploadOutlined, DownloadOutlined, CloudUploadOutlined,
   DatabaseOutlined, ImportOutlined, ThunderboltOutlined,
-  ClockCircleOutlined, DeleteOutlined, EyeOutlined, ExclamationCircleOutlined,
+  ClockCircleOutlined, DeleteOutlined, EyeOutlined,
+  ExclamationCircleOutlined, CheckCircleOutlined,
 } from '@ant-design/icons';
 import { useMutation } from '@tanstack/react-query';
 import api from '../api/client';
@@ -15,8 +16,6 @@ export default function ImportExport() {
   const [importResult, setImportResult] = useState(null);
   const [restoreResult, setRestoreResult] = useState(null);
   const [importMonth, setImportMonth] = useState(dayjs().format('YYYY-MM'));
-
-  // X Overtime management
   const [otRange, setOtRange] = useState([dayjs().startOf('month'), dayjs()]);
   const [previewData, setPreviewData] = useState(null);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -32,11 +31,8 @@ export default function ImportExport() {
         timeout: 60000,
       });
     },
-    onSuccess: (res) => {
-      message.success(res.data.message);
-      setImportResult(res.data);
-    },
-    onError: (e) => message.error(e.response?.data?.detail || 'Loi import'),
+    onSuccess: (res) => { message.success(res.data.message); setImportResult(res.data); },
+    onError: (e) => message.error(e.response?.data?.detail || 'Lỗi import'),
   });
 
   const restoreMut = useMutation({
@@ -45,11 +41,8 @@ export default function ImportExport() {
       fd.append('file', file);
       return api.post('/import-export/restore', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
     },
-    onSuccess: (res) => {
-      message.success(res.data.message);
-      setRestoreResult(res.data);
-    },
-    onError: (e) => message.error(e.response?.data?.detail || 'Loi restore'),
+    onSuccess: (res) => { message.success(res.data.message); setRestoreResult(res.data); },
+    onError: (e) => message.error(e.response?.data?.detail || 'Lỗi restore'),
   });
 
   const handleBackup = async () => {
@@ -63,9 +56,9 @@ export default function ImportExport() {
       document.body.appendChild(link);
       link.click();
       link.remove();
-      message.success('Da tai backup!');
-    } catch (e) {
-      message.error('Loi khi backup');
+      message.success('Đã tải backup!');
+    } catch {
+      message.error('Lỗi khi backup');
     }
   };
 
@@ -74,13 +67,10 @@ export default function ImportExport() {
     setPreviewLoading(true);
     try {
       const res = await api.get('/schedules/x-overtime/range-preview', {
-        params: {
-          start_date: otRange[0].format('YYYY-MM-DD'),
-          end_date: otRange[1].format('YYYY-MM-DD'),
-        },
+        params: { start_date: otRange[0].format('YYYY-MM-DD'), end_date: otRange[1].format('YYYY-MM-DD') },
       });
       setPreviewData(res.data);
-    } catch (e) {
+    } catch {
       message.error('Lỗi khi tải dữ liệu tăng ca');
     } finally {
       setPreviewLoading(false);
@@ -97,13 +87,12 @@ export default function ImportExport() {
       icon: <ExclamationCircleOutlined style={{ color: '#ef4444' }} />,
       content: (
         <div style={{ marginTop: 8 }}>
-          <div style={{ color: '#6b7a99', fontSize: 13, marginBottom: 8 }}>
+          <div style={{ color: '#6b7280', fontSize: 13, marginBottom: 8 }}>
             Từ <b>{otRange[0]?.format('DD/MM/YYYY')}</b> đến <b>{otRange[1]?.format('DD/MM/YYYY')}</b>
           </div>
           <Alert
-            type="warning"
-            showIcon
-            message="Hành động này không thể hoàn tác. Chỉ xóa config tăng ca (giờ ra, số bữa OT), KHÔNG xóa dữ liệu chấm công."
+            type="warning" showIcon
+            message="Hành động này không thể hoàn tác. Chỉ xóa config tăng ca, KHÔNG xóa dữ liệu chấm công."
             style={{ fontSize: 12 }}
           />
         </div>
@@ -115,14 +104,11 @@ export default function ImportExport() {
         setDeleteLoading(true);
         try {
           const res = await api.delete('/schedules/x-overtime/range', {
-            params: {
-              start_date: otRange[0].format('YYYY-MM-DD'),
-              end_date: otRange[1].format('YYYY-MM-DD'),
-            },
+            params: { start_date: otRange[0].format('YYYY-MM-DD'), end_date: otRange[1].format('YYYY-MM-DD') },
           });
           message.success(res.data.message);
           setPreviewData(null);
-        } catch (e) {
+        } catch {
           message.error('Lỗi khi xóa');
         } finally {
           setDeleteLoading(false);
@@ -132,216 +118,229 @@ export default function ImportExport() {
   };
 
   const previewColumns = [
-    {
-      title: 'Ngày', dataIndex: 'work_date', key: 'date', width: 120,
-      render: (v) => dayjs(v).format('DD/MM/YYYY'),
-    },
+    { title: 'Ngày', dataIndex: 'work_date', key: 'date', width: 120, render: (v) => dayjs(v).format('DD/MM/YYYY') },
     { title: 'NV ID', dataIndex: 'employee_id', key: 'emp', width: 80 },
-    {
-      title: 'Giờ OT', dataIndex: 'ot_hours', key: 'ot', width: 100,
-      render: (v) => v > 0 ? <Tag color="orange">{v}h</Tag> : '-',
-    },
-    {
-      title: 'Số bữa OT', dataIndex: 'meal_count', key: 'meal', width: 100,
-      render: (v) => v > 0 ? <Tag color="green">{v} bữa</Tag> : '-',
-    },
+    { title: 'Giờ OT', dataIndex: 'ot_hours', key: 'ot', width: 100, render: (v) => v > 0 ? <Tag color="orange">{v}h</Tag> : '–' },
+    { title: 'Số bữa OT', dataIndex: 'meal_count', key: 'meal', width: 100, render: (v) => v > 0 ? <Tag color="green">{v} bữa</Tag> : '–' },
   ];
 
   return (
-    <div>
-      <div className="page-head">
-        <div>
-          <h1><ImportOutlined style={{ marginRight: 6 }} />Import / Export</h1>
-          <div className="sub">Nhap du lieu cham cong &amp; sao luu he thong</div>
+    <div className="att-page">
+      {/* Title bar */}
+      <div className="emp-titlebar">
+        <div className="emp-titlebar-left">
+          <h2 className="emp-title">Import / Export</h2>
+          <div className="emp-stats">
+            <div className="emp-stat-chip">Nhập dữ liệu chấm công &amp; sao lưu hệ thống</div>
+          </div>
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
-        {/* Import Attendance */}
-        <div className="card">
-          <div className="card-title">
-            <ClockCircleOutlined style={{ color: '#4361ee' }} />
-            Import Cham Cong
+      {/* Top 2-column grid */}
+      <div className="ie-grid-2">
+
+        {/* ── Import chấm công ── */}
+        <div className="ed-section">
+          <div className="ed-section-title">
+            <ClockCircleOutlined style={{ color: '#276EF1', marginRight: 7 }} />
+            Import Chấm Công
           </div>
-          <p style={{ color: '#6b7a99', fontSize: 12, marginBottom: 16 }}>
-            Upload file Excel tu may cham cong. He thong se tu dong:
-          </p>
-          <ul style={{ color: '#6b7a99', fontSize: 12, paddingLeft: 20, marginBottom: 16 }}>
-            <li>Loc trung lap (duplicate scans)</li>
-            <li>Nhom theo ngay cho moi nhan vien</li>
-            <li>Tinh gio vao (first scan) va gio ra (last scan)</li>
-            <li>Xu ly ca dem: scan truoc 6h sang = ca hom truoc</li>
-          </ul>
+          <div className="ie-section-body">
+            <p className="ie-desc">Upload file Excel từ máy chấm công. Hệ thống sẽ tự động:</p>
+            <ul className="ie-list">
+              <li>Lọc trùng lặp (duplicate scans)</li>
+              <li>Nhóm theo ngày cho mỗi nhân viên</li>
+              <li>Tính giờ vào (first scan) và giờ ra (last scan)</li>
+              <li>Xử lý ca đêm: scan trước 6h sáng = ca hôm trước</li>
+            </ul>
+
+            <Alert
+              type="info" showIcon
+              message="Format: Mã NV | Tên | Bộ phận | Thời gian scan (.xlsx hoặc .csv)"
+              style={{ marginBottom: 14, fontSize: 11 }}
+            />
+
+            <div className="ie-field">
+              <div className="ie-field-label">Chọn tháng chấm công:</div>
+              <DatePicker
+                picker="month"
+                value={dayjs(importMonth)}
+                onChange={(d) => d && setImportMonth(d.format('YYYY-MM'))}
+                format="MM/YYYY"
+                style={{ width: '100%' }}
+                size="middle"
+              />
+            </div>
+
+            <Upload
+              accept=".xlsx,.xls,.csv"
+              showUploadList={false}
+              beforeUpload={(file) => { importAtt.mutate(file); return false; }}
+            >
+              <Button
+                type="primary" icon={<UploadOutlined />}
+                loading={importAtt.isPending} size="large" block
+                style={{ background: '#276EF1', borderColor: '#276EF1', borderRadius: 8 }}
+              >
+                Chọn file chấm công (.xlsx, .csv)
+              </Button>
+            </Upload>
+
+            {importResult && (
+              <div className="ie-result ie-result--green">
+                <div className="ie-result-title">
+                  <CheckCircleOutlined /> Kết quả import
+                </div>
+                <div className="ie-result-rows">
+                  <div>File: <b>{importResult.filename}</b></div>
+                  <div>Tổng dòng: <b>{importResult.total_raw_rows}</b></div>
+                  <div>NV xử lý: <b>{importResult.employees_processed}</b></div>
+                  <div>Ngày mới: <Tag color="green">{importResult.days_created}</Tag></div>
+                  <div>Ngày cập nhật: <Tag color="blue">{importResult.days_updated}</Tag></div>
+                  {importResult.skipped_employees?.length > 0 && (
+                    <div style={{ color: '#d97706', marginTop: 4 }}>
+                      NV không nhận diện: {importResult.skipped_employees.join(', ')}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* ── Backup & Restore ── */}
+        <div className="ed-section">
+          <div className="ed-section-title">
+            <DatabaseOutlined style={{ color: '#7c3aed', marginRight: 7 }} />
+            Backup &amp; Restore
+          </div>
+          <div className="ie-section-body">
+            <p className="ie-desc">
+              Sao lưu toàn bộ dữ liệu (nhân viên, ca, lịch làm, chấm công, ngày lễ) thành file JSON.
+              Restore sẽ khôi phục dữ liệu từ file backup.
+            </p>
+
+            <div className="ie-action-stack">
+              <Button
+                icon={<DownloadOutlined />}
+                onClick={handleBackup}
+                size="large" block
+                style={{ background: '#7c3aed', color: '#fff', border: 'none', borderRadius: 8 }}
+              >
+                Tải Backup (.json)
+              </Button>
+
+              <Divider style={{ margin: '10px 0', fontSize: 11, color: '#9ca3af' }}>hoặc</Divider>
+
+              <Upload
+                accept=".json"
+                showUploadList={false}
+                beforeUpload={(file) => {
+                  Modal.confirm({
+                    title: 'Xác nhận Restore',
+                    content: 'Bạn có chắc muốn restore dữ liệu từ file backup? Dữ liệu trùng sẽ bị bỏ qua, dữ liệu mới sẽ được thêm vào.',
+                    okText: 'Restore',
+                    cancelText: 'Hủy',
+                    onOk: () => restoreMut.mutate(file),
+                  });
+                  return false;
+                }}
+              >
+                <Button icon={<CloudUploadOutlined />} loading={restoreMut.isPending} size="large" block style={{ borderRadius: 8 }}>
+                  Restore từ Backup (.json)
+                </Button>
+              </Upload>
+            </div>
+
+            {restoreResult && (
+              <div className="ie-result ie-result--purple">
+                <div className="ie-result-title">
+                  <CheckCircleOutlined /> Kết quả restore
+                </div>
+                <div className="ie-result-rows">
+                  <div>Backup từ: <b>{restoreResult.backup_date}</b></div>
+                  {restoreResult.restored && Object.entries(restoreResult.restored).map(([k, v]) => (
+                    <div key={k}>{k}: <Tag color="purple">{v} mới</Tag></div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ── X Overtime Management ── */}
+      <div className="ed-section">
+        <div className="ed-section-title">
+          <ThunderboltOutlined style={{ color: '#f59e0b', marginRight: 7 }} />
+          Quản lý Config Tăng Ca X
+          <span className="ie-section-sub">— Xem &amp; xóa có chọn lọc theo khoảng ngày</span>
+        </div>
+        <div className="ie-section-body">
           <Alert
             type="info" showIcon
-            message="Format: Ma NV | Ten | Bo phan | Thoi gian scan (.xlsx hoặc .csv)"
-            style={{ marginBottom: 16, fontSize: 11 }}
+            message="Chỉ xóa config tăng ca X (giờ ra, giờ OT, số bữa OT đã nhập). KHÔNG ảnh hưởng dữ liệu chấm công bình thường."
+            style={{ marginBottom: 16, fontSize: 12 }}
           />
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 12, marginBottom: 4, fontWeight: 500 }}>Chon thang cham cong:</div>
-            <DatePicker
-              picker="month"
-              value={dayjs(importMonth)}
-              onChange={(d) => d && setImportMonth(d.format('YYYY-MM'))}
-              format="MM / YYYY"
-              style={{ width: '100%' }}
-            />
-          </div>
-          <Upload
-            accept=".xlsx,.xls,.csv"
-            showUploadList={false}
-            beforeUpload={(file) => { importAtt.mutate(file); return false; }}
-          >
-            <Button type="primary" icon={<UploadOutlined />} loading={importAtt.isPending} size="large" block>
-              Chon file cham cong (.xlsx, .csv)
-            </Button>
-          </Upload>
 
-          {importResult && (
-            <div style={{ marginTop: 16, padding: 12, background: '#f0fdf4', borderRadius: 8, fontSize: 12 }}>
-              <div style={{ fontWeight: 600, color: '#22c55e', marginBottom: 8 }}>Ket qua import:</div>
-              <div>File: <b>{importResult.filename}</b></div>
-              <div>Tong dong: <b>{importResult.total_raw_rows}</b></div>
-              <div>NV xu ly: <b>{importResult.employees_processed}</b></div>
-              <div>Ngay moi: <Tag color="green">{importResult.days_created}</Tag></div>
-              <div>Ngay cap nhat: <Tag color="blue">{importResult.days_updated}</Tag></div>
-              {importResult.skipped_employees?.length > 0 && (
-                <div style={{ color: '#f59e0b', marginTop: 4 }}>
-                  NV khong nhan dien: {importResult.skipped_employees.join(', ')}
+          <div className="ie-ot-bar">
+            <div className="ie-ot-range">
+              <div className="ie-field-label">Khoảng ngày:</div>
+              <RangePicker
+                value={otRange}
+                onChange={(dates) => { if (dates) { setOtRange(dates); setPreviewData(null); } }}
+                format="DD/MM/YYYY"
+                style={{ width: '100%' }}
+                allowClear={false}
+                size="middle"
+              />
+            </div>
+            <Button
+              icon={<EyeOutlined />}
+              onClick={handlePreviewOT}
+              loading={previewLoading}
+              size="middle"
+              style={{ alignSelf: 'flex-end' }}
+            >
+              Xem trước
+            </Button>
+          </div>
+
+          {previewData !== null && (
+            <div style={{ marginTop: 16 }}>
+              <div className="ie-preview-header">
+                <div>
+                  Tìm thấy&nbsp;
+                  <Tag color={previewData.count > 0 ? 'orange' : 'default'} style={{ fontSize: 13 }}>
+                    {previewData.count} config tăng ca
+                  </Tag>
+                  &nbsp;từ <b>{dayjs(previewData.start_date).format('DD/MM/YYYY')}</b> đến&nbsp;
+                  <b>{dayjs(previewData.end_date).format('DD/MM/YYYY')}</b>
+                </div>
+                {previewData.count > 0 && (
+                  <Button danger icon={<DeleteOutlined />} loading={deleteLoading} onClick={handleDeleteOTRange}>
+                    Xóa {previewData.count} config này
+                  </Button>
+                )}
+              </div>
+
+              {previewData.count > 0 ? (
+                <Table
+                  dataSource={previewData.items}
+                  columns={previewColumns}
+                  rowKey={(r) => `${r.employee_id}_${r.work_date}`}
+                  size="small"
+                  pagination={{ pageSize: 10, showSizeChanger: false }}
+                  scroll={{ y: 260 }}
+                />
+              ) : (
+                <div className="ie-empty-state">
+                  ✓ Không có config tăng ca nào trong khoảng ngày này
                 </div>
               )}
             </div>
           )}
         </div>
-
-        {/* Backup & Restore */}
-        <div className="card">
-          <div className="card-title">
-            <DatabaseOutlined style={{ color: '#8b5cf6' }} />
-            Backup &amp; Restore
-          </div>
-          <p style={{ color: '#6b7a99', fontSize: 12, marginBottom: 16 }}>
-            Sao luu toan bo du lieu (nhan vien, ca, lich lam, cham cong, ngay le) thanh file JSON.
-            Restore se khoi phuc du lieu tu file backup.
-          </p>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <Button icon={<DownloadOutlined />} onClick={handleBackup} size="large" block
-              style={{ background: '#8b5cf6', color: '#fff', border: 'none' }}>
-              Tai Backup (.json)
-            </Button>
-
-            <Divider style={{ margin: '8px 0', fontSize: 11, color: '#9ba8bf' }}>hoac</Divider>
-
-            <Upload
-              accept=".json"
-              showUploadList={false}
-              beforeUpload={(file) => {
-                Modal.confirm({
-                  title: 'Xac nhan Restore',
-                  content: 'Ban co chac muon restore du lieu tu file backup? Du lieu trung se bi bo qua, du lieu moi se duoc them vao.',
-                  okText: 'Restore',
-                  cancelText: 'Huy',
-                  onOk: () => restoreMut.mutate(file),
-                });
-                return false;
-              }}
-            >
-              <Button icon={<CloudUploadOutlined />} loading={restoreMut.isPending} size="large" block>
-                Restore tu Backup (.json)
-              </Button>
-            </Upload>
-          </div>
-
-          {restoreResult && (
-            <div style={{ marginTop: 16, padding: 12, background: '#f5f3ff', borderRadius: 8, fontSize: 12 }}>
-              <div style={{ fontWeight: 600, color: '#8b5cf6', marginBottom: 8 }}>Ket qua restore:</div>
-              <div>Backup tu: <b>{restoreResult.backup_date}</b></div>
-              {restoreResult.restored && Object.entries(restoreResult.restored).map(([k, v]) => (
-                <div key={k}>{k}: <Tag color="purple">{v} moi</Tag></div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* ── X Overtime Management ─────────────────────────────────────────── */}
-      <div className="card">
-        <div className="card-title">
-          <ThunderboltOutlined style={{ color: '#f59e0b' }} />
-          Quản lý Config Tăng Ca X
-          <span style={{ fontSize: 12, fontWeight: 400, color: '#6b7a99', marginLeft: 8 }}>
-            — Xem &amp; xóa có chọn lọc theo khoảng ngày
-          </span>
-        </div>
-
-        <Alert
-          type="info" showIcon
-          message="Chỉ xóa config tăng ca X (giờ ra, giờ OT, số bữa OT đã nhập). KHÔNG ảnh hưởng dữ liệu chấm công bình thường."
-          style={{ marginBottom: 16, fontSize: 12 }}
-        />
-
-        <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', marginBottom: 16 }}>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 4 }}>Chọn khoảng ngày:</div>
-            <RangePicker
-              value={otRange}
-              onChange={(dates) => { if (dates) { setOtRange(dates); setPreviewData(null); } }}
-              format="DD/MM/YYYY"
-              style={{ width: '100%' }}
-              allowClear={false}
-            />
-          </div>
-          <Button
-            icon={<EyeOutlined />}
-            onClick={handlePreviewOT}
-            loading={previewLoading}
-            style={{ height: 32 }}
-          >
-            Xem trước
-          </Button>
-        </div>
-
-        {previewData !== null && (
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-              <div style={{ fontSize: 13 }}>
-                Tìm thấy&nbsp;
-                <Tag color={previewData.count > 0 ? 'orange' : 'default'} style={{ fontSize: 13 }}>
-                  {previewData.count} config tăng ca
-                </Tag>
-                &nbsp;từ <b>{dayjs(previewData.start_date).format('DD/MM/YYYY')}</b> đến&nbsp;
-                <b>{dayjs(previewData.end_date).format('DD/MM/YYYY')}</b>
-              </div>
-              {previewData.count > 0 && (
-                <Button
-                  danger
-                  icon={<DeleteOutlined />}
-                  loading={deleteLoading}
-                  onClick={handleDeleteOTRange}
-                >
-                  Xóa {previewData.count} config này
-                </Button>
-              )}
-            </div>
-
-            {previewData.count > 0 ? (
-              <Table
-                dataSource={previewData.items}
-                columns={previewColumns}
-                rowKey={(r) => `${r.employee_id}_${r.work_date}`}
-                size="small"
-                pagination={{ pageSize: 10, showSizeChanger: false }}
-                scroll={{ y: 260 }}
-                style={{ fontSize: 12 }}
-              />
-            ) : (
-              <div style={{ padding: '24px', textAlign: 'center', color: '#94a3b8', fontSize: 13, background: '#f8fafc', borderRadius: 8 }}>
-                ✓ Không có config tăng ca nào trong khoảng ngày này
-              </div>
-            )}
-          </div>
-        )}
       </div>
     </div>
   );

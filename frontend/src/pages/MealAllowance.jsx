@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { DatePicker, Select, Spin, Tooltip, Button, Space, Modal, Input, InputNumber, Form, message } from 'antd';
+import { DatePicker, Select, Spin, Tooltip, Button, Space, Modal, Input, InputNumber, Form, message, Popconfirm } from 'antd';
 import {
   DollarCircleOutlined,
   DownloadOutlined,
@@ -10,20 +10,44 @@ import {
   SearchOutlined,
   MoonOutlined,
 } from '@ant-design/icons';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import dayjs from 'dayjs';
 import api from '../api/client';
 import useAuthStore from '../stores/authStore';
 
 const { RangePicker } = DatePicker;
 
+let mealAllowanceFilters = null;
+
+const getInitialFilters = () => {
+  const defaultStart = dayjs().startOf('month');
+  const defaultEnd = dayjs().endOf('month');
+
+  if (!mealAllowanceFilters) {
+    return {
+      monthKey: dayjs().format('YYYY-MM'),
+      dateRange: [defaultStart, defaultEnd],
+    };
+  }
+
+  const start = mealAllowanceFilters.start_date ? dayjs(mealAllowanceFilters.start_date) : defaultStart;
+  const end = mealAllowanceFilters.end_date ? dayjs(mealAllowanceFilters.end_date) : defaultEnd;
+
+  return {
+    monthKey: mealAllowanceFilters.month_key || start.format('YYYY-MM'),
+    dateRange: [start, end],
+  };
+};
+
 export default function MealAllowance() {
   const navigate = useNavigate();
   const { user } = useAuthStore();
-  const [monthKey, setMonthKey] = useState(dayjs().format('YYYY-MM'));
+  const queryClient = useQueryClient();
+  const initialFilters = useMemo(() => getInitialFilters(), []);
+  const [monthKey, setMonthKey] = useState(initialFilters.monthKey);
   const [dept, setDept] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [dateRange, setDateRange] = useState([dayjs().startOf('month'), dayjs().endOf('month')]);
+  const [dateRange, setDateRange] = useState(initialFilters.dateRange);
   const [nightModal, setNightModal] = useState(false);
   const [nightAllowanceRate, setNightAllowanceRate] = useState(0);
 
@@ -31,6 +55,15 @@ export default function MealAllowance() {
     const saved = localStorage.getItem('nightAllowanceRate');
     setNightAllowanceRate(saved ? Number(saved) : 100000);
   }, []);
+
+  useEffect(() => {
+    if (!dateRange?.[0] || !dateRange?.[1]) return;
+    mealAllowanceFilters = {
+      month_key: monthKey,
+      start_date: dateRange[0].format('YYYY-MM-DD'),
+      end_date: dateRange[1].format('YYYY-MM-DD'),
+    };
+  }, [monthKey, dateRange]);
 
   const handleSaveNightAllowance = (val) => {
     setNightAllowanceRate(val);
@@ -68,12 +101,47 @@ export default function MealAllowance() {
     days = Array.from({ length: s.days_in_month }, (_, i) => i + 1);
   }
 
-  const renderMealCell = (cell) => {
+  const renderMealCell = (cell, employeeId) => {
     if (cell.status === 'no_data') return <span className="ma-cell-dot">·</span>;
+
+    if (cell.ot_eligible) {
+      const amount = cell.meal_allowance || 0;
+      const shortAmount = amount >= 1000 ? `${amount / 1000}k` : String(amount || '0');
+      return (
+        <Popconfirm
+          title="Thêm bữa tăng ca?"
+          description={`Ngày ${dayjs(cell.work_date).format('DD/MM')} — OT sau 18h hoặc ≥ 3h`}
+          onConfirm={async () => {
+            try {
+              await api.put('/schedules/x-overtime', {
+                employee_id: employeeId,
+                work_date: cell.work_date,
+                meal_count: 1,
+              });
+              message.success('Đã thêm bữa tăng ca');
+              queryClient.invalidateQueries({ queryKey: ['attendance'] });
+            } catch {
+              message.error('Lỗi khi thêm bữa tăng ca');
+            }
+          }}
+          okText="Thêm bữa"
+          cancelText="Bỏ qua"
+        >
+          <div className="ma-cell-val ma-cell-val--ot-eligible">
+            {shortAmount}
+          </div>
+        </Popconfirm>
+      );
+    }
+
     if (!cell.meal_allowance) return <span className="ma-cell-zero">0</span>;
 
     const amount = cell.meal_allowance;
     const shortAmount = amount >= 1000 ? `${amount / 1000}k` : amount;
+
+    const extraClass = cell.night_allowance > 0
+      ? 'ma-cell-val--night'
+      : (cell.meal_count >= 2 ? 'ma-cell-val--double' : '');
 
     return (
       <Tooltip title={
@@ -85,10 +153,11 @@ export default function MealAllowance() {
           {cell.check_in && <div className="ma-tooltip-row">Vào: <b>{dayjs(cell.check_in).format('HH:mm')}</b></div>}
           {cell.check_out && <div className="ma-tooltip-row">Ra: <b>{dayjs(cell.check_out).format('HH:mm')}</b></div>}
           <div className="ma-tooltip-amount meal">Tiền ăn: <b>{amount.toLocaleString()} đ</b></div>
+          {cell.meal_count >= 2 && <div className="ma-tooltip-row" style={{ color: '#2563eb' }}>Bữa ăn: <b>{cell.meal_count} bữa</b></div>}
           {cell.night_allowance > 0 && <div className="ma-tooltip-amount night">PC Đêm: <b>{cell.night_allowance.toLocaleString()} đ</b></div>}
         </div>
       }>
-        <div className={`ma-cell-val ${cell.night_allowance > 0 ? 'ma-cell-val--night' : ''}`}>
+        <div className={`ma-cell-val ${extraClass}`}>
           {shortAmount}
         </div>
       </Tooltip>
@@ -303,7 +372,7 @@ export default function MealAllowance() {
                       const cell = row.days?.find((c) => c.day === d);
                       return (
                         <td key={d} className="ma-td ma-td--cell">
-                          {cell ? renderMealCell(cell) : <span className="ma-cell-dot">·</span>}
+                          {cell ? renderMealCell(cell, row.employee_id) : <span className="ma-cell-dot">·</span>}
                         </td>
                       );
                     })}

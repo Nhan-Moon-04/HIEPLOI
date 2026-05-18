@@ -318,26 +318,21 @@ def _build_result(mode, week_mode, shift_code, has_midday_check, warning_note, c
         )
         overtime_hours += NU_EXTRA_OT_BY_CODE.get(code, 0.0)
         
-        if mode == XNU_MODE_3:
-            meal_allowance = 35000.0
-            meal_count = 1
-            night_allowance = night_allowance_rate if night_allowance_rate > 0 else NU_NIGHT_PCCD
-        elif mode in [XNU_MODE_1, XNU_MODE_2]:
-            meal_allowance = 35000.0
-            meal_count = 1
-            night_allowance = 0.0
-        elif mode == NU_NIGHT_MODE:
-            meal_allowance = NU_NIGHT_MEAL_ALLOWANCE
-            meal_count = 1
+        # Quy tắc thống nhất: check-in < 9h → bữa sáng; check-out >= 18h HOẶC check-in >= 18h HOẶC OT >= 3h → bữa tối
+        meal_has_morning = bool(check_in and check_in.hour < 9)
+        meal_has_late = bool(
+            (check_out and check_out.hour >= 18)
+            or (check_in and check_in.hour >= 18)
+            or (overtime_hours >= 3)
+        )
+        meal_count = (1 if meal_has_morning else 0) + (1 if meal_has_late else 0)
+        meal_allowance = 35000.0 * meal_count
+
+        # Phụ cấp ca đêm chỉ cho ca tối
+        if mode in (NU_NIGHT_MODE, XNU_MODE_3):
             night_allowance = night_allowance_rate if night_allowance_rate > 0 else NU_NIGHT_PCCD
         else:
-            meal_allowance = NU_MORNING_MEAL_ALLOWANCE
-            meal_count = 1
             night_allowance = 0.0
-            # 2nd meal bonus if OT >= 3.0h (after break deduction)
-            if overtime_hours >= 3.0:
-                meal_allowance += NU_MORNING_MEAL_ALLOWANCE_OT_BONUS
-                meal_count = 2
 
     return NuShiftDayResult(
         mode=mode,
@@ -521,15 +516,18 @@ def calculate_nu_shift_details(shift_code: str, actual_hours: float, is_night: b
     extra_ot = NU_EXTRA_OT_BY_CODE.get(code, 0.0)
     total_ot = normalized_ot + extra_ot
     
+    # Không có check_in/out thực tế: dùng is_night để suy luận điều kiện bữa ăn
+    # Ca tối (is_night=True): check-in >= 18h → bữa tối; Ca sáng: giả định check-in 6h < 9h → bữa sáng
     if is_night:
-        meal_allowance = NU_NIGHT_MEAL_ALLOWANCE
+        meal_has_morning = False
+        meal_has_late = True  # ca tối luôn có bữa tối
         night_allowance = night_allowance_rate if night_allowance_rate > 0 else NU_NIGHT_PCCD
     else:
-        meal_allowance = NU_MORNING_MEAL_ALLOWANCE
+        meal_has_morning = True  # ca sáng giả định check-in trước 9h
+        meal_has_late = total_ot >= 3.0  # OT >= 3h → thêm bữa tối
         night_allowance = 0.0
-        # Threshold for 2nd meal bonus: 3.0h OT (after break)
-        if total_ot >= 3.0:
-            meal_allowance += NU_MORNING_MEAL_ALLOWANCE_OT_BONUS
+    meal_count_calc = (1 if meal_has_morning else 0) + (1 if meal_has_late else 0)
+    meal_allowance = 35000.0 * meal_count_calc
             
     return {
         "standard_hours": standard_hours,
