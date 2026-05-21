@@ -38,7 +38,7 @@ export default function BaseSalary() {
       const fd = new FormData();
       fd.append('month_key', monthKey);
       fd.append('action', action);
-      return api.post('/salaries/lock-month', fd);
+      return api.post('/salaries/lock-month', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
     },
     onSuccess: (res) => {
       message.success(res.data.message);
@@ -98,6 +98,17 @@ export default function BaseSalary() {
           )}
         </div>
       </div>
+
+      {isLocked && (
+        <Alert
+          message={`Dữ liệu lương cơ bản tháng ${dayjs(monthKey).format('M/YYYY')} đã được chốt (khóa dữ liệu).`}
+          description="Hệ thống đang hoạt động ở chế độ chỉ đọc. Việc nhập (import) đè dữ liệu hoặc sửa đổi lương của tháng này đã bị khóa."
+          type="warning"
+          showIcon
+          icon={<LockOutlined />}
+          style={{ marginBottom: 16, borderRadius: 8 }}
+        />
+      )}
 
       <div style={{ background: '#fff', padding: 20, borderRadius: 8, border: '1px solid #f0f0f0', marginBottom: 16 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

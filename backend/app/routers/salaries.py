@@ -12,6 +12,7 @@ from pydantic import BaseModel
 import openpyxl
 from io import BytesIO
 from app.utils.audit_helper import log_audit
+from app.utils.lock_helper import check_month_locked
 
 router = APIRouter(prefix="/salaries", tags=["Salaries - Lương"])
 
@@ -354,6 +355,18 @@ async def create_loan(
     current_user: AppUser = Depends(require_roles(UserRole.ADMIN, UserRole.ACCOUNTANT)),
 ):
     """Tạo khoản tạm ứng + tự động sinh advance_payments theo kế hoạch trả"""
+    # Kiểm tra khóa tháng cho toàn bộ các kỳ trả sắp tạo
+    months = max(1, req.repayment_months)
+    def add_months(d: date, n: int) -> date:
+        m = d.month - 1 + n
+        return d.replace(year=d.year + m // 12, month=m % 12 + 1, day=1)
+
+    start_dt = datetime.strptime(req.start_month, "%Y-%m").date().replace(day=1)
+    for i in range(months):
+        month_dt = add_months(start_dt, i)
+        mk = month_dt.strftime("%Y-%m")
+        await check_month_locked(db, mk)
+
     emp = await db.get(Employee, req.employee_id)
     if not emp:
         raise HTTPException(404, "Không tìm thấy nhân viên")
@@ -420,6 +433,17 @@ async def cancel_loan(
         raise HTTPException(404, "Không tìm thấy khoản ứng")
 
     today_mk = datetime.utcnow().strftime("%Y-%m")
+    
+    # Kiểm tra khóa tháng đối với các kỳ trả sắp bị xóa (kỳ ở tương lai)
+    result = await db.execute(
+        select(AdvancePayment.month_key).where(
+            AdvancePayment.loan_id == loan_id,
+            AdvancePayment.month_key > today_mk,
+        )
+    )
+    target_mks = result.scalars().all()
+    for mk in target_mks:
+        await check_month_locked(db, mk)
     # Xóa các kỳ ở tháng tương lai
     await db.execute(
         delete(AdvancePayment).where(

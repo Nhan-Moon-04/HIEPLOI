@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { DatePicker, Button, Table, Spin, Modal, Form, Input, Space, message, Select, Tag } from 'antd';
+import { DatePicker, Button, Table, Spin, Modal, Form, Input, Space, message, Select, Tag, Alert } from 'antd';
 import {
   ArrowLeftOutlined,
   UserOutlined,
@@ -10,6 +10,7 @@ import {
   MoonOutlined,
   DollarCircleOutlined,
   BankOutlined,
+  LockOutlined,
 } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import dayjs from 'dayjs';
@@ -73,6 +74,7 @@ export default function EmployeeDetail() {
   const row = attendance?.rows?.[0];
   const days = row?.days || [];
   const summary = row?.summary || {};
+  const isLocked = !!attendance?.is_locked;
 
   const mealDays = summary.total_meal_count || days.filter((d) => (d.meal_allowance || 0) > 0).length;
   const nightDays = days.filter((d) => (d.night_allowance || 0) > 0).length;
@@ -158,7 +160,7 @@ export default function EmployeeDetail() {
     },
   ];
 
-  const dayColumnsWithActions = isAdmin ? [
+  const dayColumnsWithActions = (isAdmin && !isLocked) ? [
     ...dayColumns,
     {
       title: 'Thao tác', key: 'actions', width: 160,
@@ -223,7 +225,10 @@ export default function EmployeeDetail() {
           </button>
           <div className="ed-avatar">{avatarLetter}</div>
           <div>
-            <h2 className="emp-title">{emp?.full_name || '–'}</h2>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <h2 className="emp-title" style={{ margin: 0 }}>{emp?.full_name || '–'}</h2>
+              {isLocked && <Tag color="red" icon={<LockOutlined />} style={{ borderRadius: 6 }}>Đã chốt</Tag>}
+            </div>
             <div className="emp-stats" style={{ marginTop: 4 }}>
               <div className="emp-stat-chip" style={{ fontFamily: 'monospace', color: '#276EF1', fontWeight: 700 }}>
                 #{emp?.employee_code}
@@ -259,6 +264,17 @@ export default function EmployeeDetail() {
           size="middle"
         />
       </div>
+      
+      {isLocked && (
+        <Alert
+          message={`Dữ liệu chấm công tháng ${dayjs(monthKey).format('MM/YYYY')} đã được chốt (khóa dữ liệu).`}
+          description="Hệ thống đang hoạt động ở chế độ xem chi tiết. Mọi thao tác chỉnh sửa (đổi ca, báo phép, báo đi làm) đều bị khóa đối với tháng này."
+          type="warning"
+          showIcon
+          icon={<LockOutlined />}
+          style={{ margin: '0 24px 16px 24px', borderRadius: 8 }}
+        />
+      )}
 
       {/* KPI row */}
       <div className="att-kpi-row att-kpi-row--5">

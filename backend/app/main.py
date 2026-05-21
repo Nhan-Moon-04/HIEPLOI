@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from app.database import engine, Base
 from app.models import *  # noqa: F401, F403 - Import all models so they register with Base
-from app.routers import auth, shifts, employees, dashboard, holidays, schedules, overtime, attendance, import_export, meal_allowance, salaries, audit, leave
+from app.routers import auth, shifts, employees, dashboard, holidays, schedules, overtime, attendance, import_export, meal_allowance, salaries, audit, leave, union
 from app.services.seed import seed_database
 
 
@@ -79,6 +79,7 @@ app.include_router(salaries.router, prefix="/api")
 app.include_router(meal_allowance.router, prefix="/api")
 app.include_router(audit.router, prefix="/api")
 app.include_router(leave.router, prefix="/api")
+app.include_router(union.router, prefix="/api")
 
 
 @app.get("/api/health")

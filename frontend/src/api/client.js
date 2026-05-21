@@ -15,10 +15,23 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// Response interceptor - handle 401
+// Response interceptor - handle 401 and format error details
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
+    // Format error details if they are structured objects (e.g. 422 validation errors)
+    if (error.response?.data?.detail) {
+      const detail = error.response.data.detail;
+      if (Array.isArray(detail)) {
+        error.response.data.detail = detail.map(err => {
+          const field = err.loc ? err.loc.filter(l => l !== 'body').join('.') : '';
+          return `${field ? field + ': ' : ''}${err.msg}`;
+        }).join(', ');
+      } else if (typeof detail === 'object') {
+        error.response.data.detail = JSON.stringify(detail);
+      }
+    }
+
     if (error.response?.status === 401) {
       const refreshToken = localStorage.getItem('refresh_token');
       if (refreshToken && !error.config._retry) {

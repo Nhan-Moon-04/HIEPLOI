@@ -8,6 +8,7 @@ from app.models.holiday import CompanyHoliday
 from app.models.user import AppUser, UserRole
 from app.schemas.holiday import HolidayCreate, HolidayUpdate, HolidayResponse, HolidayBulkGenerate
 from app.middleware.auth import get_current_user, require_roles
+from app.utils.lock_helper import check_date_locked, check_month_locked
 
 router = APIRouter(prefix="/holidays", tags=["Holidays - Ngay Le"])
 
@@ -79,6 +80,7 @@ async def create_holiday(
     current_user: AppUser = Depends(require_roles(UserRole.ADMIN)),
 ):
     """Tao ngay le/nghi moi - chi Admin"""
+    await check_date_locked(db, request.holiday_date)
     existing = await db.execute(
         select(CompanyHoliday).where(CompanyHoliday.holiday_date == request.holiday_date)
     )
@@ -108,6 +110,8 @@ async def update_holiday(
     if not holiday:
         raise HTTPException(status_code=404, detail="Ngay le khong ton tai")
 
+    await check_date_locked(db, holiday.holiday_date)
+
     update_data = request.model_dump(exclude_unset=True)
     for key, value in update_data.items():
         setattr(holiday, key, value)
@@ -129,6 +133,8 @@ async def toggle_holiday(
     if not holiday:
         raise HTTPException(status_code=404, detail="Ngay le khong ton tai")
 
+    await check_date_locked(db, holiday.holiday_date)
+
     holiday.is_active = not holiday.is_active
     await db.commit()
     await db.refresh(holiday)
@@ -147,6 +153,8 @@ async def delete_holiday(
     if not holiday:
         raise HTTPException(status_code=404, detail="Ngay le khong ton tai")
 
+    await check_date_locked(db, holiday.holiday_date)
+
     await db.delete(holiday)
     await db.commit()
     return {"message": f"Da xoa ngay le {holiday.holiday_date}"}
@@ -159,6 +167,7 @@ async def generate_vn_holidays(
     current_user: AppUser = Depends(require_roles(UserRole.ADMIN)),
 ):
     """Tu dong tao cac ngay le Viet Nam trong thang hien tai."""
+    await check_month_locked(db, request.month_key)
     try:
         year, month = map(int, request.month_key.split("-"))
     except ValueError:

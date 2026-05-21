@@ -3,6 +3,7 @@ import {
   AppstoreOutlined, TeamOutlined, ClockCircleOutlined, ScheduleOutlined,
   CalendarOutlined, DollarOutlined, FileTextOutlined, SafetyOutlined,
   BankOutlined, ImportOutlined, AuditOutlined, SettingOutlined, RiseOutlined,
+  UsergroupAddOutlined,
 } from '@ant-design/icons';
 import useAuthStore from '../../stores/authStore';
 
@@ -32,6 +33,13 @@ const sections = [
       { key: '/salaries/payroll', icon: <FileTextOutlined />, label: 'Bảng lương' },
       { key: '/insurance', icon: <SafetyOutlined />, label: 'BHXH / Thuế' },
       { key: '/advances', icon: <BankOutlined />, label: 'Tạm ứng' },
+    ],
+  },
+  {
+    group: 'CÔNG ĐOÀN',
+    roles: ['admin', 'accountant'],
+    items: [
+      { key: '/union', icon: <UsergroupAddOutlined />, label: 'Công đoàn' },
     ],
   },
   {

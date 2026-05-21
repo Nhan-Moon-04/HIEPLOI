@@ -8,6 +8,7 @@ from app.models.schedule import WorkSchedule
 from app.models.audit import AuditLog
 from app.models.holiday import CompanyHoliday
 from app.models.x_overtime import XOvertimeConfig
+from app.models.union import UnionTransaction, UnionEvent, UnionEventMember
 
 __all__ = [
     "AppUser",
@@ -24,4 +25,8 @@ __all__ = [
     "AuditLog",
     "CompanyHoliday",
     "XOvertimeConfig",
+    "UnionTransaction",
+    "UnionEvent",
+    "UnionEventMember",
 ]
+

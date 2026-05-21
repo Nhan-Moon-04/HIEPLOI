@@ -17,6 +17,7 @@ from app.models.schedule import WorkSchedule
 from app.models.user import AppUser, UserRole
 from app.middleware.auth import require_roles
 from app.utils.audit_helper import log_audit
+from app.utils.lock_helper import check_month_locked
 from app.services.nu_shift import is_nu_dynamic_shift_code, build_nu_shift_day_results
 
 router = APIRouter(prefix="/import-export", tags=["Import/Export"])
@@ -31,6 +32,7 @@ async def import_attendance(
     db: AsyncSession = Depends(get_db),
     current_user: AppUser = Depends(require_roles(UserRole.ADMIN, UserRole.ACCOUNTANT)),
 ):
+    await check_month_locked(db, month_key)
     """Import file cham cong tu may cham cong.
     Format: C1=Ma NV, C2=Ten, C3=Bo phan, C4=Thoi gian (datetime)
     Bo phan trong file se bo qua, lay theo nhan vien trong DB.

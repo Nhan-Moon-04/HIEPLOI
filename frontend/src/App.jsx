@@ -24,6 +24,7 @@ import Advances from './pages/Advances';
 import Audit from './pages/Audit';
 import LeaveBalance from './pages/LeaveBalance';
 import Settings from './pages/Settings';
+import Union from './pages/Union';
 
 function PrivateRoute({ children }) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -65,6 +66,7 @@ export default function App() {
                   <Route path="/audit" element={<Audit />} />
                   <Route path="/leave" element={<LeaveBalance />} />
                   <Route path="/settings" element={<Settings />} />
+                  <Route path="/union" element={<Union />} />
                 </Routes>
               </MainLayout>
             </PrivateRoute>

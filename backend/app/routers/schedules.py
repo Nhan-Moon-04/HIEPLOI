@@ -15,6 +15,8 @@ from app.models.user import AppUser, UserRole
 from app.middleware.auth import get_current_user, require_roles
 from pydantic import BaseModel
 from decimal import Decimal
+from app.utils.lock_helper import check_month_locked, check_date_locked
+from app.models.salary import MonthlyWorkdayConfig
 
 router = APIRouter(prefix="/schedules", tags=["Schedules"])
 
@@ -36,6 +38,7 @@ class ScheduleMonthResponse(BaseModel):
     month: int
     days_in_month: int
     weekdays: dict
+    is_locked: bool = False
     rows: List[ScheduleCell]
 
 
@@ -94,9 +97,13 @@ async def get_schedule(
             days=days,
         ))
 
+    config_res = await db.execute(select(MonthlyWorkdayConfig).where(MonthlyWorkdayConfig.month_key == month_key))
+    config = config_res.scalar_one_or_none()
+    is_locked = bool(config.is_locked) if config else False
+
     return ScheduleMonthResponse(
         month_key=month_key, year=year, month=month,
-        days_in_month=dim, weekdays=weekdays, rows=rows,
+        days_in_month=dim, weekdays=weekdays, is_locked=is_locked, rows=rows,
     )
 
 
@@ -107,6 +114,7 @@ async def update_schedule_cell(
     db: AsyncSession = Depends(get_db),
     current_user: AppUser = Depends(require_roles(UserRole.ADMIN, UserRole.ACCOUNTANT)),
 ):
+    await check_month_locked(db, month_key)
     try:
         year, month = map(int, month_key.split("-"))
     except ValueError:
@@ -174,6 +182,8 @@ async def import_schedule(
         month_key = f"{int(m.group(2))}-{int(m.group(1)):02d}"
     if not month_key:
         raise HTTPException(400, "Khong tim thay thang/nam trong tieu de. Format: 'LICH LAM VIEC THANG MM/YYYY'")
+
+    await check_month_locked(db, month_key)
 
     year, month = map(int, month_key.split("-"))
     dim = calendar.monthrange(year, month)[1]
@@ -302,6 +312,7 @@ async def upsert_x_overtime_config(
     db: AsyncSession = Depends(get_db),
     current_user: AppUser = Depends(require_roles(UserRole.ADMIN, UserRole.ACCOUNTANT)),
 ):
+    await check_date_locked(db, request.work_date)
     from datetime import time as dt_time
 
     result = await db.execute(
@@ -342,6 +353,7 @@ async def delete_x_overtime_config(
     db: AsyncSession = Depends(get_db),
     current_user: AppUser = Depends(require_roles(UserRole.ADMIN, UserRole.ACCOUNTANT)),
 ):
+    await check_date_locked(db, work_date)
     """Xóa config tăng ca X của nhân viên theo ngày"""
     result = await db.execute(
         select(XOvertimeConfig).where(
@@ -393,6 +405,13 @@ async def delete_x_overtime_range(
     db: AsyncSession = Depends(get_db),
     current_user: AppUser = Depends(require_roles(UserRole.ADMIN, UserRole.ACCOUNTANT)),
 ):
+    curr = start_date.replace(day=1)
+    while curr <= end_date:
+        await check_month_locked(db, curr.strftime("%Y-%m"))
+        if curr.month == 12:
+            curr = curr.replace(year=curr.year + 1, month=1)
+        else:
+            curr = curr.replace(month=curr.month + 1)
     """Xóa tất cả config tăng ca X trong khoảng ngày"""
     from sqlalchemy import delete as sa_delete
     result = await db.execute(

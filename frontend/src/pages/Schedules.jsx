@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { DatePicker, Button, Tag, Select, message, Upload, Spin, Popover, Tooltip, Input, Form, TimePicker, InputNumber } from 'antd';
-import { CalendarOutlined, UploadOutlined, SearchOutlined, DeleteOutlined, CheckOutlined, ThunderboltOutlined } from '@ant-design/icons';
+import { DatePicker, Button, Tag, Select, message, Upload, Spin, Popover, Tooltip, Input, Form, TimePicker, InputNumber, Alert } from 'antd';
+import { CalendarOutlined, UploadOutlined, SearchOutlined, DeleteOutlined, CheckOutlined, ThunderboltOutlined, LockOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import dayjs from 'dayjs';
 import api from '../api/client';
@@ -90,6 +90,7 @@ export default function Schedules() {
   });
 
   const s = schedule || { rows: [], weekdays: {}, days_in_month: 30 };
+  const isLocked = !!s.is_locked;
   const days = Array.from({ length: s.days_in_month }, (_, i) => i + 1);
   const normalizedSearch = searchTerm.trim().toLowerCase();
   const filteredRows = (s.rows || []).filter((row) => {
@@ -169,7 +170,7 @@ export default function Schedules() {
             color: accentColor,
             border: `1px solid ${accentColor}44`,
           } : {}}
-          onClick={() => setEditingCell({ empId: row.employee_id, day })}
+          onClick={() => !isLocked && setEditingCell({ empId: row.employee_id, day })}
         >
           {code || <span className="sch-cell-empty">–</span>}
         </div>
@@ -177,7 +178,7 @@ export default function Schedules() {
           <div
             className={`ot-dot ${hasOt ? 'ot-dot--active' : ''}`}
             title={hasOt ? 'Đã có tăng ca – click để sửa' : 'Thêm tăng ca X'}
-            onClick={(e) => { e.stopPropagation(); openOtPopover(row, day); }}
+            onClick={(e) => { e.stopPropagation(); !isLocked && openOtPopover(row, day); }}
           >
             ⚡
           </div>
@@ -255,20 +256,37 @@ export default function Schedules() {
               <span className="emp-stat-dot emp-stat-dot--green" />
               {filteredRows.length}/{s.rows?.length || 0} nhân viên
             </div>
-            <div className="emp-stat-chip" style={{ color: '#9ca3af', fontSize: 11 }}>
-              Click ô để đổi ca · ⚡ tăng ca X
-            </div>
+            {isLocked ? (
+              <Tag color="red" icon={<LockOutlined />} style={{ borderRadius: 6, margin: 0, padding: '0 8px', display: 'flex', alignItems: 'center' }}>
+                Đã chốt (Xem chi tiết)
+              </Tag>
+            ) : (
+              <div className="emp-stat-chip" style={{ color: '#9ca3af', fontSize: 11 }}>
+                Click ô để đổi ca · ⚡ tăng ca X
+              </div>
+            )}
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <Upload accept=".xlsx,.xls" showUploadList={false}
-            beforeUpload={(file) => { importMut.mutate(file); return false; }}>
-            <Button icon={<UploadOutlined />} loading={importMut.isPending} size="middle">
+          <Upload accept=".xlsx,.xls" showUploadList={false} disabled={isLocked}
+            beforeUpload={(file) => { if (!isLocked) { importMut.mutate(file); } return false; }}>
+            <Button icon={<UploadOutlined />} loading={importMut.isPending} size="middle" disabled={isLocked}>
               Import Excel
             </Button>
           </Upload>
         </div>
       </div>
+      
+      {isLocked && (
+        <Alert
+          message={`Dữ liệu lịch làm việc tháng ${dayjs(monthKey).format('M/YYYY')} đã được chốt (khóa dữ liệu).`}
+          description="Hệ thống đang hoạt động ở chế độ xem chi tiết (chỉ đọc). Mọi thay đổi đối với lịch làm việc và cấu hình tăng ca đều bị vô hiệu hóa."
+          type="warning"
+          showIcon
+          icon={<LockOutlined />}
+          style={{ marginBottom: 16, borderRadius: 8 }}
+        />
+      )}
 
       {/* Filter bar */}
       <div className="emp-filterbar">

@@ -24,6 +24,8 @@ from app.services.nu_shift import (
 )
 from app.utils.audit_helper import log_audit
 from pydantic import BaseModel
+from app.utils.lock_helper import check_date_locked
+from app.models.salary import MonthlyWorkdayConfig
 
 router = APIRouter(prefix="/attendance", tags=["Attendance - Cham Cong"])
 
@@ -72,6 +74,7 @@ class AttendanceRow(BaseModel):
 class AttendanceMonthResponse(BaseModel):
     month_key: str
     days_in_month: int
+    is_locked: bool = False
     rows: List[AttendanceRow]
 
 
@@ -592,9 +595,14 @@ async def get_attendance(
             },
         ))
 
+    config_result = await db.execute(select(MonthlyWorkdayConfig).where(MonthlyWorkdayConfig.month_key == month_key))
+    config = config_result.scalar_one_or_none()
+    is_locked = bool(config.is_locked) if config else False
+
     return AttendanceMonthResponse(
         month_key=month_key,
         days_in_month=range_days,
+        is_locked=is_locked,
         rows=rows,
     )
 
@@ -613,6 +621,7 @@ async def manual_attendance_action(
     db: AsyncSession = Depends(get_db),
     current_user: AppUser = Depends(require_roles(UserRole.ADMIN)),
 ):
+    await check_date_locked(db, request.work_date)
     emp = await db.get(Employee, request.employee_id)
     if not emp:
         raise HTTPException(status_code=404, detail="Nhan vien khong ton tai")
