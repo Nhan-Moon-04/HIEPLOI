@@ -1276,6 +1276,17 @@ body.dark {
   background: #fed7aa;
   border-color: #f59e0b;
 }
+.ma-cell-val--night-eligible {
+  color: #1d4ed8;
+  background: #dbeafe;
+  border: 1.5px solid #93c5fd;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.ma-cell-val--night-eligible:hover {
+  background: #bfdbfe;
+  border-color: #60a5fa;
+}
 .ma-cell-dot { color: #e2e8f0; font-size: 13px; }
 .ma-cell-zero { color: #d1d5db; font-size: 10px; }
 

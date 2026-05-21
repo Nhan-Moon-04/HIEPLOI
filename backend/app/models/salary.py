@@ -55,17 +55,41 @@ class PayrollPaymentStatus(Base):
     )
 
 
+class AdvanceLoan(Base):
+    """Khoản tạm ứng — gốc (1 khoản vay, nhiều kỳ trả)"""
+    __tablename__ = "advance_loans"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    employee_id = Column(Integer, ForeignKey("employees.id"), nullable=False, index=True)
+    loan_date = Column(Date, nullable=False)
+    total_amount = Column(Numeric(12, 2), nullable=False)
+    # cash | half_month | full_month | multi_month
+    advance_type = Column(String(16), default='cash')
+    repayment_months = Column(Integer, default=1)       # Số tháng trả
+    monthly_repayment = Column(Numeric(12, 2))          # Tiền trả mỗi tháng
+    start_month = Column(String(7), nullable=False)     # YYYY-MM bắt đầu trừ
+    paid_amount = Column(Numeric(12, 2), default=0)     # Đã trừ tích luỹ
+    # active | completed | cancelled
+    status = Column(String(16), default='active')
+    notes = Column(String(255))
+    created_by = Column(String(64))
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class AdvancePayment(Base):
-    """Tạm ứng"""
+    """Tạm ứng — kỳ trả từng tháng (liên kết tới AdvanceLoan)"""
     __tablename__ = "advance_payments"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     employee_id = Column(Integer, ForeignKey("employees.id"), nullable=False)
+    loan_id = Column(Integer, nullable=True)            # FK tới advance_loans.id
     advance_date = Column(Date, nullable=False)
-    month_key = Column(String(7), nullable=False)
+    month_key = Column(String(7), nullable=False)       # Tháng trừ YYYY-MM
     amount = Column(Numeric(12, 2))
-    input_mode = Column(String(16))  # amount, days
-    payment_method = Column(String(32))  # cash, bank
+    installment_no = Column(Integer, default=1)         # Kỳ thứ mấy
+    input_mode = Column(String(16))                     # amount, days
+    payment_method = Column(String(32))                 # cash, bank
     advance_days = Column(Numeric(6, 2))
     notes = Column(String(255))
     created_at = Column(DateTime, default=datetime.utcnow)

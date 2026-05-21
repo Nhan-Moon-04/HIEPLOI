@@ -56,6 +56,7 @@ class AttendanceCell(BaseModel):
     meal_count: Optional[int] = None
     night_allowance: float = 0.0
     ot_eligible: bool = False
+    night_eligible: bool = False
 
 
 class AttendanceRow(BaseModel):
@@ -412,6 +413,9 @@ async def get_attendance(
         total_early = 0
         total_hours = 0.0
         total_ot = 0.0
+        total_ot_weekday = 0.0
+        total_ot_sunday = 0.0
+        total_ot_holiday = 0.0
         total_meal_count = 0
         total_meal_allowance = 0.0
 
@@ -491,9 +495,10 @@ async def get_attendance(
             if override_note:
                 cell_notes = f"{cell_notes} | {override_note}" if cell_notes else override_note
 
-            # Cộng thêm tiền ăn OT cho mọi ca không-tự-động nếu có config xot, hoặc đánh dấu ot_eligible
+            # Cộng thêm tiền ăn OT cho mọi ca không-tự-động nếu có config xot, hoặc đánh dấu ot/night eligible
             is_auto_shift = nu_res is not None or (cell_shift_code or "").upper() in DRIVER_AUTO_OT_SHIFT_CODES
             ot_eligible_val = False
+            night_eligible_val = False
             if not is_auto_shift and ev["status"] in ("full", "early_leave", "short", "forgot_scan"):
                 xot = xot_map.get((emp.id, dt))
                 if xot and xot.meal_count and xot.meal_count > 0:
@@ -502,14 +507,20 @@ async def get_attendance(
                     ev["meal_allowance"] = (ev["meal_allowance"] or 0) + ot_meal
                     ev["meal_count"] = (ev["meal_count"] or 0) + int(xot.meal_count)
                     ev["ot_hours"] = float(xot.ot_hours) if xot.ot_hours else ev["ot_hours"]
+                    # Nếu ot_end_time >= 23h thì cộng thêm phụ cấp ca đêm
+                    if xot.ot_end_time:
+                        end_t = parse_time(xot.ot_end_time)
+                        if end_t and end_t.hour >= 23:
+                            ev["night_allowance"] = (ev["night_allowance"] or 0) + night_allowance_rate
                 elif shift and shift.end_time and check_out_dt:
                     shift_end_t = parse_time(shift.end_time)
                     shift_end_dt_elig = datetime.combine(dt, shift_end_t)
                     actual_ot_h = max(0.0, (check_out_dt - shift_end_dt_elig).total_seconds() / 3600.0)
-                    ot_eligible_val = bool(
-                        (check_out_dt.hour >= 18 and shift_end_t.hour < 18)
-                        or (actual_ot_h >= 3)
-                    )
+                    # Checkout từ 23h trở lên → đề xuất thêm PCCD ca đêm (ưu tiên hơn ot_eligible)
+                    if check_out_dt >= datetime.combine(dt, time(23, 0)):
+                        night_eligible_val = True
+                    elif (check_out_dt.hour >= 18 and shift_end_t.hour < 18) or (actual_ot_h >= 3):
+                        ot_eligible_val = True
 
             cell = AttendanceCell(
                 work_date=str(dt),
@@ -533,6 +544,7 @@ async def get_attendance(
                 meal_count=ev["meal_count"],
                 night_allowance=ev["night_allowance"],
                 ot_eligible=ot_eligible_val,
+                night_eligible=night_eligible_val,
             )
             days_cells.append(cell)
 
@@ -547,6 +559,13 @@ async def get_attendance(
             if ev["status"] == "early_leave":
                 total_early += 1
             total_ot += ev["ot_hours"]
+            ot_h = ev["ot_hours"]
+            if is_holiday:
+                total_ot_holiday += ot_h
+            elif is_sunday:
+                total_ot_sunday += ot_h
+            else:
+                total_ot_weekday += ot_h
             total_meal_count += ev["meal_count"] or 0
 
         rows.append(AttendanceRow(
@@ -563,6 +582,9 @@ async def get_attendance(
                 "total_early_leave": total_early,
                 "total_hours": round(total_hours, 2),
                 "total_ot": round(total_ot, 2),
+                "total_ot_weekday": round(total_ot_weekday, 2),
+                "total_ot_sunday": round(total_ot_sunday, 2),
+                "total_ot_holiday": round(total_ot_holiday, 2),
                 "total_meal_count": total_meal_count,
                 "total_meal_allowance": sum(c.meal_allowance for c in days_cells),
                 "total_night_allowance": sum(c.night_allowance for c in days_cells),

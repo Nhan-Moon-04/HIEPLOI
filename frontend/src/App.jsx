@@ -19,6 +19,8 @@ import ImportExport from './pages/ImportExport';
 import MealAllowance from './pages/MealAllowance';
 import MealAllowanceDetail from './pages/MealAllowanceDetail';
 import BaseSalary from './pages/BaseSalary';
+import PayrollTable from './pages/PayrollTable';
+import Advances from './pages/Advances';
 import Audit from './pages/Audit';
 import LeaveBalance from './pages/LeaveBalance';
 import Settings from './pages/Settings';
@@ -58,6 +60,8 @@ export default function App() {
                   <Route path="/meal-allowance" element={<MealAllowance />} />
                   <Route path="/meal-allowance/:id" element={<MealAllowanceDetail />} />
                   <Route path="/salaries" element={<BaseSalary />} />
+                  <Route path="/salaries/payroll" element={<PayrollTable />} />
+                  <Route path="/advances" element={<Advances />} />
                   <Route path="/audit" element={<Audit />} />
                   <Route path="/leave" element={<LeaveBalance />} />
                   <Route path="/settings" element={<Settings />} />

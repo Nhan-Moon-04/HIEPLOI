@@ -1,10 +1,10 @@
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, date
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, delete
+from sqlalchemy import select, and_, delete, update, func
 from app.database import get_db
-from app.models.salary import MonthlySalary, MonthlyWorkdayConfig
+from app.models.salary import MonthlySalary, MonthlyWorkdayConfig, AdvancePayment, AdvanceLoan
 from app.models.employee import Employee
 from app.models.user import AppUser, UserRole
 from app.middleware.auth import require_roles, get_current_user
@@ -12,12 +12,12 @@ from pydantic import BaseModel
 import openpyxl
 from io import BytesIO
 from app.utils.audit_helper import log_audit
-from datetime import date
 
 router = APIRouter(prefix="/salaries", tags=["Salaries - Lương"])
 
 
 class BaseSalaryRow(BaseModel):
+    employee_id: int
     employee_code: str
     full_name: str
     department: Optional[str] = None
@@ -64,6 +64,7 @@ async def get_base_salaries(
     rows = []
     for sal, emp in records:
         rows.append(BaseSalaryRow(
+            employee_id=sal.employee_id,
             employee_code=emp.employee_code,
             full_name=emp.full_name,
             department=emp.department,
@@ -231,11 +232,228 @@ async def lock_month(
     """Khóa/Mở khóa dữ liệu tháng. Chỉ admin."""
     config_result = await db.execute(select(MonthlyWorkdayConfig).where(MonthlyWorkdayConfig.month_key == month_key))
     config = config_result.scalar_one_or_none()
-    
+
     if not config:
         config = MonthlyWorkdayConfig(month_key=month_key)
         db.add(config)
-        
+
     config.is_locked = (action == 'lock')
     await db.commit()
     return {"message": "Đã chốt (khóa) dữ liệu tháng" if config.is_locked else "Đã mở khóa dữ liệu tháng"}
+
+
+@router.get("/advances")
+async def get_advances_summary(
+    month_key: str = Query(..., description="YYYY-MM"),
+    db: AsyncSession = Depends(get_db),
+    current_user: AppUser = Depends(get_current_user),
+):
+    """Tổng tạm ứng theo nhân viên trong tháng"""
+    result = await db.execute(
+        select(AdvancePayment, Employee)
+        .join(Employee, AdvancePayment.employee_id == Employee.id)
+        .where(AdvancePayment.month_key == month_key)
+        .order_by(Employee.employee_code)
+    )
+    rows = result.all()
+    from collections import defaultdict
+    emp_advances = defaultdict(float)
+    emp_info = {}
+    for adv, emp in rows:
+        emp_advances[emp.id] += float(adv.amount or 0)
+        emp_info[emp.id] = {
+            "employee_id": emp.id,
+            "employee_code": emp.employee_code,
+            "full_name": emp.full_name,
+        }
+    return [{"total_advance": emp_advances[eid], **emp_info[eid]} for eid in emp_advances]
+
+
+class UpdateDependentsRequest(BaseModel):
+    employee_id: int
+    dependents: int
+
+
+@router.put("/dependents")
+async def update_dependents(
+    req: UpdateDependentsRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: AppUser = Depends(require_roles(UserRole.ADMIN, UserRole.ACCOUNTANT)),
+):
+    """Cập nhật số người phụ thuộc của nhân viên"""
+    emp = await db.get(Employee, req.employee_id)
+    if not emp:
+        raise HTTPException(404, "Không tìm thấy nhân viên")
+    emp.dependents = max(0, req.dependents)
+    await db.commit()
+    return {"message": f"Đã cập nhật {emp.full_name}: {emp.dependents} người phụ thuộc"}
+
+
+# ─── Advance Loans ────────────────────────────────────────────────────────────
+
+class CreateLoanRequest(BaseModel):
+    employee_id: int
+    loan_date: date
+    total_amount: float
+    advance_type: str = 'cash'          # cash | half_month | full_month | multi_month
+    repayment_months: int = 1           # Số tháng trả
+    monthly_repayment: Optional[float] = None  # Nếu None → auto = total/months
+    start_month: str                    # YYYY-MM tháng đầu tiên bị trừ
+    notes: Optional[str] = None
+
+
+@router.get("/loans")
+async def get_loans(
+    employee_id: Optional[int] = Query(None),
+    status: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: AppUser = Depends(get_current_user),
+):
+    """Danh sách khoản tạm ứng (có thể lọc theo nhân viên / trạng thái)"""
+    q = select(AdvanceLoan, Employee).join(Employee, AdvanceLoan.employee_id == Employee.id)
+    if employee_id:
+        q = q.where(AdvanceLoan.employee_id == employee_id)
+    if status:
+        q = q.where(AdvanceLoan.status == status)
+    q = q.order_by(AdvanceLoan.loan_date.desc())
+    result = await db.execute(q)
+
+    rows = []
+    for loan, emp in result.all():
+        # Tính tổng đã trả từ advance_payments
+        paid_res = await db.execute(
+            select(func.sum(AdvancePayment.amount))
+            .where(AdvancePayment.loan_id == loan.id)
+        )
+        paid = float(paid_res.scalar() or 0)
+        rows.append({
+            "id": loan.id,
+            "employee_id": emp.id,
+            "employee_code": emp.employee_code,
+            "full_name": emp.full_name,
+            "department": emp.department,
+            "loan_date": loan.loan_date.isoformat(),
+            "total_amount": float(loan.total_amount),
+            "advance_type": loan.advance_type,
+            "repayment_months": loan.repayment_months,
+            "monthly_repayment": float(loan.monthly_repayment or 0),
+            "start_month": loan.start_month,
+            "paid_amount": paid,
+            "remaining": max(0, float(loan.total_amount) - paid),
+            "status": loan.status,
+            "notes": loan.notes,
+            "created_at": loan.created_at.isoformat() if loan.created_at else None,
+        })
+    return rows
+
+
+@router.post("/loans")
+async def create_loan(
+    req: CreateLoanRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: AppUser = Depends(require_roles(UserRole.ADMIN, UserRole.ACCOUNTANT)),
+):
+    """Tạo khoản tạm ứng + tự động sinh advance_payments theo kế hoạch trả"""
+    emp = await db.get(Employee, req.employee_id)
+    if not emp:
+        raise HTTPException(404, "Không tìm thấy nhân viên")
+
+    months = max(1, req.repayment_months)
+    per_month = req.monthly_repayment if req.monthly_repayment else round(req.total_amount / months)
+
+    loan = AdvanceLoan(
+        employee_id=req.employee_id,
+        loan_date=req.loan_date,
+        total_amount=req.total_amount,
+        advance_type=req.advance_type,
+        repayment_months=months,
+        monthly_repayment=per_month,
+        start_month=req.start_month,
+        paid_amount=0,
+        status='active',
+        notes=req.notes,
+        created_by=current_user.username,
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    )
+    db.add(loan)
+    await db.flush()  # để có loan.id
+
+    def add_months(d: date, n: int) -> date:
+        m = d.month - 1 + n
+        return d.replace(year=d.year + m // 12, month=m % 12 + 1, day=1)
+
+    # Sinh advance_payment cho từng kỳ
+    start = datetime.strptime(req.start_month, "%Y-%m").date().replace(day=1)
+    remaining = float(req.total_amount)
+    for i in range(months):
+        month_dt = add_months(start, i)
+        mk = month_dt.strftime("%Y-%m")
+        # Kỳ cuối trả phần còn lại để tránh sai số làm tròn
+        amt = per_month if i < months - 1 else remaining
+        remaining -= amt
+        pay = AdvancePayment(
+            employee_id=req.employee_id,
+            loan_id=loan.id,
+            advance_date=month_dt,
+            month_key=mk,
+            amount=round(amt),
+            installment_no=i + 1,
+            input_mode='amount',
+            notes=f"Kỳ {i+1}/{months} — {req.notes or ''}".strip(" —"),
+        )
+        db.add(pay)
+
+    await db.commit()
+    return {"message": f"Tạo thành công khoản ứng {req.total_amount:,.0f}đ cho {emp.full_name} — {months} kỳ", "loan_id": loan.id}
+
+
+@router.delete("/loans/{loan_id}")
+async def cancel_loan(
+    loan_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: AppUser = Depends(require_roles(UserRole.ADMIN, UserRole.ACCOUNTANT)),
+):
+    """Hủy khoản tạm ứng — xóa các kỳ chưa đến hạn"""
+    loan = await db.get(AdvanceLoan, loan_id)
+    if not loan:
+        raise HTTPException(404, "Không tìm thấy khoản ứng")
+
+    today_mk = datetime.utcnow().strftime("%Y-%m")
+    # Xóa các kỳ ở tháng tương lai
+    await db.execute(
+        delete(AdvancePayment).where(
+            AdvancePayment.loan_id == loan_id,
+            AdvancePayment.month_key > today_mk,
+        )
+    )
+    loan.status = 'cancelled'
+    loan.updated_at = datetime.utcnow()
+    await db.commit()
+    return {"message": "Đã hủy các kỳ trả chưa đến hạn"}
+
+
+@router.get("/loans/{loan_id}/installments")
+async def get_loan_installments(
+    loan_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: AppUser = Depends(get_current_user),
+):
+    """Danh sách kỳ trả của 1 khoản ứng"""
+    result = await db.execute(
+        select(AdvancePayment)
+        .where(AdvancePayment.loan_id == loan_id)
+        .order_by(AdvancePayment.month_key)
+    )
+    today_mk = datetime.utcnow().strftime("%Y-%m")
+    rows = []
+    for p in result.scalars().all():
+        rows.append({
+            "id": p.id,
+            "month_key": p.month_key,
+            "amount": float(p.amount or 0),
+            "installment_no": p.installment_no,
+            "paid": p.month_key <= today_mk,
+            "notes": p.notes,
+        })
+    return rows

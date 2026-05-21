@@ -21,6 +21,7 @@ class Employee(Base):
     join_date = Column(Date)  # Ngày vào
     leave_date = Column(Date)  # Ngày nghỉ
     is_active = Column(Boolean, default=True)
+    dependents = Column(Integer, default=0)  # Số người phụ thuộc giảm trừ TNCN
     notes = Column(String(255))
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

@@ -1,10 +1,41 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 from app.database import engine, Base
 from app.models import *  # noqa: F401, F403 - Import all models so they register with Base
 from app.routers import auth, shifts, employees, dashboard, holidays, schedules, overtime, attendance, import_export, meal_allowance, salaries, audit, leave
 from app.services.seed import seed_database
+
+
+async def run_migration():
+    """Chạy migration thủ công — thêm cột nếu chưa tồn tại"""
+    async with engine.begin() as conn:
+        for stmt in [
+            "ALTER TABLE employees ADD COLUMN dependents INTEGER DEFAULT 0",
+            "ALTER TABLE advance_payments ADD COLUMN loan_id INTEGER",
+            "ALTER TABLE advance_payments ADD COLUMN installment_no INTEGER DEFAULT 1",
+            """CREATE TABLE IF NOT EXISTS advance_loans (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                employee_id INTEGER NOT NULL,
+                loan_date DATE NOT NULL,
+                total_amount NUMERIC(12,2) NOT NULL,
+                advance_type VARCHAR(16) DEFAULT 'cash',
+                repayment_months INTEGER DEFAULT 1,
+                monthly_repayment NUMERIC(12,2),
+                start_month VARCHAR(7) NOT NULL,
+                paid_amount NUMERIC(12,2) DEFAULT 0,
+                status VARCHAR(16) DEFAULT 'active',
+                notes VARCHAR(255),
+                created_by VARCHAR(64),
+                created_at DATETIME,
+                updated_at DATETIME
+            )""",
+        ]:
+            try:
+                await conn.execute(text(stmt))
+            except Exception:
+                pass
 
 
 @asynccontextmanager
@@ -12,6 +43,7 @@ async def lifespan(app: FastAPI):
     """Startup: create tables + seed data"""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    await run_migration()
     # await seed_database()  # Dừng tự động seed dữ liệu theo yêu cầu
     yield
     await engine.dispose()

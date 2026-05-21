@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { DatePicker, Select, Spin, Tooltip, Button, Space, Modal, Input, InputNumber, Form, message, Popconfirm } from 'antd';
+import { DatePicker, Select, Spin, Tooltip, Button, Space, Modal, Input, InputNumber, Form, message, Popconfirm, Table as AntTable, Tag } from 'antd';
 import {
   DollarCircleOutlined,
   DownloadOutlined,
@@ -9,6 +9,7 @@ import {
   TeamOutlined,
   SearchOutlined,
   MoonOutlined,
+  ThunderboltOutlined,
 } from '@ant-design/icons';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import dayjs from 'dayjs';
@@ -50,6 +51,11 @@ export default function MealAllowance() {
   const [dateRange, setDateRange] = useState(initialFilters.dateRange);
   const [nightModal, setNightModal] = useState(false);
   const [nightAllowanceRate, setNightAllowanceRate] = useState(0);
+  const [nightOtTarget, setNightOtTarget] = useState(null); // { cell, employeeId }
+  const [nightOtSaving, setNightOtSaving] = useState(false);
+  const [quickModal, setQuickModal] = useState(false);
+  const [selectedRowKeys, setSelectedRowKeys] = useState([]);
+  const [quickSaving, setQuickSaving] = useState(false);
 
   useEffect(() => {
     const saved = localStorage.getItem('nightAllowanceRate');
@@ -72,6 +78,50 @@ export default function MealAllowance() {
     message.success('Đã lưu mức phụ cấp ca đêm');
   };
 
+  const handleNightOtSave = async (withNightPccd) => {
+    if (!nightOtTarget) return;
+    const { cell, employeeId } = nightOtTarget;
+    setNightOtSaving(true);
+    try {
+      const payload = { employee_id: employeeId, work_date: cell.work_date, meal_count: 1 };
+      if (withNightPccd) payload.ot_end_time = '23:30';
+      await api.put('/schedules/x-overtime', payload);
+      message.success(withNightPccd ? 'Đã thêm bữa ăn và PC ca đêm' : 'Đã thêm bữa ăn');
+      setNightOtTarget(null);
+      queryClient.invalidateQueries({ queryKey: ['attendance'] });
+    } catch {
+      message.error('Lỗi khi lưu');
+    } finally {
+      setNightOtSaving(false);
+    }
+  };
+
+  const handleQuickOtSave = async () => {
+    if (selectedRowKeys.length === 0) return;
+    setQuickSaving(true);
+    try {
+      const selected = eligibleList.filter((r) => selectedRowKeys.includes(r.key));
+      await Promise.all(
+        selected.map((r) =>
+          api.put('/schedules/x-overtime', {
+            employee_id: r.employee_id,
+            work_date: r.cell.work_date,
+            meal_count: 1,
+            ...(r.is_night ? { ot_end_time: '23:30' } : {}),
+          })
+        )
+      );
+      message.success(`Đã cập nhật ${selected.length} ngày tăng ca`);
+      setQuickModal(false);
+      setSelectedRowKeys([]);
+      queryClient.invalidateQueries({ queryKey: ['attendance'] });
+    } catch {
+      message.error('Lỗi khi lưu hàng loạt');
+    } finally {
+      setQuickSaving(false);
+    }
+  };
+
   const { data: att, isLoading } = useQuery({
     queryKey: ['attendance', monthKey, dept, dateRange[0]?.format('YYYY-MM-DD'), dateRange[1]?.format('YYYY-MM-DD'), nightAllowanceRate],
     queryFn: () => api.get('/attendance', {
@@ -92,6 +142,67 @@ export default function MealAllowance() {
 
   const s = att || { rows: [], days_in_month: 30 };
 
+  const eligibleList = useMemo(() => {
+    const result = [];
+    for (const row of (att?.rows || [])) {
+      for (const cell of (row.days || [])) {
+        if (cell.ot_eligible || cell.night_eligible) {
+          result.push({
+            key: `${row.employee_id}_${cell.work_date}`,
+            employee_id: row.employee_id,
+            employee_code: row.employee_code,
+            full_name: row.full_name,
+            cell,
+            is_night: !!cell.night_eligible,
+          });
+        }
+      }
+    }
+    return result.sort((a, b) => a.cell.work_date.localeCompare(b.cell.work_date));
+  }, [att]);
+
+  const quickOtColumns = [
+    {
+      title: 'Họ tên',
+      dataIndex: 'full_name',
+      render: (v, r) => (
+        <div>
+          <div style={{ fontWeight: 600, fontSize: 13 }}>{v}</div>
+          <div style={{ fontSize: 11, color: '#9ca3af' }}>{r.employee_code}</div>
+        </div>
+      ),
+    },
+    {
+      title: 'Ngày',
+      key: 'date',
+      width: 75,
+      render: (_, r) => dayjs(r.cell.work_date).format('DD/MM'),
+    },
+    {
+      title: 'Giờ ra',
+      key: 'checkout',
+      width: 72,
+      render: (_, r) => r.cell.check_out
+        ? <b style={{ color: r.is_night ? '#1d4ed8' : '#d97706' }}>{dayjs(r.cell.check_out).format('HH:mm')}</b>
+        : '–',
+    },
+    {
+      title: 'Loại OT',
+      key: 'type',
+      width: 115,
+      render: (_, r) => r.is_night
+        ? <Tag color="blue" style={{ fontSize: 11 }}>OT sau 23h</Tag>
+        : <Tag color="orange" style={{ fontSize: 11 }}>OT sau 18h</Tag>,
+    },
+    {
+      title: 'Sẽ thêm',
+      key: 'action',
+      render: (_, r) => r.is_night
+        ? <span style={{ fontSize: 11, color: '#1d4ed8' }}>1 bữa + PC đêm</span>
+        : <span style={{ fontSize: 11, color: '#d97706' }}>1 bữa ăn</span>,
+    },
+  ];
+
   let days = [];
   if (dateRange[0] && dateRange[1]) {
     const start = dateRange[0].date();
@@ -103,6 +214,21 @@ export default function MealAllowance() {
 
   const renderMealCell = (cell, employeeId) => {
     if (cell.status === 'no_data') return <span className="ma-cell-dot">·</span>;
+
+    if (cell.night_eligible) {
+      const amount = cell.meal_allowance || 0;
+      const shortAmount = amount >= 1000 ? `${amount / 1000}k` : String(amount || '0');
+      return (
+        <Tooltip title={`Ra ${cell.check_out ? dayjs(cell.check_out).format('HH:mm') : ''} — quá 23h, click để xử lý`}>
+          <div
+            className="ma-cell-val ma-cell-val--night-eligible"
+            onClick={() => setNightOtTarget({ cell, employeeId })}
+          >
+            {shortAmount}
+          </div>
+        </Tooltip>
+      );
+    }
 
     if (cell.ot_eligible) {
       const amount = cell.meal_allowance || 0;
@@ -233,16 +359,26 @@ export default function MealAllowance() {
             </div>
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          {user?.role === 'admin' && (
-            <Tooltip title="Cấu hình phụ cấp ca đêm">
-              <Button icon={<SettingOutlined />} onClick={() => setNightModal(true)} />
-            </Tooltip>
-          )}
-          <Button icon={<DownloadOutlined />} type="primary"
-            style={{ background: '#276EF1', borderColor: '#276EF1', borderRadius: 7 }}
-            onClick={handleExport}>
-            Xuất Excel
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {user?.role === 'admin' && (
+              <Tooltip title="Cấu hình phụ cấp ca đêm">
+                <Button icon={<SettingOutlined />} onClick={() => setNightModal(true)} />
+              </Tooltip>
+            )}
+            <Button icon={<DownloadOutlined />} type="primary"
+              style={{ background: '#276EF1', borderColor: '#276EF1', borderRadius: 7 }}
+              onClick={handleExport}>
+              Xuất Excel
+            </Button>
+          </div>
+          <Button
+            size="small"
+            icon={<ThunderboltOutlined />}
+            onClick={() => { setSelectedRowKeys(eligibleList.map((r) => r.key)); setQuickModal(true); }}
+            style={{ background: eligibleList.length > 0 ? '#fff7ed' : '#f9fafb', color: eligibleList.length > 0 ? '#d97706' : '#9ca3af', border: `1px solid ${eligibleList.length > 0 ? '#fbbf24' : '#e5e7eb'}`, borderRadius: 6, fontSize: 12 }}
+          >
+            Thêm nhanh OT{eligibleList.length > 0 ? ` (${eligibleList.length} ngày)` : ''}
           </Button>
         </div>
       </div>
@@ -401,6 +537,90 @@ export default function MealAllowance() {
       <div className="ma-footer-hint">
         * Bảng hiển thị tiền ăn theo từng ngày. Click tên nhân viên để xem chi tiết.
       </div>
+
+      {/* Quick OT bulk modal */}
+      <Modal
+        title={<><ThunderboltOutlined style={{ color: '#d97706', marginRight: 8 }} />Thêm nhanh tăng ca ({eligibleList.length} ngày)</>}
+        open={quickModal}
+        onCancel={() => setQuickModal(false)}
+        width={660}
+        centered
+        footer={[
+          <Button key="cancel" onClick={() => setQuickModal(false)}>Hủy</Button>,
+          <Button key="submit" type="primary" loading={quickSaving}
+            disabled={selectedRowKeys.length === 0}
+            style={{ background: '#276EF1', borderColor: '#276EF1' }}
+            onClick={handleQuickOtSave}>
+            Áp dụng cho {selectedRowKeys.length} ngày đã chọn
+          </Button>,
+        ]}
+      >
+        <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 12 }}>
+          <Tag color="orange">OT sau 18h</Tag> → thêm 1 bữa ăn &nbsp;|&nbsp;
+          <Tag color="blue">OT sau 23h</Tag> → thêm 1 bữa + PC ca đêm ({nightAllowanceRate.toLocaleString()}đ)
+        </div>
+        {eligibleList.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '40px 0', color: '#9ca3af', fontSize: 13 }}>
+            Không có ngày OT nào cần xử lý trong khoảng thời gian này.<br />
+            <span style={{ fontSize: 11 }}>Ô cam / xanh trên bảng mới xuất hiện ở đây.</span>
+          </div>
+        ) : (
+          <AntTable
+            dataSource={eligibleList}
+            columns={quickOtColumns}
+            rowSelection={{ selectedRowKeys, onChange: setSelectedRowKeys }}
+            size="small"
+            pagination={false}
+            scroll={{ y: 380 }}
+          />
+        )}
+      </Modal>
+
+      {/* Night OT action modal */}
+      <Modal
+        title={<><MoonOutlined style={{ color: '#1d4ed8', marginRight: 8 }} />Xử lý tăng ca qua 23h</>}
+        open={!!nightOtTarget}
+        onCancel={() => setNightOtTarget(null)}
+        footer={[
+          <Button key="cancel" onClick={() => setNightOtTarget(null)}>Hủy</Button>,
+          <Button key="meal" loading={nightOtSaving} onClick={() => handleNightOtSave(false)}>
+            Chỉ thêm bữa ăn
+          </Button>,
+          <Button key="meal-pccd" type="primary" loading={nightOtSaving}
+            style={{ background: '#1d4ed8', borderColor: '#1d4ed8' }}
+            onClick={() => handleNightOtSave(true)}>
+            Thêm bữa + PC đêm
+          </Button>,
+        ]}
+        centered
+        width={400}
+      >
+        {nightOtTarget && (
+          <div style={{ padding: '8px 0' }}>
+            <div style={{ marginBottom: 12 }}>
+              <span style={{ color: '#6b7280', fontSize: 13 }}>Nhân viên: </span>
+              <b>{nightOtTarget.employeeId}</b>
+              &nbsp;—&nbsp;
+              <span style={{ color: '#6b7280', fontSize: 13 }}>Ngày: </span>
+              <b>{dayjs(nightOtTarget.cell.work_date).format('DD/MM/YYYY')}</b>
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <span style={{ color: '#6b7280', fontSize: 13 }}>Giờ ra: </span>
+              <b style={{ color: '#1d4ed8' }}>
+                {nightOtTarget.cell.check_out ? dayjs(nightOtTarget.cell.check_out).format('HH:mm') : '--'}
+              </b>
+            </div>
+            <div style={{ background: '#eff6ff', borderRadius: 8, padding: '10px 14px', fontSize: 13 }}>
+              <div style={{ marginBottom: 6 }}>
+                <b>Chỉ thêm bữa ăn</b> — cộng 1 suất ăn tăng ca (35k), không thêm PC đêm.
+              </div>
+              <div>
+                <b>Thêm bữa + PC đêm</b> — cộng 1 suất ăn tăng ca và phụ cấp ca đêm ({nightAllowanceRate.toLocaleString()}đ).
+              </div>
+            </div>
+          </div>
+        )}
+      </Modal>
 
       {/* Night allowance modal */}
       <Modal

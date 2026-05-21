@@ -55,6 +55,7 @@ class EmployeeResponse(BaseModel):
     join_date: Optional[date] = None
     leave_date: Optional[date] = None
     is_active: bool
+    dependents: Optional[int] = 0
     notes: Optional[str] = None
     month_salary: Optional[Decimal] = None
     created_at: Optional[datetime] = None
