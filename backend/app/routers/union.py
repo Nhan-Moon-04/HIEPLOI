@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Q
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, delete, func, case
 from app.database import get_db
-from app.models.union import UnionTransaction, UnionEvent, UnionEventMember
+from app.models.union import UnionTransaction, UnionEvent, UnionEventMember, UnionMember
 from app.models.employee import Employee
 from app.models.user import AppUser, UserRole
 from app.middleware.auth import require_roles, get_current_user
@@ -506,10 +506,10 @@ EVENT_SHEET_MAP = {
     'TET am': {'name': 'Tất niên 2024', 'type': 'tat_nien', 'year': 2025},
     '8 3': {'name': 'Quốc tế Phụ nữ 08/03/2025', 'type': 'quocte_phunu', 'year': 2025},
     '10 03 al': {'name': 'Giỗ Tổ Hùng Vương 10/03 AL', 'type': 'gio_to', 'year': 2025},
-    '30 04': {'name': 'Lễ 30/04 & 01/05/2025', 'type': 'le_304_105', 'year': 2025},
-    '10-3 va 30-4-1-5': {'name': 'Giỗ Tổ Hùng Vương & 30/4-1/5', 'type': 'le_304_105', 'year': 2025},
+    '30 04': {'name': 'Lễ 30/04 & 01/05/2025', 'type': 'le_304_105', 'year': 2026},
+    '10-3 va 30-4-1-5': {'name': 'Giỗ Tổ Hùng Vương & 30/4-1/5', 'type': 'le_304_105', 'year': 2026},
     '02.09 (2)': {'name': 'Quốc khánh 02/09/2025', 'type': 'quoc_khanh', 'year': 2025},
-    ' TRUNG THU 25 (2)': {'name': 'Tết Trung thu 2025', 'type': 'trung_thu', 'year': 2025},
+    'TRUNG THU 25 (2)': {'name': 'Tết Trung thu 2025', 'type': 'trung_thu', 'year': 2025},
     '20 10': {'name': 'Phụ nữ Việt Nam 20/10/2025', 'type': 'phunu_vn', 'year': 2025},
     'NGAY NAM 19 11': {'name': 'Quốc tế Nam giới 19/11/2025', 'type': 'ngay_nam', 'year': 2025},
     'TET 1-1': {'name': 'Tết Dương lịch 01/01/2026', 'type': 'tet_duong', 'year': 2026},
@@ -655,10 +655,12 @@ async def import_union_excel(
             stats["cash_transactions"] += 1
 
     # ─── Import Event sheets ──────────────────────────────────────────────────
+    sheet_name_lookup = {s.strip(): s for s in wb.sheet_names()}
     for sheet_name, meta in EVENT_SHEET_MAP.items():
-        if sheet_name not in wb.sheet_names():
+        actual_name = sheet_name_lookup.get(sheet_name.strip())
+        if not actual_name:
             continue
-        ws = wb.sheet_by_name(sheet_name)
+        ws = wb.sheet_by_name(actual_name)
 
         # Clear old event data for this event
         old_events = await db.execute(
@@ -739,3 +741,175 @@ async def import_union_excel(
                    f"{stats['events']} su kien, {stats['members']} doan vien",
         **stats,
     }
+
+
+# ─── Union Members (Danh sách đoàn viên) ─────────────────────────────────────
+
+POSITION_LABELS = {
+    'doan_vien': 'Đoàn viên',
+    'uy_vien_bch': 'Ủy viên BCH',
+    'chu_tich': 'Chủ tịch CĐ',
+    'pho_chu_tich': 'Phó chủ tịch CĐ',
+    'thu_quy': 'Thủ quỹ',
+}
+
+
+class UnionMemberOut(BaseModel):
+    id: int
+    employee_id: Optional[int] = None
+    full_name: str
+    gender: Optional[str] = None
+    position: str = 'doan_vien'
+    bch_monthly_salary: float = 0
+    join_date: Optional[date] = None
+    is_active: bool = True
+    notes: Optional[str] = None
+
+
+class UnionMemberCreate(BaseModel):
+    employee_id: Optional[int] = None
+    full_name: str
+    gender: Optional[str] = None
+    position: str = 'doan_vien'
+    bch_monthly_salary: float = 0
+    join_date: Optional[date] = None
+    notes: Optional[str] = None
+
+
+@router.get("/members", response_model=List[UnionMemberOut])
+async def get_union_members(
+    is_active: Optional[bool] = Query(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: AppUser = Depends(get_current_user),
+):
+    q = select(UnionMember)
+    if is_active is not None:
+        q = q.where(UnionMember.is_active == is_active)
+    q = q.order_by(UnionMember.position, UnionMember.full_name)
+    result = await db.execute(q)
+    rows = result.scalars().all()
+    return [UnionMemberOut(
+        id=r.id, employee_id=r.employee_id, full_name=r.full_name,
+        gender=r.gender, position=r.position or 'doan_vien',
+        bch_monthly_salary=float(r.bch_monthly_salary or 0),
+        join_date=r.join_date, is_active=bool(r.is_active), notes=r.notes,
+    ) for r in rows]
+
+
+@router.post("/members", response_model=UnionMemberOut)
+async def create_union_member(
+    req: UnionMemberCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: AppUser = Depends(require_roles(UserRole.ADMIN, UserRole.ACCOUNTANT)),
+):
+    m = UnionMember(
+        employee_id=req.employee_id, full_name=req.full_name,
+        gender=req.gender, position=req.position,
+        bch_monthly_salary=req.bch_monthly_salary,
+        join_date=req.join_date, is_active=True, notes=req.notes,
+    )
+    db.add(m)
+    await db.commit()
+    await db.refresh(m)
+    return UnionMemberOut(
+        id=m.id, employee_id=m.employee_id, full_name=m.full_name,
+        gender=m.gender, position=m.position or 'doan_vien',
+        bch_monthly_salary=float(m.bch_monthly_salary or 0),
+        join_date=m.join_date, is_active=bool(m.is_active), notes=m.notes,
+    )
+
+
+@router.put("/members/{mid}")
+async def update_union_member(
+    mid: int,
+    req: UnionMemberCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: AppUser = Depends(require_roles(UserRole.ADMIN, UserRole.ACCOUNTANT)),
+):
+    m = await db.get(UnionMember, mid)
+    if not m:
+        raise HTTPException(404, "Khong tim thay doan vien")
+    m.employee_id = req.employee_id
+    m.full_name = req.full_name
+    m.gender = req.gender
+    m.position = req.position
+    m.bch_monthly_salary = req.bch_monthly_salary
+    m.join_date = req.join_date
+    m.notes = req.notes
+    m.updated_at = datetime.utcnow()
+    await db.commit()
+    return {"message": "Da cap nhat"}
+
+
+@router.patch("/members/{mid}/toggle-active")
+async def toggle_member_active(
+    mid: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: AppUser = Depends(require_roles(UserRole.ADMIN, UserRole.ACCOUNTANT)),
+):
+    m = await db.get(UnionMember, mid)
+    if not m:
+        raise HTTPException(404, "Khong tim thay doan vien")
+    m.is_active = not m.is_active
+    m.updated_at = datetime.utcnow()
+    await db.commit()
+    return {"is_active": m.is_active}
+
+
+@router.delete("/members/{mid}")
+async def delete_union_member(
+    mid: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: AppUser = Depends(require_roles(UserRole.ADMIN)),
+):
+    m = await db.get(UnionMember, mid)
+    if not m:
+        raise HTTPException(404, "Khong tim thay doan vien")
+    await db.delete(m)
+    await db.commit()
+    return {"message": "Da xoa"}
+
+
+@router.post("/events/{eid}/members/bulk-from-list")
+async def bulk_add_from_member_list(
+    eid: int,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user: AppUser = Depends(require_roles(UserRole.ADMIN, UserRole.ACCOUNTANT)),
+):
+    """Thêm hàng loạt đoàn viên vào sự kiện từ danh sách đoàn viên chính thức"""
+    ev = await db.get(UnionEvent, eid)
+    if not ev:
+        raise HTTPException(404, "Su kien khong ton tai")
+    amount_per_person = float(body.get("amount_per_person", 0))
+    gender_filter = body.get("gender")  # None | male | female
+    # Clear existing members
+    await db.execute(delete(UnionEventMember).where(UnionEventMember.event_id == eid))
+    # Get active members
+    q = select(UnionMember).where(UnionMember.is_active == True)
+    if gender_filter:
+        q = q.where(UnionMember.gender == gender_filter)
+    result = await db.execute(q)
+    members = result.scalars().all()
+    total_amount = 0.0
+    total_male = 0
+    total_female = 0
+    for mem in members:
+        m = UnionEventMember(
+            event_id=eid, employee_id=mem.employee_id,
+            full_name=mem.full_name, gender=mem.gender,
+            amount=amount_per_person,
+        )
+        db.add(m)
+        total_amount += amount_per_person
+        if mem.gender == 'male':
+            total_male += 1
+        elif mem.gender == 'female':
+            total_female += 1
+    ev.total_members = len(members)
+    ev.total_amount = total_amount
+    ev.total_male = total_male
+    ev.total_female = total_female
+    ev.amount_per_person = amount_per_person
+    await db.commit()
+    return {"message": f"Da them {len(members)} doan vien", "count": len(members)}

@@ -56,3 +56,21 @@ class UnionEventMember(Base):
     amount = Column(Numeric(12, 2), default=0)
     notes = Column(String(255))
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class UnionMember(Base):
+    """Danh sách đoàn viên chính thức"""
+    __tablename__ = "union_members"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    employee_id = Column(Integer, ForeignKey("employees.id"), nullable=True)
+    full_name = Column(String(255), nullable=False)
+    gender = Column(String(10))            # male | female
+    # doan_vien | uy_vien_bch | chu_tich | pho_chu_tich | thu_quy
+    position = Column(String(32), default='doan_vien')
+    bch_monthly_salary = Column(Numeric(12, 2), default=0)  # Phụ cấp BCH (0 nếu không thuộc BCH)
+    join_date = Column(Date)
+    is_active = Column(Boolean, default=True)
+    notes = Column(String(255))
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

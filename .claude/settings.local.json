@@ -17,7 +17,11 @@
       "PowerShell(Get-Process -Name uvicorn -ErrorAction SilentlyContinue)",
       "PowerShell(Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue)",
       "PowerShell(Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue })",
-      "PowerShell(Get-Process -Id 28148)"
+      "PowerShell(Get-Process -Id 28148)",
+      "Bash(cat)",
+      "Bash(python3 /tmp/write_union.py)",
+      "PowerShell(Select-String \"union|advance\" \"D:\\\\CODE\\\\HIEPLOI\\\\frontend\\\\src\\\\components\\\\Layout\\\\Sidebar.jsx\" -i)",
+      "PowerShell(Select-String -Pattern \"union|advance\" -Path \"D:\\\\CODE\\\\HIEPLOI\\\\frontend\\\\src\\\\components\\\\Layout\\\\Sidebar.jsx\" -CaseSensitive:$false)"
     ]
   }
 }
