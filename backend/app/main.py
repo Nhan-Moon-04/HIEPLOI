@@ -11,32 +11,33 @@ from app.services.seed import seed_database
 
 async def run_migration():
     """Chạy migration thủ công — thêm cột nếu chưa tồn tại"""
-    async with engine.begin() as conn:
-        for stmt in [
-            "ALTER TABLE employees ADD COLUMN dependents INTEGER DEFAULT 0",
-            "ALTER TABLE advance_payments ADD COLUMN loan_id INTEGER",
-            "ALTER TABLE advance_payments ADD COLUMN installment_no INTEGER DEFAULT 1",
-            """CREATE TABLE IF NOT EXISTS advance_loans (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                employee_id INTEGER NOT NULL,
-                loan_date DATE NOT NULL,
-                total_amount NUMERIC(12,2) NOT NULL,
-                advance_type VARCHAR(16) DEFAULT 'cash',
-                repayment_months INTEGER DEFAULT 1,
-                monthly_repayment NUMERIC(12,2),
-                start_month VARCHAR(7) NOT NULL,
-                paid_amount NUMERIC(12,2) DEFAULT 0,
-                status VARCHAR(16) DEFAULT 'active',
-                notes VARCHAR(255),
-                created_by VARCHAR(64),
-                created_at DATETIME,
-                updated_at DATETIME
-            )""",
-        ]:
-            try:
+    for stmt in [
+        "ALTER TABLE employees ADD COLUMN dependents INTEGER DEFAULT 0",
+        "ALTER TABLE advance_payments ADD COLUMN loan_id INTEGER",
+        "ALTER TABLE advance_payments ADD COLUMN installment_no INTEGER DEFAULT 1",
+        "ALTER TABLE app_users ADD COLUMN is_setup_completed BOOLEAN DEFAULT FALSE",
+        """CREATE TABLE IF NOT EXISTS advance_loans (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            employee_id INTEGER NOT NULL,
+            loan_date DATE NOT NULL,
+            total_amount NUMERIC(12,2) NOT NULL,
+            advance_type VARCHAR(16) DEFAULT 'cash',
+            repayment_months INTEGER DEFAULT 1,
+            monthly_repayment NUMERIC(12,2),
+            start_month VARCHAR(7) NOT NULL,
+            paid_amount NUMERIC(12,2) DEFAULT 0,
+            status VARCHAR(16) DEFAULT 'active',
+            notes VARCHAR(255),
+            created_by VARCHAR(64),
+            created_at DATETIME,
+            updated_at DATETIME
+        )""",
+    ]:
+        try:
+            async with engine.begin() as conn:
                 await conn.execute(text(stmt))
-            except Exception:
-                pass
+        except Exception:
+            pass
 
 
 @asynccontextmanager

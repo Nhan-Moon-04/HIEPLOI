@@ -14,6 +14,7 @@ import { useQuery } from '@tanstack/react-query';
 import dayjs from 'dayjs';
 import api from '../api/client';
 import AttendanceDetailModal from '../components/Attendance/AttendanceDetailModal';
+import useAuthStore from '../stores/authStore';
 
 const STATUS_MAP = {
   full:        { label: 'Đủ giờ',   icon: '✓' },
@@ -27,6 +28,8 @@ const STATUS_MAP = {
 };
 
 export default function Attendance() {
+  const { user } = useAuthStore();
+  const isWorker = user?.role === 'worker';
   const [monthKey, setMonthKey] = useState(dayjs().format('YYYY-MM'));
   const [dept, setDept] = useState(null);
   const [selectedRow, setSelectedRow] = useState(null);
@@ -118,15 +121,17 @@ export default function Attendance() {
             )}
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <Button
-            icon={<DownloadOutlined />}
-            type="primary"
-            style={{ background: '#276EF1', borderColor: '#276EF1', borderRadius: 7 }}
-          >
-            Xuất Excel
-          </Button>
-        </div>
+        {!isWorker && (
+          <div style={{ display: 'flex', gap: 8 }}>
+            <Button
+              icon={<DownloadOutlined />}
+              type="primary"
+              style={{ background: '#276EF1', borderColor: '#276EF1', borderRadius: 7 }}
+            >
+              Xuất Excel
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* Filter bar */}
@@ -139,16 +144,18 @@ export default function Attendance() {
           style={{ width: 160 }}
           size="middle"
         />
-        <Select
-          placeholder="Bộ phận"
-          allowClear
-          style={{ width: 160 }}
-          value={dept}
-          onChange={setDept}
-          options={departments.map((d) => ({ value: d, label: d }))}
-          suffixIcon={<TeamOutlined style={{ color: '#9ca3af' }} />}
-          size="middle"
-        />
+        {!isWorker && (
+          <Select
+            placeholder="Bộ phận"
+            allowClear
+            style={{ width: 160 }}
+            value={dept}
+            onChange={setDept}
+            options={departments.map((d) => ({ value: d, label: d }))}
+            suffixIcon={<TeamOutlined style={{ color: '#9ca3af' }} />}
+            size="middle"
+          />
+        )}
       </div>
 
       {/* KPI row */}

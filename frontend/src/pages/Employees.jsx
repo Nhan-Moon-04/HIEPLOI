@@ -5,9 +5,12 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import dayjs from 'dayjs';
 import api from '../api/client';
+import useAuthStore from '../stores/authStore';
 
 export default function Employees() {
   const navigate = useNavigate();
+  const { user } = useAuthStore();
+  const isWorker = user?.role === 'worker';
   const [modal, setModal] = useState(false);
   const [editing, setEditing] = useState(null);
   const [search, setSearch] = useState('');
@@ -171,7 +174,7 @@ export default function Employees() {
         </Space>
       ),
     },
-  ];
+  ].filter(col => !isWorker || col.fixed !== 'right');
 
   return (
     <div className="emp-page">
@@ -200,13 +203,15 @@ export default function Employees() {
             )}
           </div>
         </div>
-        <Button
-          type="primary" icon={<PlusOutlined />}
-          className="emp-add-btn"
-          onClick={() => { setEditing(null); form.resetFields(); setModal(true); }}
-        >
-          Thêm nhân viên
-        </Button>
+        {!isWorker && (
+          <Button
+            type="primary" icon={<PlusOutlined />}
+            className="emp-add-btn"
+            onClick={() => { setEditing(null); form.resetFields(); setModal(true); }}
+          >
+            Thêm nhân viên
+          </Button>
+        )}
       </div>
 
       {/* Filter bar */}

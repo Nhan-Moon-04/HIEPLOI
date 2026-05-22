@@ -11,8 +11,11 @@ import {
 import { useQuery } from '@tanstack/react-query';
 import dayjs from 'dayjs';
 import api from '../api/client';
+import useAuthStore from '../stores/authStore';
 
 export default function Overtime() {
+  const { user } = useAuthStore();
+  const isWorker = user?.role === 'worker';
   const [monthKey, setMonthKey] = useState(dayjs().format('YYYY-MM'));
   const [dept, setDept] = useState(null);
 
@@ -87,16 +90,18 @@ export default function Overtime() {
           style={{ width: 160 }}
           size="middle"
         />
-        <Select
-          placeholder="Bộ phận"
-          allowClear
-          style={{ width: 160 }}
-          value={dept}
-          onChange={setDept}
-          options={departments.map((d) => ({ value: d, label: d }))}
-          suffixIcon={<TeamOutlined style={{ color: '#9ca3af' }} />}
-          size="middle"
-        />
+        {!isWorker && (
+          <Select
+            placeholder="Bộ phận"
+            allowClear
+            style={{ width: 160 }}
+            value={dept}
+            onChange={setDept}
+            options={departments.map((d) => ({ value: d, label: d }))}
+            suffixIcon={<TeamOutlined style={{ color: '#9ca3af' }} />}
+            size="middle"
+          />
+        )}
       </div>
 
       {/* KPI row */}

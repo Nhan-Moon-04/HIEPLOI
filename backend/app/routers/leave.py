@@ -23,7 +23,11 @@ async def get_leave_summary(
 ):
     """Tong hop phep nam va nghi ko phep - Tinh toan chinh xac theo mac dinh va lich lam"""
     # 1. Lay tat ca nhan vien dang hoat dong
-    emp_result = await db.execute(select(Employee).where(Employee.is_active == True).order_by(Employee.employee_code))
+    emp_q = select(Employee).where(Employee.is_active == True)
+    if current_user.role == UserRole.WORKER:
+        emp_q = emp_q.where(Employee.id == current_user.employee_id)
+    emp_q = emp_q.order_by(Employee.employee_code)
+    emp_result = await db.execute(emp_q)
     employees = emp_result.scalars().all()
     
     # 2. Load ma ca
@@ -116,6 +120,9 @@ async def get_leave_details(
     current_user: AppUser = Depends(get_current_user),
 ):
     """Chi tiet cac ngay nghi phep va vang mat cua 1 nhan vien"""
+    if current_user.role == UserRole.WORKER and employee_id != current_user.employee_id:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=403, detail="Không có quyền xem chi tiết phép của nhân viên khác")
     # 1. Load data
     shift_res = await db.execute(select(ShiftTemplate))
     all_shifts = shift_res.scalars().all()

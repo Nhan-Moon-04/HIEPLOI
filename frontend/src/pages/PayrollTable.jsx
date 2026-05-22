@@ -7,6 +7,7 @@ import {
 import { useQuery } from '@tanstack/react-query';
 import dayjs from 'dayjs';
 import api from '../api/client';
+import useAuthStore from '../stores/authStore';
 
 // ─── TNCN Calculator ────────────────────────────────────────────────────────
 function calcTNCN(taxable) {
@@ -137,6 +138,8 @@ function PaySlip({ row, monthKey, onClose }) {
 
 // ─── Main Component ──────────────────────────────────────────────────────────
 export default function PayrollTable() {
+  const { user } = useAuthStore();
+  const isWorker = user?.role === 'worker';
   const [monthKey, setMonthKey] = useState(dayjs().format('YYYY-MM'));
   const [nightRate, setNightRate] = useState(() => Number(localStorage.getItem('nightAllowanceRate')) || 100000);
   const [dept, setDept] = useState(null);
@@ -412,20 +415,23 @@ export default function PayrollTable() {
           format="MM/YYYY"
           size="middle"
         />
-        <Select
-          placeholder="Bộ phận"
-          allowClear
-          style={{ width: 150 }}
-          value={dept}
-          onChange={setDept}
-          options={departments.map((d) => ({ value: d, label: d }))}
-          suffixIcon={<TeamOutlined style={{ color: '#9ca3af' }} />}
-          size="middle"
-        />
+        {!isWorker && (
+          <Select
+            placeholder="Bộ phận"
+            allowClear
+            style={{ width: 150 }}
+            value={dept}
+            onChange={setDept}
+            options={departments.map((d) => ({ value: d, label: d }))}
+            suffixIcon={<TeamOutlined style={{ color: '#9ca3af' }} />}
+            size="middle"
+          />
+        )}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#6b7280' }}>
           <span>PC đêm:</span>
           <InputNumber
             value={nightRate}
+            disabled={isWorker}
             onChange={(v) => { if (v != null) { setNightRate(v); localStorage.setItem('nightAllowanceRate', v); } }}
             formatter={(v) => `${v}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
             parser={(v) => v.replace(/,/g, '')}
@@ -433,7 +439,7 @@ export default function PayrollTable() {
           />
         </div>
         <div style={{ marginLeft: 'auto', fontSize: 12, color: '#6b7280' }}>
-          Nhấp tên nhân viên để xem phiếu lương
+          {isWorker ? 'Nhấp dòng lương để xem/in phiếu chi tiết' : 'Nhấp tên nhân viên để xem phiếu lương'}
         </div>
       </div>
 
@@ -448,7 +454,7 @@ export default function PayrollTable() {
             size="small"
             pagination={false}
             bordered
-            summary={() => (
+            summary={() => isWorker ? null : (
               <Table.Summary fixed>
                 <Table.Summary.Row style={{ background: '#f0f4ff', fontWeight: 700 }}>
                   <Table.Summary.Cell index={0} colSpan={2} fixed="left">TỔNG CỘNG ({payrollRows.length} NV)</Table.Summary.Cell>

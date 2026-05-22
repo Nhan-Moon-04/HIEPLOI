@@ -57,7 +57,10 @@ async def get_base_salaries(
 
     # Lấy lương
     query = select(MonthlySalary, Employee).join(Employee, MonthlySalary.employee_id == Employee.id)\
-        .where(MonthlySalary.month_key == month_key).order_by(Employee.employee_code)
+        .where(MonthlySalary.month_key == month_key)
+    if current_user.role == UserRole.WORKER:
+        query = query.where(MonthlySalary.employee_id == current_user.employee_id)
+    query = query.order_by(Employee.employee_code)
     
     result = await db.execute(query)
     records = result.all()
@@ -88,6 +91,9 @@ async def get_salary_history(
     current_user: AppUser = Depends(get_current_user),
 ):
     """Lịch sử lương theo tháng của 1 nhân viên"""
+    if current_user.role == UserRole.WORKER and employee_id != current_user.employee_id:
+        raise HTTPException(status_code=403, detail="Không có quyền xem lịch sử lương của nhân viên khác")
+
     result = await db.execute(
         select(MonthlySalary)
         .where(MonthlySalary.employee_id == employee_id)
@@ -250,12 +256,14 @@ async def get_advances_summary(
     current_user: AppUser = Depends(get_current_user),
 ):
     """Tổng tạm ứng theo nhân viên trong tháng"""
-    result = await db.execute(
-        select(AdvancePayment, Employee)
-        .join(Employee, AdvancePayment.employee_id == Employee.id)
+    query = select(AdvancePayment, Employee).join(Employee, AdvancePayment.employee_id == Employee.id)\
         .where(AdvancePayment.month_key == month_key)
-        .order_by(Employee.employee_code)
-    )
+    
+    if current_user.role == UserRole.WORKER:
+        query = query.where(AdvancePayment.employee_id == current_user.employee_id)
+        
+    query = query.order_by(Employee.employee_code)
+    result = await db.execute(query)
     rows = result.all()
     from collections import defaultdict
     emp_advances = defaultdict(float)
@@ -312,6 +320,8 @@ async def get_loans(
 ):
     """Danh sách khoản tạm ứng (có thể lọc theo nhân viên / trạng thái)"""
     q = select(AdvanceLoan, Employee).join(Employee, AdvanceLoan.employee_id == Employee.id)
+    if current_user.role == UserRole.WORKER:
+        employee_id = current_user.employee_id
     if employee_id:
         q = q.where(AdvanceLoan.employee_id == employee_id)
     if status:

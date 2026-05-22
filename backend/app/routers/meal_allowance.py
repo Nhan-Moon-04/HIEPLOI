@@ -12,7 +12,7 @@ from app.models.shift import ShiftTemplate
 from app.models.schedule import WorkSchedule
 from app.models.holiday import CompanyHoliday
 from app.models.x_overtime import XOvertimeConfig
-from app.models.user import AppUser
+from app.models.user import AppUser, UserRole
 from app.middleware.auth import get_current_user
 from app.services.nu_shift import is_nu_dynamic_shift_code, build_nu_shift_day_results, calculate_nu_shift_details
 
@@ -63,6 +63,8 @@ async def get_meal_allowance(
             or_(Employee.leave_date.is_(None), Employee.leave_date >= start_date),
         )
     )
+    if current_user.role == UserRole.WORKER:
+        emp_q = emp_q.where(Employee.id == current_user.employee_id)
     if department:
         emp_q = emp_q.where(Employee.department == department)
     emp_q = emp_q.order_by(cast(Employee.employee_code, Integer))

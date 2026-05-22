@@ -4,10 +4,13 @@ import { CalendarOutlined, EyeOutlined, HistoryOutlined } from '@ant-design/icon
 import { useQuery } from '@tanstack/react-query';
 import dayjs from 'dayjs';
 import api from '../api/client';
+import useAuthStore from '../stores/authStore';
 
 const { Title, Text } = Typography;
 
 export default function LeaveBalance() {
+  const { user } = useAuthStore();
+  const isWorker = user?.role === 'worker';
   const [year, setYear] = useState(dayjs().year());
   const [detailModal, setDetailModal] = useState(null);
 
@@ -72,32 +75,33 @@ export default function LeaveBalance() {
 
       <Row gutter={16} style={{ marginBottom: 16 }}>
         <Col span={8}>
-          <Card bordered={false} className="card">
+          <Card variant="borderless" className="card">
             <Statistic
-              title="Tổng nhân viên"
-              value={summary.length}
+              title={isWorker ? "Tiêu chuẩn phép" : "Tổng nhân viên"}
+              value={isWorker ? (summary[0]?.entitlement || 0) : summary.length}
               prefix={<HistoryOutlined />}
-              valueStyle={{ color: '#1e293b' }}
+              suffix={isWorker ? "ngày" : ""}
+              styles={{ content: { color: '#1e293b' } }}
             />
           </Card>
         </Col>
         <Col span={8}>
-          <Card bordered={false} className="card">
+          <Card variant="borderless" className="card">
             <Statistic
-              title="Tổng ngày đã nghỉ (toàn công ty)"
-              value={totalUsed}
+              title={isWorker ? "Đã nghỉ phép" : "Tổng ngày đã nghỉ (toàn công ty)"}
+              value={isWorker ? (summary[0]?.used || 0) : totalUsed}
               suffix="ngày"
-              valueStyle={{ color: '#f59e0b' }}
+              styles={{ content: { color: '#f59e0b' } }}
             />
           </Card>
         </Col>
         <Col span={8}>
-          <Card bordered={false} className="card">
+          <Card variant="borderless" className="card">
             <Statistic
-              title="Tổng ngày còn lại"
-              value={totalRemaining}
+              title={isWorker ? "Phép còn lại" : "Tổng ngày còn lại"}
+              value={isWorker ? (summary[0]?.remaining || 0) : totalRemaining}
               suffix="ngày"
-              valueStyle={{ color: '#10b981' }}
+              styles={{ content: { color: '#10b981' } }}
             />
           </Card>
         </Col>

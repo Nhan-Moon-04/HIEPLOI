@@ -4,6 +4,7 @@ import { CalendarOutlined, UploadOutlined, SearchOutlined, DeleteOutlined, Check
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import dayjs from 'dayjs';
 import api from '../api/client';
+import useAuthStore from '../stores/authStore';
 
 const SHIFT_COLORS = {
   X: '#4361ee', XVP: '#6366f1', D: '#7c3aed', CND: '#9333ea',
@@ -14,6 +15,8 @@ const SHIFT_COLORS = {
 const X_OT_SHIFTS = ['X', 'X40'];
 
 export default function Schedules() {
+  const { user } = useAuthStore();
+  const isWorker = user?.role === 'worker';
   const [monthKey, setMonthKey] = useState(dayjs().format('YYYY-MM'));
   const [editingCell, setEditingCell] = useState(null);
   const [otPopover, setOtPopover] = useState(null);
@@ -170,15 +173,16 @@ export default function Schedules() {
             color: accentColor,
             border: `1px solid ${accentColor}44`,
           } : {}}
-          onClick={() => !isLocked && setEditingCell({ empId: row.employee_id, day })}
+          onClick={() => !isLocked && !isWorker && setEditingCell({ empId: row.employee_id, day })}
         >
           {code || <span className="sch-cell-empty">–</span>}
         </div>
         {isXShift && (
           <div
             className={`ot-dot ${hasOt ? 'ot-dot--active' : ''}`}
-            title={hasOt ? 'Đã có tăng ca – click để sửa' : 'Thêm tăng ca X'}
-            onClick={(e) => { e.stopPropagation(); !isLocked && openOtPopover(row, day); }}
+            title={isWorker ? (hasOt ? 'Có tăng ca' : '') : (hasOt ? 'Đã có tăng ca – click để sửa' : 'Thêm tăng ca X')}
+            onClick={(e) => { e.stopPropagation(); !isLocked && !isWorker && openOtPopover(row, day); }}
+            style={{ cursor: isWorker ? 'default' : 'pointer' }}
           >
             ⚡
           </div>
@@ -229,7 +233,7 @@ export default function Schedules() {
       </div>
     );
 
-    if (isXShift) {
+    if (isXShift && !isWorker) {
       return (
         <Popover content={otContent} open={isOtOpen}
           onOpenChange={(open) => { if (!open) setOtPopover(null); }}
@@ -262,19 +266,21 @@ export default function Schedules() {
               </Tag>
             ) : (
               <div className="emp-stat-chip" style={{ color: '#9ca3af', fontSize: 11 }}>
-                Click ô để đổi ca · ⚡ tăng ca X
+                {isWorker ? 'Chế độ xem (Chỉ đọc)' : 'Click ô để đổi ca · ⚡ tăng ca X'}
               </div>
             )}
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <Upload accept=".xlsx,.xls" showUploadList={false} disabled={isLocked}
-            beforeUpload={(file) => { if (!isLocked) { importMut.mutate(file); } return false; }}>
-            <Button icon={<UploadOutlined />} loading={importMut.isPending} size="middle" disabled={isLocked}>
-              Import Excel
-            </Button>
-          </Upload>
-        </div>
+        {!isWorker && (
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <Upload accept=".xlsx,.xls" showUploadList={false} disabled={isLocked}
+              beforeUpload={(file) => { if (!isLocked) { importMut.mutate(file); } return false; }}>
+              <Button icon={<UploadOutlined />} loading={importMut.isPending} size="middle" disabled={isLocked}>
+                Import Excel
+              </Button>
+            </Upload>
+          </div>
+        )}
       </div>
       
       {isLocked && (

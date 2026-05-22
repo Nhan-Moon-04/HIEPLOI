@@ -15,14 +15,14 @@ const ROLE_OPTIONS = [
   { value: 'admin',         label: 'Quản trị viên' },
   { value: 'accountant',    label: 'Kế toán' },
   { value: 'import_export', label: 'Xuất nhập khẩu' },
-  { value: 'worker',        label: 'Công nhân' },
+  { value: 'worker',        label: 'Nhân viên' },
 ];
 
 const ROLE_COLORS = {
   admin: 'red',
   accountant: 'blue',
   import_export: 'purple',
-  worker: 'default',
+  worker: 'cyan',
 };
 
 function timeAgo(dt) {
@@ -42,6 +42,7 @@ function fmtDate(dt) {
 
 export default function UserManagement() {
   const [users, setUsers] = useState([]);
+  const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [editUser, setEditUser] = useState(null);
@@ -70,6 +71,15 @@ export default function UserManagement() {
     }
   }, []);
 
+  const fetchEmployees = useCallback(async () => {
+    try {
+      const res = await api.get('/employees', { params: { page_size: 500 } });
+      setEmployees(res.data?.items || res.data || []);
+    } catch {
+      message.error('Không lấy được danh sách nhân viên');
+    }
+  }, []);
+
   const fetchAllSessions = useCallback(async () => {
     setAllSessLoading(true);
     try {
@@ -82,7 +92,7 @@ export default function UserManagement() {
     }
   }, []);
 
-  useEffect(() => { fetchUsers(); }, [fetchUsers]);
+  useEffect(() => { fetchUsers(); fetchEmployees(); }, [fetchUsers, fetchEmployees]);
   useEffect(() => {
     if (activeTab === 'sessions') fetchAllSessions();
   }, [activeTab, fetchAllSessions]);
@@ -493,8 +503,18 @@ export default function UserManagement() {
           <Form.Item name="role" label="Quyền" initialValue="worker">
             <Select size="small" options={ROLE_OPTIONS} />
           </Form.Item>
-          <Form.Item name="employee_id" label="Mã nhân viên (tuỳ chọn)">
-            <Input size="small" type="number" placeholder="ID nhân viên liên kết" />
+          <Form.Item name="employee_id" label="Liên kết nhân viên (tuỳ chọn)">
+            <Select
+              size="small"
+              showSearch
+              placeholder="Chọn nhân viên"
+              optionFilterProp="label"
+              allowClear
+              options={employees.map(e => ({
+                value: e.id,
+                label: `[${e.employee_code}] ${e.full_name} - ${e.department || ''}`,
+              }))}
+            />
           </Form.Item>
         </Form>
       </Modal>
@@ -516,8 +536,18 @@ export default function UserManagement() {
           <Form.Item name="role" label="Quyền">
             <Select size="small" options={ROLE_OPTIONS} />
           </Form.Item>
-          <Form.Item name="employee_id" label="Mã nhân viên">
-            <Input size="small" type="number" />
+          <Form.Item name="employee_id" label="Liên kết nhân viên">
+            <Select
+              size="small"
+              showSearch
+              placeholder="Chọn nhân viên"
+              optionFilterProp="label"
+              allowClear
+              options={employees.map(e => ({
+                value: e.id,
+                label: `[${e.employee_code}] ${e.full_name} - ${e.department || ''}`,
+              }))}
+            />
           </Form.Item>
         </Form>
       </Modal>

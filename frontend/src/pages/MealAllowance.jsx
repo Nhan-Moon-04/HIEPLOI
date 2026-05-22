@@ -43,6 +43,7 @@ const getInitialFilters = () => {
 export default function MealAllowance() {
   const navigate = useNavigate();
   const { user } = useAuthStore();
+  const isWorker = user?.role === 'worker';
   const queryClient = useQueryClient();
   const initialFilters = useMemo(() => getInitialFilters(), []);
   const [monthKey, setMonthKey] = useState(initialFilters.monthKey);
@@ -219,10 +220,11 @@ export default function MealAllowance() {
       const amount = cell.meal_allowance || 0;
       const shortAmount = amount >= 1000 ? `${amount / 1000}k` : String(amount || '0');
       return (
-        <Tooltip title={`Ra ${cell.check_out ? dayjs(cell.check_out).format('HH:mm') : ''} — quá 23h, click để xử lý`}>
+        <Tooltip title={isWorker ? `Ra ${cell.check_out ? dayjs(cell.check_out).format('HH:mm') : ''} — quá 23h` : `Ra ${cell.check_out ? dayjs(cell.check_out).format('HH:mm') : ''} — quá 23h, click để xử lý`}>
           <div
             className="ma-cell-val ma-cell-val--night-eligible"
-            onClick={() => setNightOtTarget({ cell, employeeId })}
+            onClick={() => !isWorker && setNightOtTarget({ cell, employeeId })}
+            style={{ cursor: isWorker ? 'default' : 'pointer' }}
           >
             {shortAmount}
           </div>
@@ -233,6 +235,13 @@ export default function MealAllowance() {
     if (cell.ot_eligible) {
       const amount = cell.meal_allowance || 0;
       const shortAmount = amount >= 1000 ? `${amount / 1000}k` : String(amount || '0');
+      if (isWorker) {
+        return (
+          <div className="ma-cell-val ma-cell-val--ot-eligible" style={{ cursor: 'default' }}>
+            {shortAmount}
+          </div>
+        );
+      }
       return (
         <Popconfirm
           title="Thêm bữa tăng ca?"
@@ -359,28 +368,30 @@ export default function MealAllowance() {
             </div>
           </div>
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
-          <div style={{ display: 'flex', gap: 8 }}>
-            {user?.role === 'admin' && (
-              <Tooltip title="Cấu hình phụ cấp ca đêm">
-                <Button icon={<SettingOutlined />} onClick={() => setNightModal(true)} />
-              </Tooltip>
-            )}
-            <Button icon={<DownloadOutlined />} type="primary"
-              style={{ background: '#276EF1', borderColor: '#276EF1', borderRadius: 7 }}
-              onClick={handleExport}>
-              Xuất Excel
+        {!isWorker && (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
+            <div style={{ display: 'flex', gap: 8 }}>
+              {user?.role === 'admin' && (
+                <Tooltip title="Cấu hình phụ cấp ca đêm">
+                  <Button icon={<SettingOutlined />} onClick={() => setNightModal(true)} />
+                </Tooltip>
+              )}
+              <Button icon={<DownloadOutlined />} type="primary"
+                style={{ background: '#276EF1', borderColor: '#276EF1', borderRadius: 7 }}
+                onClick={handleExport}>
+                Xuất Excel
+              </Button>
+            </div>
+            <Button
+              size="small"
+              icon={<ThunderboltOutlined />}
+              onClick={() => { setSelectedRowKeys(eligibleList.map((r) => r.key)); setQuickModal(true); }}
+              style={{ background: eligibleList.length > 0 ? '#fff7ed' : '#f9fafb', color: eligibleList.length > 0 ? '#d97706' : '#9ca3af', border: `1px solid ${eligibleList.length > 0 ? '#fbbf24' : '#e5e7eb'}`, borderRadius: 6, fontSize: 12 }}
+            >
+              Thêm nhanh OT{eligibleList.length > 0 ? ` (${eligibleList.length} ngày)` : ''}
             </Button>
           </div>
-          <Button
-            size="small"
-            icon={<ThunderboltOutlined />}
-            onClick={() => { setSelectedRowKeys(eligibleList.map((r) => r.key)); setQuickModal(true); }}
-            style={{ background: eligibleList.length > 0 ? '#fff7ed' : '#f9fafb', color: eligibleList.length > 0 ? '#d97706' : '#9ca3af', border: `1px solid ${eligibleList.length > 0 ? '#fbbf24' : '#e5e7eb'}`, borderRadius: 6, fontSize: 12 }}
-          >
-            Thêm nhanh OT{eligibleList.length > 0 ? ` (${eligibleList.length} ngày)` : ''}
-          </Button>
-        </div>
+        )}
       </div>
 
       {/* Filter bar */}
@@ -408,16 +419,18 @@ export default function MealAllowance() {
           size="middle"
         />
 
-        <Select
-          placeholder="Bộ phận"
-          allowClear
-          style={{ width: 150 }}
-          value={dept}
-          onChange={setDept}
-          options={departments.map((d) => ({ value: d, label: d }))}
-          suffixIcon={<TeamOutlined style={{ color: '#9ca3af' }} />}
-          size="middle"
-        />
+        {!isWorker && (
+          <Select
+            placeholder="Bộ phận"
+            allowClear
+            style={{ width: 150 }}
+            value={dept}
+            onChange={setDept}
+            options={departments.map((d) => ({ value: d, label: d }))}
+            suffixIcon={<TeamOutlined style={{ color: '#9ca3af' }} />}
+            size="middle"
+          />
+        )}
 
         <Input
           placeholder="Tìm mã NV, họ tên..."

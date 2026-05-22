@@ -11,6 +11,7 @@ from app.models.auth_tokens import OtpCode
 from app.schemas.user import (
     LoginRequest, TokenResponse, UserResponse, UserCreate,
     UserProfileUpdate, ChangePasswordRequest, SessionResponse,
+    CompleteSetupRequest,
 )
 from app.utils.security import (
     verify_password, get_password_hash,
@@ -415,6 +416,42 @@ async def change_password(
     current_user.password_hash = get_password_hash(request.new_password)
     await db.commit()
     return {"detail": "Đổi mật khẩu thành công"}
+
+
+@router.post("/complete-setup", response_model=UserResponse)
+async def complete_setup(
+    request: CompleteSetupRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: AppUser = Depends(get_current_user),
+):
+    """Hoàn tất thông tin đăng nhập lần đầu (đổi mật khẩu + email)"""
+    if len(request.password) < 6:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Mật khẩu mới phải có ít nhất 6 ký tự",
+        )
+    
+    email = request.email.strip()
+    if not email or "@" not in email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email không hợp lệ",
+        )
+        
+    # Kiểm tra trùng email (trừ chính mình)
+    dup = await db.execute(
+        select(AppUser).where(AppUser.email == email, AppUser.id != current_user.id)
+    )
+    if dup.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="Email này đã được sử dụng bởi tài khoản khác")
+
+    current_user.password_hash = get_password_hash(request.password)
+    current_user.email = email
+    current_user.is_setup_completed = True
+    
+    await db.commit()
+    await db.refresh(current_user)
+    return UserResponse.model_validate(current_user)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -37,7 +37,7 @@ const ROLE_LABELS = {
   admin: 'Quản trị viên',
   accountant: 'Kế toán',
   import_export: 'Xuất nhập khẩu',
-  worker: 'Công nhân',
+  worker: 'Nhân viên',
 };
 
 export default function Settings() {
@@ -47,6 +47,13 @@ export default function Settings() {
   const [profileLoading, setProfileLoading] = useState(false);
   const [pwLoading, setPwLoading] = useState(false);
   const [pwForm] = Form.useForm();
+
+  const visibleNavItems = NAV_ITEMS.filter((item) => {
+    if (user?.role === 'worker') {
+      return item.key === 'profile';
+    }
+    return true;
+  });
 
   const onFinishProfile = async (values) => {
     setProfileLoading(true);
@@ -81,7 +88,7 @@ export default function Settings() {
       <div className="st-layout">
         {/* Left nav */}
         <nav className="st-nav">
-          {NAV_ITEMS.map((item) => (
+          {visibleNavItems.map((item) => (
             <button
               key={item.key}
               className={`st-nav-item${activeTab === item.key ? ' st-nav-item--active' : ''}`}

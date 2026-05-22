@@ -21,7 +21,7 @@ router = APIRouter(prefix="/employees", tags=["Employees - Nhân Viên"])
 @router.get("", response_model=dict)
 async def list_employees(
     page: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=200),
+    page_size: int = Query(50, ge=1, le=1000),
     search: Optional[str] = None,
     department: Optional[str] = None,
     is_active: Optional[bool] = None,
@@ -49,6 +49,9 @@ async def list_employees(
         query = query.where(Employee.department == department)
     if is_active is not None:
         query = query.where(Employee.is_active == is_active)
+        
+    if current_user.role == UserRole.WORKER:
+        query = query.where(Employee.id == current_user.employee_id)
 
     # Filter by month: employee active if join_date <= end_of_month AND (leave_date is null OR leave_date >= start_of_month)
     if month_key:
@@ -110,6 +113,9 @@ async def get_employee(
     current_user: AppUser = Depends(get_current_user),
 ):
     """Chi tiết nhân viên"""
+    if current_user.role == UserRole.WORKER and employee_id != current_user.employee_id:
+        raise HTTPException(status_code=403, detail="Không có quyền xem thông tin nhân viên khác")
+
     result = await db.execute(select(Employee).where(Employee.id == employee_id))
     emp = result.scalar_one_or_none()
     if not emp:

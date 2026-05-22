@@ -69,10 +69,15 @@ async def get_schedule(
 
     emp_q = select(Employee).where(
         Employee.is_active == True,
-    ).order_by(Employee.employee_code)
+    )
+    if current_user.role == UserRole.WORKER:
+        emp_q = emp_q.where(Employee.id == current_user.employee_id)
+    emp_q = emp_q.order_by(Employee.employee_code)
     emps = (await db.execute(emp_q)).scalars().all()
 
     sched_q = select(WorkSchedule).where(WorkSchedule.month_key == month_key)
+    if current_user.role == UserRole.WORKER:
+        sched_q = sched_q.where(WorkSchedule.employee_id == current_user.employee_id)
     scheds = (await db.execute(sched_q)).scalars().all()
 
     shift_q = select(ShiftTemplate)

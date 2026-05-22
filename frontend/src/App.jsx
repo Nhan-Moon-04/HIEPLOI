@@ -27,10 +27,21 @@ import Settings from './pages/Settings';
 import Union from './pages/Union';
 import UserManagement from './pages/UserManagement';
 import ResetPassword from './pages/ResetPassword';
+import SetupWizard from './pages/SetupWizard';
 
 function PrivateRoute({ children }) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
-  return isAuthenticated ? children : <Navigate to="/login" replace />;
+  const user = useAuthStore((s) => s.user);
+
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace />;
+  }
+
+  if (user?.role === 'worker' && !user?.is_setup_completed) {
+    return <SetupWizard />;
+  }
+
+  return children;
 }
 
 export default function App() {

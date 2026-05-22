@@ -9,6 +9,7 @@ import useAuthStore from '../stores/authStore';
 export default function BaseSalary() {
   const { user } = useAuthStore();
   const isAdmin = user?.role === 'admin';
+  const isWorker = user?.role === 'worker';
   const [monthKey, setMonthKey] = useState(dayjs().format('YYYY-MM'));
   const [importModal, setImportModal] = useState(false);
   const qc = useQueryClient();
@@ -119,9 +120,9 @@ export default function BaseSalary() {
             </div>
           </div>
           <div style={{ textAlign: 'right' }}>
-            <div style={{ color: '#6b7a99', fontSize: 12 }}>Tổng số nhân viên</div>
-            <div style={{ fontSize: 24, fontWeight: 600, color: '#1e293b' }}>
-              {data?.rows?.length || 0}
+            <div style={{ color: '#6b7a99', fontSize: 12 }}>{isWorker ? "Họ tên" : "Tổng số nhân viên"}</div>
+            <div style={{ fontSize: isWorker ? 18 : 24, fontWeight: 600, color: '#1e293b' }}>
+              {isWorker ? (data?.rows?.[0]?.full_name || '') : (data?.rows?.length || 0)}
             </div>
           </div>
         </div>

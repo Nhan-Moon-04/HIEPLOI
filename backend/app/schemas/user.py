@@ -30,6 +30,7 @@ class UserResponse(BaseModel):
     role: UserRole
     employee_id: Optional[int] = None
     is_active: bool
+    is_setup_completed: bool
 
     class Config:
         from_attributes = True
@@ -75,3 +76,8 @@ class SessionResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class CompleteSetupRequest(BaseModel):
+    password: str
+    email: str

@@ -10,7 +10,7 @@ from app.models.employee import Employee
 from app.models.shift import ShiftTemplate
 from app.models.attendance import AttendanceDaily, AttendanceLog
 from app.models.holiday import CompanyHoliday
-from app.models.user import AppUser
+from app.models.user import AppUser, UserRole
 from app.middleware.auth import get_current_user
 from app.routers.attendance import evaluate_attendance
 from app.services.nu_shift import is_nu_dynamic_shift_code, build_nu_shift_day_results
@@ -85,7 +85,10 @@ async def get_overtime(
         # Load active employees
         emp_q = select(Employee).where(
             and_(Employee.is_active == True, Employee.join_date <= last_day)
-        ).order_by(Employee.employee_code)
+        )
+        if current_user.role == UserRole.WORKER:
+            emp_q = emp_q.where(Employee.id == current_user.employee_id)
+        emp_q = emp_q.order_by(Employee.employee_code)
         emp_result = await db.execute(emp_q)
         employees = emp_result.scalars().all()
 

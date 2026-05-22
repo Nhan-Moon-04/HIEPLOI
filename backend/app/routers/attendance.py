@@ -276,6 +276,9 @@ async def get_attendance(
     current_user: AppUser = Depends(get_current_user),
 ):
     """Cham cong thang - ket hop lich lam + du lieu cham cong + ma ca"""
+    if current_user.role == UserRole.WORKER:
+        employee_id = current_user.employee_id
+
     try:
         year, month = map(int, month_key.split("-"))
     except ValueError:

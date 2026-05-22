@@ -102,6 +102,21 @@ const useAuthStore = create((set, get) => ({
     }
   },
 
+  completeSetup: async (password, email) => {
+    try {
+      const res = await api.post('/auth/complete-setup', {
+        password,
+        email,
+      });
+      const updatedUser = res.data;
+      localStorage.setItem('user', JSON.stringify(updatedUser));
+      set({ user: updatedUser });
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err.response?.data?.detail || 'Thiết lập tài khoản thất bại' };
+    }
+  },
+
   // ── Quản lý thiết bị ────────────────────────────────────────────────────
   getSessions: async () => {
     try {

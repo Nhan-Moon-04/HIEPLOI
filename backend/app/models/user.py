@@ -22,6 +22,7 @@ class AppUser(Base):
     role = Column(Enum(UserRole), default=UserRole.WORKER, nullable=False)
     employee_id = Column(Integer, nullable=True)
     is_active = Column(Boolean, default=True)
+    is_setup_completed = Column(Boolean, default=False, nullable=False, server_default="false")
 
     # Bảo mật login
     login_attempts = Column(Integer, default=0)                   # Số lần sai liên tiếp
