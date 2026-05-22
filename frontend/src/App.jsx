@@ -25,6 +25,8 @@ import Audit from './pages/Audit';
 import LeaveBalance from './pages/LeaveBalance';
 import Settings from './pages/Settings';
 import Union from './pages/Union';
+import UserManagement from './pages/UserManagement';
+import ResetPassword from './pages/ResetPassword';
 
 function PrivateRoute({ children }) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -42,6 +44,7 @@ export default function App() {
     <ConfigProvider theme={getThemeConfig(mode, primaryColor)} locale={viVN}>
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path="/reset-password" element={<ResetPassword />} />
         <Route
           path="/*"
           element={
@@ -67,6 +70,7 @@ export default function App() {
                   <Route path="/leave" element={<LeaveBalance />} />
                   <Route path="/settings" element={<Settings />} />
                   <Route path="/union" element={<Union />} />
+                  <Route path="/user-management" element={<UserManagement />} />
                 </Routes>
               </MainLayout>
             </PrivateRoute>

@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
 from app.models.user import UserRole
 
@@ -7,6 +7,7 @@ from app.models.user import UserRole
 class LoginRequest(BaseModel):
     username: str
     password: str
+    device_name: Optional[str] = None   # Tên thiết bị tùy chỉnh (tùy chọn)
 
 
 class TokenResponse(BaseModel):
@@ -14,6 +15,7 @@ class TokenResponse(BaseModel):
     refresh_token: str
     token_type: str = "bearer"
     user: "UserResponse"
+    session_id: Optional[str] = None
 
 
 class RefreshRequest(BaseModel):
@@ -46,3 +48,28 @@ class UserUpdate(BaseModel):
     employee_id: Optional[int] = None
     is_active: Optional[bool] = None
     password: Optional[str] = None
+
+
+class UserProfileUpdate(BaseModel):
+    full_name: Optional[str] = None
+
+
+class ChangePasswordRequest(BaseModel):
+    old_password: str
+    new_password: str
+    confirm_password: str
+
+
+class SessionResponse(BaseModel):
+    """Thông tin một phiên đăng nhập / thiết bị"""
+    id: str
+    device_name: Optional[str] = None
+    ip_address: Optional[str] = None
+    is_active: bool
+    created_at: datetime
+    last_active_at: datetime
+    expires_at: datetime
+    revoked_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True

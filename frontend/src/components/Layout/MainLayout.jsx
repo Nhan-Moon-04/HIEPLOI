@@ -29,6 +29,8 @@ const ROUTE_META = {
   '/import-export': ['Hệ thống',     'Import / Export'],
   '/audit':         ['Hệ thống',     'Nhật ký'],
   '/settings':      ['Hệ thống',     'Cài đặt'],
+  '/union':         ['Công đoàn',    'Công đoàn'],
+  '/user-management': ['Hệ thống',  'Quản lý người dùng'],
 };
 
 export default function MainLayout({ children }) {

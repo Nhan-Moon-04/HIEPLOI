@@ -21,7 +21,17 @@
       "Bash(cat)",
       "Bash(python3 /tmp/write_union.py)",
       "PowerShell(Select-String \"union|advance\" \"D:\\\\CODE\\\\HIEPLOI\\\\frontend\\\\src\\\\components\\\\Layout\\\\Sidebar.jsx\" -i)",
-      "PowerShell(Select-String -Pattern \"union|advance\" -Path \"D:\\\\CODE\\\\HIEPLOI\\\\frontend\\\\src\\\\components\\\\Layout\\\\Sidebar.jsx\" -CaseSensitive:$false)"
+      "PowerShell(Select-String -Pattern \"union|advance\" -Path \"D:\\\\CODE\\\\HIEPLOI\\\\frontend\\\\src\\\\components\\\\Layout\\\\Sidebar.jsx\" -CaseSensitive:$false)",
+      "PowerShell(New-Item -ItemType Directory -Force \"d:\\\\CODE\\\\TIKTOK\")",
+      "PowerShell(ffmpeg -version 2>&1)",
+      "PowerShell(python --version)",
+      "PowerShell(python -c \"import sys; print\\(sys.executable\\)\")",
+      "PowerShell(winget install --id Gyan.FFmpeg -e --accept-source-agreements --accept-package-agreements)",
+      "PowerShell($env:PATH = [System.Environment]::GetEnvironmentVariable\\(\"PATH\",\"Machine\"\\) + \";\" + [System.Environment]::GetEnvironmentVariable\\(\"PATH\",\"User\"\\); ffmpeg -version 2>&1 | Select-Object -First 1)",
+      "PowerShell(py -3.11 --version 2>$null)",
+      "PowerShell(py -3.10 --version 2>$null)",
+      "PowerShell(py --version 2>$null)",
+      "PowerShell($env:PATH = [System.Environment]::GetEnvironmentVariable\\(\"PATH\",\"Machine\"\\) + \";\" + [System.Environment]::GetEnvironmentVariable\\(\"PATH\",\"User\"\\); \\(Get-Command ffmpeg\\).Source)"
     ]
   }
 }

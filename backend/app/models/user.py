@@ -18,8 +18,14 @@ class AppUser(Base):
     username = Column(String(64), unique=True, nullable=False, index=True)
     password_hash = Column(String(255), nullable=False)
     full_name = Column(String(120))
+    email = Column(String(255), nullable=True, index=True)        # Email để reset password / OTP
     role = Column(Enum(UserRole), default=UserRole.WORKER, nullable=False)
-    employee_id = Column(Integer, nullable=True)  # Link to employee if role=worker
+    employee_id = Column(Integer, nullable=True)
     is_active = Column(Boolean, default=True)
+
+    # Bảo mật login
+    login_attempts = Column(Integer, default=0)                   # Số lần sai liên tiếp
+    locked_until = Column(DateTime, nullable=True)                # Khoá đến lúc này (None = không khoá)
+
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

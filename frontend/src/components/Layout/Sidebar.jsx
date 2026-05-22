@@ -3,7 +3,7 @@ import {
   AppstoreOutlined, TeamOutlined, ClockCircleOutlined, ScheduleOutlined,
   CalendarOutlined, DollarOutlined, FileTextOutlined, SafetyOutlined,
   BankOutlined, ImportOutlined, AuditOutlined, SettingOutlined, RiseOutlined,
-  UsergroupAddOutlined,
+  UsergroupAddOutlined, UserSwitchOutlined,
 } from '@ant-design/icons';
 import useAuthStore from '../../stores/authStore';
 
@@ -46,10 +46,11 @@ const sections = [
     group: 'HỆ THỐNG',
     roles: ['admin'],
     items: [
-      { key: '/holidays', icon: <CalendarOutlined />, label: 'Ngày OFF & Lễ' },
-      { key: '/import-export', icon: <ImportOutlined />, label: 'Import / Export' },
-      { key: '/audit', icon: <AuditOutlined />, label: 'Nhật ký' },
-      { key: '/settings', icon: <SettingOutlined />, label: 'Cài đặt' },
+      { key: '/holidays',        icon: <CalendarOutlined />,     label: 'Ngày OFF & Lễ' },
+      { key: '/import-export',   icon: <ImportOutlined />,       label: 'Import / Export' },
+      { key: '/audit',           icon: <AuditOutlined />,        label: 'Nhật ký' },
+      { key: '/user-management', icon: <UserSwitchOutlined />,   label: 'Quản lý user' },
+      { key: '/settings',        icon: <SettingOutlined />,      label: 'Cài đặt' },
     ],
   },
 ];

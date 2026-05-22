@@ -9,6 +9,8 @@ from app.models.audit import AuditLog
 from app.models.holiday import CompanyHoliday
 from app.models.x_overtime import XOvertimeConfig
 from app.models.union import UnionTransaction, UnionEvent, UnionEventMember, UnionMember
+from app.models.session import UserSession
+from app.models.auth_tokens import PasswordResetToken, OtpCode
 
 __all__ = [
     "AppUser",
@@ -28,5 +30,8 @@ __all__ = [
     "UnionTransaction",
     "UnionEvent",
     "UnionEventMember",
+    "UserSession",
+    "PasswordResetToken",
+    "OtpCode",
 ]
 
