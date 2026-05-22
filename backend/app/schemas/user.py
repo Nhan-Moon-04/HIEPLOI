@@ -26,6 +26,7 @@ class UserResponse(BaseModel):
     id: int
     username: str
     full_name: Optional[str] = None
+    email: Optional[str] = None           # Email nhận OTP / reset password
     role: UserRole
     employee_id: Optional[int] = None
     is_active: bool
@@ -52,6 +53,7 @@ class UserUpdate(BaseModel):
 
 class UserProfileUpdate(BaseModel):
     full_name: Optional[str] = None
+    email: Optional[str] = None           # Có thể xóa email bằng cách gửi null
 
 
 class ChangePasswordRequest(BaseModel):

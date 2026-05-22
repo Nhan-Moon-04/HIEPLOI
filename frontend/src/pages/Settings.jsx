@@ -12,6 +12,8 @@ import {
   LoadingOutlined,
   KeyOutlined,
   IdcardOutlined,
+  MailOutlined,
+  InfoCircleOutlined,
 } from '@ant-design/icons';
 import useAuthStore from '../stores/authStore';
 import useThemeStore from '../stores/themeStore';
@@ -48,7 +50,7 @@ export default function Settings() {
 
   const onFinishProfile = async (values) => {
     setProfileLoading(true);
-    const result = await updateProfile({ full_name: values.full_name });
+    const result = await updateProfile({ full_name: values.full_name, email: values.email || null });
     setProfileLoading(false);
     result.success ? message.success('Đã cập nhật thông tin') : message.error(result.error);
   };
@@ -103,7 +105,7 @@ export default function Settings() {
                   <UserOutlined className="st-card-icon" />
                   <div>
                     <div className="st-card-title">Thông tin tài khoản</div>
-                    <div className="st-card-desc">Cập nhật họ tên hiển thị</div>
+                    <div className="st-card-desc">Cập nhật họ tên và email nhận OTP</div>
                   </div>
                 </div>
 
@@ -120,7 +122,7 @@ export default function Settings() {
 
                 <Form
                   layout="vertical"
-                  initialValues={{ full_name: user?.full_name }}
+                  initialValues={{ full_name: user?.full_name, email: user?.email }}
                   onFinish={onFinishProfile}
                   className="st-form-compact"
                 >
@@ -139,9 +141,29 @@ export default function Settings() {
                     label="Họ và tên"
                     name="full_name"
                     rules={[{ required: true, message: 'Nhập họ và tên' }]}
-                    style={{ marginBottom: 12 }}
+                    style={{ marginBottom: 10 }}
                   >
                     <Input size="small" placeholder="Nhập họ tên đầy đủ" />
+                  </Form.Item>
+                  <Form.Item
+                    label={
+                      <span>
+                        Email nhận OTP &amp; reset mật khẩu
+                        <InfoCircleOutlined style={{ marginLeft: 5, color: '#9ca3af', fontSize: 11 }} />
+                      </span>
+                    }
+                    name="email"
+                    rules={[
+                      { type: 'email', message: 'Email không hợp lệ' },
+                    ]}
+                    style={{ marginBottom: 12 }}
+                    tooltip="Email này dùng để nhận mã OTP khi đăng nhập từ thiết bị lạ và link đặt lại mật khẩu"
+                  >
+                    <Input
+                      size="small"
+                      prefix={<MailOutlined style={{ color: '#9ca3af' }} />}
+                      placeholder="vd: ten@gmail.com"
+                    />
                   </Form.Item>
                   <Button
                     type="primary"

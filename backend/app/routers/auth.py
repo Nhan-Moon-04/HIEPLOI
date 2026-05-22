@@ -372,9 +372,24 @@ async def update_me(
     db: AsyncSession = Depends(get_db),
     current_user: AppUser = Depends(get_current_user),
 ):
-    """Cập nhật thông tin cá nhân"""
+    """Cập nhật thông tin cá nhân (họ tên, email)"""
     if request.full_name is not None:
         current_user.full_name = request.full_name
+
+    if request.email is not None:
+        # Validate email cơ bản
+        email = request.email.strip()
+        if email and "@" not in email:
+            raise HTTPException(status_code=400, detail="Email không hợp lệ")
+        # Kiểm tra email đã dùng chưa (trừ chính mình)
+        if email:
+            dup = await db.execute(
+                select(AppUser).where(AppUser.email == email, AppUser.id != current_user.id)
+            )
+            if dup.scalar_one_or_none():
+                raise HTTPException(status_code=400, detail="Email này đã được sử dụng bởi tài khoản khác")
+        current_user.email = email or None
+
     await db.commit()
     await db.refresh(current_user)
     return UserResponse.model_validate(current_user)
