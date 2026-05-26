@@ -159,7 +159,10 @@ export default function Login() {
     if (!forgotEmail.trim()) { message.warning('Nhập email hoặc username'); return; }
     setForgotLoading(true);
     try {
-      await api.post('/auth/forgot-password', { email: forgotEmail.trim() });
+      await api.post('/auth/forgot-password', {
+        email: forgotEmail.trim(),
+        frontend_origin: window.location.origin,
+      });
       setForgotSent(true);
       setForgotCooldown(60);
     } catch (err) {

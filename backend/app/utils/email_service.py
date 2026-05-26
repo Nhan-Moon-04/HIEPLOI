@@ -96,10 +96,11 @@ def _send(to_email: str, subject: str, html_body: str) -> bool:
         return False
 
 
-def send_reset_password_email(to_email: str, full_name: str, reset_token: str) -> bool:
+def send_reset_password_email(to_email: str, full_name: str, reset_token: str, frontend_origin: str = None) -> bool:
     """Gửi email chứa link reset mật khẩu (hiệu lực 5 phút)"""
     print(f"[EMAIL] send_reset_password_email called → {to_email}", flush=True)
-    reset_url = f"{settings.FRONTEND_URL}/reset-password?token={reset_token}"
+    base_url = (frontend_origin or "").rstrip("/") or settings.FRONTEND_URL
+    reset_url = f"{base_url}/reset-password?token={reset_token}"
     name = full_name or to_email.split("@")[0]
 
     body = f"""

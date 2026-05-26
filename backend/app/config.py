@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     # App
     APP_NAME: str = "Hiệp Lợi HR System"
     DEBUG: bool = True
-    FRONTEND_URL: str = "http://192.168.1.156:5173"   # URL frontend để tạo reset link
+    FRONTEND_URL: str = "http://localhost:5173"       # URL frontend để tạo reset link (mặc định)
 
     # SMTP Email (Gmail)
     SMTP_HOST: str = "smtp.gmail.com"

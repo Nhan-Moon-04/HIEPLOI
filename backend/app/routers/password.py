@@ -38,6 +38,7 @@ def _utcnow():
 
 class ForgotPasswordRequest(BaseModel):
     email: str                     # Có thể nhập email hoặc username
+    frontend_origin: Optional[str] = None  # URL gốc frontend (auto-detect từ trình duyệt)
 
 
 class ResetPasswordRequest(BaseModel):
@@ -124,17 +125,33 @@ async def forgot_password(
         # Ghi rate limit TRƯỚC khi gửi mail
         record_email_sent(client_ip)
 
+        # Xác định URL frontend: lấy từ HTTP header Origin/Referer (trình duyệt tự gửi)
+        http_origin = req.headers.get("origin") or ""
+        if not http_origin:
+            referer = req.headers.get("referer") or ""
+            if referer:
+                # Extract origin from referer: http://host:port/path → http://host:port
+                from urllib.parse import urlparse
+                parsed = urlparse(referer)
+                http_origin = f"{parsed.scheme}://{parsed.netloc}" if parsed.scheme and parsed.netloc else ""
+        origin = http_origin.rstrip("/") or (body.frontend_origin or "").rstrip("/") or settings.FRONTEND_URL
+
         # Gửi email synchronous để debug
         send_reset_password_email(
             user.email,
             user.full_name or user.username,
             token,
+            frontend_origin=origin,
         )
 
         # In Link Reset ra terminal khi ở chế độ DEBUG
         if settings.DEBUG:
-            reset_url = f"{settings.FRONTEND_URL}/reset-password?token={token}"
+            reset_url = f"{origin}/reset-password?token={token}"
             print("\n" + "="*60)
+            print(f"[DEBUG] HTTP Origin header: {req.headers.get('origin')}")
+            print(f"[DEBUG] Referer header: {req.headers.get('referer')}")
+            print(f"[DEBUG] body.frontend_origin: {body.frontend_origin}")
+            print(f"[DEBUG] → Resolved origin: {origin}")
             print(f"[DEBUG MODE] Reset link generated for {user.username} ({user.email}):")
             print(reset_url)
             print("="*60 + "\n")
