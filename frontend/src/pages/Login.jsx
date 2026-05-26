@@ -33,6 +33,8 @@ export default function Login() {
   const [otpLoading, setOtpLoading] = useState(false);
   const [otpError, setOtpError] = useState(null);
   const [otpExpiry, setOtpExpiry] = useState(300); // 5 phút
+  const [otpResendCooldown, setOtpResendCooldown] = useState(0);
+  const [otpResendLoading, setOtpResendLoading] = useState(false);
 
   const otpRefs = useRef([]);
 
@@ -57,6 +59,13 @@ export default function Login() {
     const t = setInterval(() => setForgotCooldown(s => Math.max(0, s - 1)), 1000);
     return () => clearInterval(t);
   }, [forgotCooldown]);
+
+  // ── OTP resend cooldown ────────────────────────────────────────────────────
+  useEffect(() => {
+    if (otpResendCooldown <= 0) return;
+    const t = setInterval(() => setOtpResendCooldown(s => Math.max(0, s - 1)), 1000);
+    return () => clearInterval(t);
+  }, [otpResendCooldown]);
 
   const fmtSecs = (s) => {
     const m = Math.floor(s / 60);
@@ -84,6 +93,7 @@ export default function Login() {
       setOtpExpiry(300);
       setOtpCode('');
       setOtpError(null);
+      setOtpResendCooldown(result.resend_cooldown_secs ?? 120);
       setOtpOpen(true);
       return;
     }
@@ -112,6 +122,7 @@ export default function Login() {
       const res = await api.post('/auth/otp/verify', {
         otp_session_id: otpSessionId,
         code: otpCode,
+        device_id: localStorage.getItem('device_id'),
       });
       useAuthStore.getState().setAuthFromToken(res.data);
       setOtpOpen(false);
@@ -121,6 +132,25 @@ export default function Login() {
       setOtpError(err.response?.data?.detail || 'Mã OTP không đúng');
     } finally {
       setOtpLoading(false);
+    }
+  };
+
+  // ── OTP resend ─────────────────────────────────────────────────────────────
+  const handleOtpResend = async () => {
+    setOtpResendLoading(true);
+    try {
+      const res = await api.post('/auth/otp/resend', { otp_session_id: otpSessionId });
+      setOtpResendCooldown(res.data.resend_cooldown_secs ?? 120);
+      setOtpExpiry(300);
+      setOtpCode('');
+      setOtpError(null);
+      message.success('Đã gửi lại mã OTP về email của bạn.');
+    } catch (err) {
+      const retryAfter = parseInt(err.response?.headers?.['retry-after'] || '120');
+      setOtpResendCooldown(retryAfter);
+      message.error(err.response?.data?.detail || 'Không thể gửi lại OTP. Thử lại sau.');
+    } finally {
+      setOtpResendLoading(false);
     }
   };
 
@@ -167,7 +197,7 @@ export default function Login() {
             icon={<ClockCircleOutlined />}
             showIcon
             style={{ marginBottom: 16, borderRadius: 8, fontSize: 13 }}
-            message={
+            title={
               <span>
                 Tài khoản tạm thời bị khoá — Thử lại sau{' '}
                 <strong style={{ fontVariantNumeric: 'tabular-nums' }}>
@@ -185,7 +215,7 @@ export default function Login() {
             icon={<ExclamationCircleOutlined />}
             showIcon
             style={{ marginBottom: 16, borderRadius: 8, fontSize: 12 }}
-            message={`Còn ${attemptsLeft} lần thử trước khi tài khoản bị khoá tạm thời`}
+            title={`Còn ${attemptsLeft} lần thử trước khi tài khoản bị khoá tạm thời`}
           />
         )}
 
@@ -331,7 +361,7 @@ export default function Login() {
         width={380}
         centered
         closable={!otpLoading}
-        maskClosable={false}
+        mask={{ closable: false }}
       >
         <div style={{ padding: '8px 0', textAlign: 'center' }}>
           <div style={{ fontSize: 40, marginBottom: 8 }}>🔐</div>
@@ -372,7 +402,7 @@ export default function Login() {
           </div>
 
           {otpError && (
-            <Alert type="error" message={otpError} style={{ marginTop: 12, borderRadius: 8, fontSize: 12 }} />
+            <Alert type="error" title={otpError} style={{ marginTop: 12, borderRadius: 8, fontSize: 12 }} />
           )}
 
           {/* Timer */}
@@ -395,9 +425,27 @@ export default function Login() {
             Xác nhận
           </Button>
 
+          {/* Gửi lại OTP */}
+          <div style={{ marginTop: 10, fontSize: 12, color: '#9ca3af' }}>
+            Không nhận được email?{' '}
+            {otpResendCooldown > 0 ? (
+              <span>Gửi lại sau <strong style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtSecs(otpResendCooldown)}</strong></span>
+            ) : (
+              <Button
+                type="link"
+                size="small"
+                loading={otpResendLoading}
+                onClick={handleOtpResend}
+                style={{ padding: 0, fontSize: 12, height: 'auto' }}
+              >
+                Gửi lại mã OTP
+              </Button>
+            )}
+          </div>
+
           <Button
             type="text"
-            style={{ marginTop: 8, fontSize: 12, color: '#9ca3af' }}
+            style={{ marginTop: 4, fontSize: 12, color: '#9ca3af' }}
             onClick={() => setOtpOpen(false)}
           >
             Huỷ — Đăng nhập lại

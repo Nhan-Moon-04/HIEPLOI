@@ -285,7 +285,7 @@ export default function Schedules() {
       
       {isLocked && (
         <Alert
-          message={`Dữ liệu lịch làm việc tháng ${dayjs(monthKey).format('M/YYYY')} đã được chốt (khóa dữ liệu).`}
+          title={`Dữ liệu lịch làm việc tháng ${dayjs(monthKey).format('M/YYYY')} đã được chốt (khóa dữ liệu).`}
           description="Hệ thống đang hoạt động ở chế độ xem chi tiết (chỉ đọc). Mọi thay đổi đối với lịch làm việc và cấu hình tăng ca đều bị vô hiệu hóa."
           type="warning"
           showIcon

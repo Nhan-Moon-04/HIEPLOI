@@ -15,6 +15,8 @@ class UserSession(Base):
     device_name = Column(String(200), nullable=True)
     ip_address = Column(String(45), nullable=True)
     user_agent = Column(String(500), nullable=True)
+    device_id = Column(String(100), nullable=True, index=True)
+
 
     # Trạng thái
     is_active = Column(Boolean, default=True, nullable=False)

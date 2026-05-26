@@ -1,6 +1,15 @@
 import { create } from 'zustand';
 import api from '../api/client';
 
+const getOrCreateDeviceId = () => {
+  let devId = localStorage.getItem('device_id');
+  if (!devId) {
+    devId = 'dev_' + Math.random().toString(36).substring(2, 15) + '_' + Date.now().toString(36);
+    localStorage.setItem('device_id', devId);
+  }
+  return devId;
+};
+
 const useAuthStore = create((set, get) => ({
   user: JSON.parse(localStorage.getItem('user') || 'null'),
   isAuthenticated: !!localStorage.getItem('access_token'),
@@ -10,9 +19,11 @@ const useAuthStore = create((set, get) => ({
   login: async (username, password, deviceName = null) => {
     set({ loading: true });
     try {
+      const deviceId = getOrCreateDeviceId();
       const res = await api.post('/auth/login', {
         username,
         password,
+        device_id: deviceId,
         ...(deviceName ? { device_name: deviceName } : {}),
       });
       const data = res.data;
@@ -25,6 +36,7 @@ const useAuthStore = create((set, get) => ({
           otp_required: true,
           otp_session_id: data.otp_session_id,
           email_hint: data.email_hint,
+          resend_cooldown_secs: data.resend_cooldown_secs ?? 120,
         };
       }
 
@@ -68,7 +80,11 @@ const useAuthStore = create((set, get) => ({
     try {
       await api.post('/auth/logout');
     } catch (_) {}
+    const deviceId = localStorage.getItem('device_id');
     localStorage.clear();
+    if (deviceId) {
+      localStorage.setItem('device_id', deviceId);
+    }
     set({ user: null, isAuthenticated: false, sessionId: null });
   },
 

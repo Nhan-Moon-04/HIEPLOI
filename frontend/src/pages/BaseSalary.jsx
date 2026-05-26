@@ -102,7 +102,7 @@ export default function BaseSalary() {
 
       {isLocked && (
         <Alert
-          message={`Dữ liệu lương cơ bản tháng ${dayjs(monthKey).format('M/YYYY')} đã được chốt (khóa dữ liệu).`}
+          title={`Dữ liệu lương cơ bản tháng ${dayjs(monthKey).format('M/YYYY')} đã được chốt (khóa dữ liệu).`}
           description="Hệ thống đang hoạt động ở chế độ chỉ đọc. Việc nhập (import) đè dữ liệu hoặc sửa đổi lương của tháng này đã bị khóa."
           type="warning"
           showIcon
@@ -151,7 +151,7 @@ export default function BaseSalary() {
         <Alert 
           type="info" 
           showIcon 
-          message="Lưu ý cấu trúc file Excel" 
+          title="Lưu ý cấu trúc file Excel" 
           description={
             <ul style={{ paddingLeft: 20, marginTop: 8, fontSize: 13 }}>
               <li>Tên sheet: <b>Bang Luong</b> (nếu không thấy sẽ lấy sheet đầu tiên).</li>

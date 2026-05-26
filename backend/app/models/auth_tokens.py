@@ -33,3 +33,4 @@ class OtpCode(Base):
     used = Column(Boolean, default=False)
     attempts = Column(Integer, default=0)             # Số lần nhập sai OTP
     created_at = Column(DateTime, default=datetime.utcnow)
+    last_sent_at = Column(DateTime, nullable=True)    # Thời điểm gửi email OTP gần nhất

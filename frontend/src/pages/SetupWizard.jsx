@@ -41,7 +41,7 @@ export default function SetupWizard() {
 
         {errorMsg && (
           <Alert
-            message={errorMsg}
+            title={errorMsg}
             type="error"
             showIcon
             style={{ marginBottom: 16, borderRadius: 8 }}

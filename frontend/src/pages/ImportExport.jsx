@@ -47,7 +47,7 @@ export default function ImportExport() {
 
   const handleBackup = async () => {
     try {
-      const res = await api.get('/import-export/backup', { responseType: 'blob' });
+      const res = await api.get('/import-export/backup', { responseType: 'blob', timeout: 120000 });
       const url = window.URL.createObjectURL(new Blob([res.data]));
       const link = document.createElement('a');
       link.href = url;
@@ -92,7 +92,7 @@ export default function ImportExport() {
           </div>
           <Alert
             type="warning" showIcon
-            message="Hành động này không thể hoàn tác. Chỉ xóa config tăng ca, KHÔNG xóa dữ liệu chấm công."
+            title="Hành động này không thể hoàn tác. Chỉ xóa config tăng ca, KHÔNG xóa dữ liệu chấm công."
             style={{ fontSize: 12 }}
           />
         </div>
@@ -156,7 +156,7 @@ export default function ImportExport() {
 
             <Alert
               type="info" showIcon
-              message="Format: Mã NV | Tên | Bộ phận | Thời gian scan (.xlsx hoặc .csv)"
+              title="Format: Mã NV | Tên | Bộ phận | Thời gian scan (.xlsx hoặc .csv)"
               style={{ marginBottom: 14, fontSize: 11 }}
             />
 
@@ -279,7 +279,7 @@ export default function ImportExport() {
         <div className="ie-section-body">
           <Alert
             type="info" showIcon
-            message="Chỉ xóa config tăng ca X (giờ ra, giờ OT, số bữa OT đã nhập). KHÔNG ảnh hưởng dữ liệu chấm công bình thường."
+            title="Chỉ xóa config tăng ca X (giờ ra, giờ OT, số bữa OT đã nhập). KHÔNG ảnh hưởng dữ liệu chấm công bình thường."
             style={{ marginBottom: 16, fontSize: 12 }}
           />
 

@@ -38,9 +38,30 @@ def create_refresh_token(data: dict) -> str:
     return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
 
+from fastapi import Request
+
 def decode_token(token: str) -> Optional[dict]:
     try:
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
         return payload
     except JWTError:
         return None
+
+
+def get_client_ip(request: Request) -> str:
+    """Lấy IP public thực tế của client từ proxy headers hoặc fallback socket"""
+    x_forwarded_for = request.headers.get("x-forwarded-for")
+    if x_forwarded_for:
+        # Lấy IP đầu tiên trong chuỗi (IP của client thực sự)
+        parts = [ip.strip() for ip in x_forwarded_for.split(",")]
+        if parts:
+            return parts[0]
+            
+    x_real_ip = request.headers.get("x-real-ip")
+    if x_real_ip:
+        return x_real_ip
+        
+    if request.client:
+        return request.client.host
+    return "unknown"
+

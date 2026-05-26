@@ -20,7 +20,7 @@ from app.database import get_db
 from app.models.user import AppUser
 from app.models.auth_tokens import PasswordResetToken, OtpCode
 from app.models.session import UserSession
-from app.utils.security import get_password_hash, create_access_token, create_refresh_token
+from app.utils.security import get_password_hash, create_access_token, create_refresh_token, get_client_ip
 from app.utils.email_service import send_reset_password_email, send_otp_email
 from app.utils.rate_limiter import check_email_rate_limit, record_email_sent
 from app.config import get_settings
@@ -48,6 +48,12 @@ class ResetPasswordRequest(BaseModel):
 class OtpVerifyRequest(BaseModel):
     otp_session_id: str            # ID phiên OTP tạm thời
     code: str                      # 6 số OTP
+    device_id: Optional[str] = None # Mã định danh thiết bị (tùy chọn)
+
+
+class OtpResendRequest(BaseModel):
+    otp_session_id: str
+
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -82,7 +88,7 @@ async def forgot_password(
     Rate limit: 5 lần / 15 phút per IP.
     Luôn trả về 200 kể cả khi email không tồn tại (tránh lộ thông tin).
     """
-    client_ip = req.client.host if req.client else "unknown"
+    client_ip = get_client_ip(req)
 
     # Rate limit theo IP
     allowed, remaining, retry_after = check_email_rate_limit(client_ip)
@@ -118,13 +124,20 @@ async def forgot_password(
         # Ghi rate limit TRƯỚC khi gửi mail
         record_email_sent(client_ip)
 
-        # Gửi email trong background (không block response)
-        background_tasks.add_task(
-            send_reset_password_email,
+        # Gửi email synchronous để debug
+        send_reset_password_email(
             user.email,
             user.full_name or user.username,
             token,
         )
+
+        # In Link Reset ra terminal khi ở chế độ DEBUG
+        if settings.DEBUG:
+            reset_url = f"{settings.FRONTEND_URL}/reset-password?token={token}"
+            print("\n" + "="*60)
+            print(f"[DEBUG MODE] Reset link generated for {user.username} ({user.email}):")
+            print(reset_url)
+            print("="*60 + "\n")
     else:
         # Vẫn ghi rate limit dù không tìm thấy user (chống brute force enumerate)
         record_email_sent(client_ip)
@@ -248,7 +261,7 @@ async def verify_otp(
 
     # Tạo session (tương tự flow login bình thường)
     session_id = str(uuid.uuid4())
-    ip_address = req.client.host if req.client else None
+    ip_address = get_client_ip(req)
     user_agent_raw = req.headers.get("user-agent", "")
 
     from app.routers.auth import _parse_device_name
@@ -260,6 +273,7 @@ async def verify_otp(
         user_id=user.id,
         device_name=device_name,
         ip_address=ip_address,
+        device_id=body.device_id,
         user_agent=user_agent_raw[:500],
         is_active=True,
         expires_at=expires_at,
@@ -285,3 +299,65 @@ async def verify_otp(
         user=UserResponse.model_validate(user),
         session_id=session_id,
     )
+
+
+# ─── OTP Resend ───────────────────────────────────────────────────────────────
+
+OTP_RESEND_COOLDOWN = 120  # seconds
+
+@router.post("/otp/resend")
+async def resend_otp(
+    body: OtpResendRequest,
+    background_tasks: BackgroundTasks,
+    req: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Gửi lại email OTP — cooldown 120 giây để tránh Gmail delay do email trùng.
+    """
+    r = await db.execute(select(OtpCode).where(OtpCode.id == int(body.otp_session_id)))
+    otp_obj = r.scalar_one_or_none()
+
+    if not otp_obj or otp_obj.used or otp_obj.expires_at < _utcnow():
+        raise HTTPException(status_code=400, detail="Phiên OTP không hợp lệ hoặc đã hết hạn.")
+
+    # Kiểm tra cooldown
+    if otp_obj.last_sent_at:
+        secs_since = (_utcnow() - otp_obj.last_sent_at).total_seconds()
+        if secs_since < OTP_RESEND_COOLDOWN:
+            wait = int(OTP_RESEND_COOLDOWN - secs_since)
+            raise HTTPException(
+                status_code=429,
+                detail=f"Vui lòng đợi {wait} giây trước khi gửi lại.",
+                headers={"Retry-After": str(wait)},
+            )
+
+    # Gia hạn OTP thêm 5 phút kể từ lúc gửi lại
+    otp_obj.expires_at = _utcnow() + timedelta(minutes=settings.OTP_EXPIRE_MINUTES)
+    otp_obj.attempts = 0
+    otp_obj.last_sent_at = _utcnow()
+    await db.commit()
+    await db.refresh(otp_obj)
+
+    # Lấy thông tin user để gửi email
+    user_r = await db.execute(select(AppUser).where(AppUser.id == otp_obj.user_id))
+    user = user_r.scalar_one_or_none()
+    if not user or not user.is_active or not user.email:
+        raise HTTPException(status_code=400, detail="Không thể gửi lại OTP.")
+
+    ip_address = get_client_ip(req)
+    background_tasks.add_task(
+        send_otp_email,
+        user.email,
+        user.full_name or user.username,
+        otp_obj.code,
+        ip_address,
+    )
+
+    if settings.DEBUG:
+        print(f"[DEBUG] OTP resent for {user.username}: {otp_obj.code}")
+
+    return {
+        "detail": "Mã OTP mới đã được gửi về email của bạn.",
+        "resend_cooldown_secs": OTP_RESEND_COOLDOWN,
+    }

@@ -72,21 +72,33 @@ def _send(to_email: str, subject: str, html_body: str) -> bool:
         msg["To"] = to_email
         msg.attach(MIMEText(html_body, "html", "utf-8"))
 
-        with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=10) as smtp:
+        with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=30) as smtp:
             smtp.ehlo()
             smtp.starttls()
+            smtp.ehlo()
             smtp.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
             smtp.sendmail(settings.SMTP_USER, to_email, msg.as_string())
 
-        logger.info(f"Email sent to {to_email}: {subject}")
+        logger.info(f"[EMAIL OK] Sent to {to_email}: {subject}")
+        print(f"[EMAIL OK] Sent to {to_email}: {subject}", flush=True)
         return True
+    except smtplib.SMTPAuthenticationError as e:
+        logger.error(f"[EMAIL FAIL] SMTP auth error: {e}")
+        print(f"[EMAIL FAIL] SMTP auth error — kiểm tra SMTP_USER/SMTP_PASSWORD trong .env: {e}")
+        return False
+    except smtplib.SMTPException as e:
+        logger.error(f"[EMAIL FAIL] SMTP error to {to_email}: {e}")
+        print(f"[EMAIL FAIL] SMTP error to {to_email}: {e}")
+        return False
     except Exception as e:
-        logger.error(f"Email send failed to {to_email}: {e}")
+        logger.error(f"[EMAIL FAIL] Unexpected error to {to_email}: {e}")
+        print(f"[EMAIL FAIL] Unexpected error to {to_email}: {e}")
         return False
 
 
 def send_reset_password_email(to_email: str, full_name: str, reset_token: str) -> bool:
     """Gửi email chứa link reset mật khẩu (hiệu lực 5 phút)"""
+    print(f"[EMAIL] send_reset_password_email called → {to_email}", flush=True)
     reset_url = f"{settings.FRONTEND_URL}/reset-password?token={reset_token}"
     name = full_name or to_email.split("@")[0]
 
@@ -109,6 +121,7 @@ def send_reset_password_email(to_email: str, full_name: str, reset_token: str) -
 
 def send_otp_email(to_email: str, full_name: str, otp_code: str, ip_address: str = "") -> bool:
     """Gửi mã OTP 6 số để xác thực đăng nhập từ IP lạ"""
+    print(f"[EMAIL] send_otp_email called → {to_email} | OTP: {otp_code}", flush=True)
     name = full_name or to_email.split("@")[0]
     ip_info = f"từ IP <strong>{ip_address}</strong> " if ip_address else ""
 

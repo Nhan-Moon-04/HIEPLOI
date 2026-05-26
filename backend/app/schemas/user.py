@@ -8,6 +8,8 @@ class LoginRequest(BaseModel):
     username: str
     password: str
     device_name: Optional[str] = None   # Tên thiết bị tùy chỉnh (tùy chọn)
+    device_id: Optional[str] = None     # Mã định danh thiết bị duy nhất (tùy chọn)
+
 
 
 class TokenResponse(BaseModel):
@@ -68,6 +70,7 @@ class SessionResponse(BaseModel):
     id: str
     device_name: Optional[str] = None
     ip_address: Optional[str] = None
+    device_id: Optional[str] = None
     is_active: bool
     created_at: datetime
     last_active_at: datetime

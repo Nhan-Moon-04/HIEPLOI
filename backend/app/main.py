@@ -16,6 +16,8 @@ async def run_migration():
         "ALTER TABLE advance_payments ADD COLUMN loan_id INTEGER",
         "ALTER TABLE advance_payments ADD COLUMN installment_no INTEGER DEFAULT 1",
         "ALTER TABLE app_users ADD COLUMN is_setup_completed BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE user_sessions ADD COLUMN device_id VARCHAR(100)",
+        "ALTER TABLE otp_codes ADD COLUMN last_sent_at DATETIME",
         """CREATE TABLE IF NOT EXISTS advance_loans (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             employee_id INTEGER NOT NULL,

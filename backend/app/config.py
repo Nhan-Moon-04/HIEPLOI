@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     SMTP_HOST: str = "smtp.gmail.com"
     SMTP_PORT: int = 587
     SMTP_USER: str = "nthiennhan1611@gmail.com"
-    SMTP_PASSWORD: str = "kpjktdjrgimwurpe"           # App password (không có dấu cách)
+    SMTP_PASSWORD: str = "fikbbpfhocqzxptu"            # App password (không có dấu cách)
     EMAIL_FROM_NAME: str = "Hiệp Lợi HR"
 
     # Security — Login lockout
@@ -41,8 +41,10 @@ class Settings(BaseSettings):
     EMAIL_RATE_LIMIT_WINDOW_MINUTES: int = 15
 
     class Config:
-        env_file = "../../.env"
+        import os
+        env_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../.env")
         env_file_encoding = "utf-8"
+
 
 
 @lru_cache()

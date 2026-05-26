@@ -146,7 +146,7 @@ function CreateLoanModal({ employees, salariesData, open, onClose, onCreated }) 
       cancelText="Hủy"
       confirmLoading={saving}
       width={520}
-      destroyOnClose
+      destroyOnHidden
     >
       <Form form={form} layout="vertical" size="middle" initialValues={{
         loan_date: dayjs(),

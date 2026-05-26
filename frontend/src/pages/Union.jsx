@@ -183,7 +183,7 @@ function TransactionTab({ year }) {
         title={<><DollarOutlined style={{ color: '#276EF1', marginRight: 8 }} />{txModal?.id ? 'Sửa giao dịch' : 'Thêm giao dịch công đoàn'}</>}
         open={!!txModal} onCancel={() => { setTxModal(null); form.resetFields(); }}
         onOk={() => form.submit()} okText={txModal?.id ? 'Cập nhật' : 'Tạo giao dịch'}
-        confirmLoading={saveMut.isPending} destroyOnClose>
+        confirmLoading={saveMut.isPending} destroyOnHidden>
         <Form form={form} layout="vertical" onFinish={(vals) => {
           saveMut.mutate({ ...vals, transaction_date: vals.transaction_date.format('YYYY-MM-DD') });
         }}>
@@ -232,7 +232,7 @@ function BulkMemberModal({ open, event, onClose, onSuccess }) {
   });
   return (
     <Modal title={<><ThunderboltOutlined style={{ color: '#276EF1', marginRight: 8 }} />Phát từ danh sách đoàn viên</>}
-      open={open} onCancel={onClose} onOk={() => form.submit()} okText="Phát thưởng" confirmLoading={mut.isPending} destroyOnClose>
+      open={open} onCancel={onClose} onOk={() => form.submit()} okText="Phát thưởng" confirmLoading={mut.isPending} destroyOnHidden>
       <Form form={form} layout="vertical" onFinish={(vals) => mut.mutate(vals)} initialValues={{ gender: null }}>
         <Form.Item name="amount_per_person" label="Số tiền / người (đ)" rules={[{ required: true }]}>
           <InputNumber style={{ width: '100%' }} min={0} step={50000}
@@ -419,7 +419,7 @@ function EventsTab({ year }) {
       )}
       <Modal title={<><GiftOutlined style={{ color: '#276EF1', marginRight: 8 }} />Tạo sự kiện công đoàn</>}
         open={createModal} onCancel={() => setCreateModal(false)} onOk={() => form.submit()}
-        okText="Tạo sự kiện" confirmLoading={createMut.isPending} destroyOnClose>
+        okText="Tạo sự kiện" confirmLoading={createMut.isPending} destroyOnHidden>
         <Form form={form} layout="vertical" onFinish={(vals) => {
           createMut.mutate({ ...vals, event_date: vals.event_date ? vals.event_date.format('YYYY-MM-DD') : null });
         }} initialValues={{ year, event_type: 'other', amount_per_person: 0 }}>
@@ -446,7 +446,7 @@ function EventsTab({ year }) {
         onSuccess={() => { setBulkModal(false); qc.invalidateQueries({ queryKey: ['union-event-members', selectedEvent?.id] }); qc.invalidateQueries({ queryKey: ['union-events'] }); }} />
       <Modal title="Thêm đoàn viên vào sự kiện" open={addMemberModal}
         onCancel={() => { setAddMemberModal(false); addForm.resetFields(); }}
-        onOk={() => addForm.submit()} okText="Thêm" confirmLoading={addMemberMut.isPending} destroyOnClose>
+        onOk={() => addForm.submit()} okText="Thêm" confirmLoading={addMemberMut.isPending} destroyOnHidden>
         <Form form={addForm} layout="vertical" onFinish={(vals) => addMemberMut.mutate(vals)}
           initialValues={{ gender: 'male', amount: selectedEvent?.amount_per_person || 0 }}>
           <Form.Item name="full_name" label="Họ và tên" rules={[{ required: true }]}><Input /></Form.Item>
@@ -588,7 +588,7 @@ function MembersTab() {
       </div>
       <Modal title={<><UsergroupAddOutlined style={{ color: '#276EF1', marginRight: 8 }} />{modal?.id ? 'Sửa đoàn viên' : 'Thêm đoàn viên'}</>}
         open={modal !== null} onCancel={() => { setModal(null); form.resetFields(); }}
-        onOk={() => form.submit()} okText={modal?.id ? 'Cập nhật' : 'Thêm'} confirmLoading={saveMut.isPending} destroyOnClose>
+        onOk={() => form.submit()} okText={modal?.id ? 'Cập nhật' : 'Thêm'} confirmLoading={saveMut.isPending} destroyOnHidden>
         <Form form={form} layout="vertical" onFinish={(vals) => {
           saveMut.mutate({ ...vals, join_date: vals.join_date ? vals.join_date.format('YYYY-MM-DD') : null });
         }} initialValues={{ gender: 'male', position: 'doan_vien', bch_monthly_salary: 0, is_active: true }}>

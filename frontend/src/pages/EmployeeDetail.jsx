@@ -267,7 +267,7 @@ export default function EmployeeDetail() {
       
       {isLocked && (
         <Alert
-          message={`Dữ liệu chấm công tháng ${dayjs(monthKey).format('MM/YYYY')} đã được chốt (khóa dữ liệu).`}
+          title={`Dữ liệu chấm công tháng ${dayjs(monthKey).format('MM/YYYY')} đã được chốt (khóa dữ liệu).`}
           description="Hệ thống đang hoạt động ở chế độ xem chi tiết. Mọi thao tác chỉnh sửa (đổi ca, báo phép, báo đi làm) đều bị khóa đối với tháng này."
           type="warning"
           showIcon

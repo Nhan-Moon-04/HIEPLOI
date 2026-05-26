@@ -16,6 +16,7 @@ from app.schemas.user import (
 from app.utils.security import (
     verify_password, get_password_hash,
     create_access_token, create_refresh_token, decode_token,
+    get_client_ip,
 )
 from app.middleware.auth import get_current_user, require_roles
 from app.config import get_settings
@@ -124,55 +125,115 @@ async def login(
     user.login_attempts = 0
     user.locked_until = None
 
-    # ── Kiểm tra IP lạ → OTP ─────────────────────────────────────────────────
-    ip_address = req.client.host if req.client else None
+    # ── Kiểm tra IP lạ / Thiết bị lạ → OTP ──────────────────────────────────────
+    ip_address = get_client_ip(req)
     user_agent_raw = req.headers.get("user-agent", "")
 
-    if ip_address and user.email:
-        # Xem IP này đã từng login thành công chưa
-        known_ip_result = await db.execute(
-            select(UserSession)
-            .where(
-                UserSession.user_id == user.id,
-                UserSession.ip_address == ip_address,
-                UserSession.is_active == True,
+    if user.email:
+        known_session = None
+        # 1. Kiểm tra theo device_id trước
+        if request.device_id:
+            known_dev_result = await db.execute(
+                select(UserSession)
+                .where(
+                    UserSession.user_id == user.id,
+                    UserSession.device_id == request.device_id,
+                )
+                .limit(1)
             )
-            .limit(1)
-        )
-        known_session = known_ip_result.scalar_one_or_none()
+            known_session = known_dev_result.scalar_one_or_none()
 
+        # 2. Nếu không khớp device_id, kiểm tra xem IP này đã từng login thành công chưa (lịch sử)
+        if not known_session and ip_address:
+            known_ip_result = await db.execute(
+                select(UserSession)
+                .where(
+                    UserSession.user_id == user.id,
+                    UserSession.ip_address == ip_address,
+                )
+                .limit(1)
+            )
+            known_session = known_ip_result.scalar_one_or_none()
+
+        # Nếu không tìm thấy phiên nào trước đó (cả device_id lẫn IP đều lạ)
         if not known_session:
-            # IP lạ → gửi OTP
-            otp_code = str(random.randint(100000, 999999))
-            otp_obj = OtpCode(
-                user_id=user.id,
-                code=otp_code,
-                purpose="login_otp",
-                ip_address=ip_address,
-                expires_at=_utcnow() + timedelta(minutes=settings.OTP_EXPIRE_MINUTES),
+            # Tìm xem có OTP nào chưa sử dụng và chưa hết hạn cho user này không (để tái sử dụng tránh gửi spam và lệch session)
+            existing_otp_result = await db.execute(
+                select(OtpCode)
+                .where(
+                    OtpCode.user_id == user.id,
+                    OtpCode.purpose == "login_otp",
+                    OtpCode.used == False,
+                    OtpCode.expires_at > _utcnow(),
+                )
+                .order_by(OtpCode.created_at.desc())
+                .limit(1)
             )
-            db.add(otp_obj)
-            await db.commit()
-            await db.refresh(otp_obj)
+            existing_otp = existing_otp_result.scalar_one_or_none()
 
-            # Gửi email OTP trong background
-            from app.utils.email_service import send_otp_email
-            background_tasks.add_task(
-                send_otp_email,
-                user.email,
-                user.full_name or user.username,
-                otp_code,
-                ip_address,
-            )
+            OTP_RESEND_COOLDOWN = 120  # seconds — tránh Gmail chặn email trùng lặp
 
+            if existing_otp:
+                otp_obj = existing_otp
+                otp_code = otp_obj.code
+                otp_obj.expires_at = _utcnow() + timedelta(minutes=settings.OTP_EXPIRE_MINUTES)
+                otp_obj.attempts = 0
+
+                # Kiểm tra cooldown gửi email — chỉ gửi lại nếu đã qua 120s
+                secs_since_sent = (
+                    (_utcnow() - otp_obj.last_sent_at).total_seconds()
+                    if otp_obj.last_sent_at else OTP_RESEND_COOLDOWN + 1
+                )
+                should_send_email = secs_since_sent >= OTP_RESEND_COOLDOWN
+                if should_send_email:
+                    otp_obj.last_sent_at = _utcnow()
+
+                await db.commit()
+                await db.refresh(otp_obj)
+            else:
+                # IP & Thiết bị lạ → tạo OTP mới
+                otp_code = str(random.randint(100000, 999999))
+                otp_obj = OtpCode(
+                    user_id=user.id,
+                    code=otp_code,
+                    purpose="login_otp",
+                    ip_address=ip_address,
+                    expires_at=_utcnow() + timedelta(minutes=settings.OTP_EXPIRE_MINUTES),
+                    last_sent_at=_utcnow(),
+                )
+                db.add(otp_obj)
+                await db.commit()
+                await db.refresh(otp_obj)
+                should_send_email = True
+
+            if should_send_email:
+                from app.utils.email_service import send_otp_email
+                send_otp_email(
+                    user.email,
+                    user.full_name or user.username,
+                    otp_code,
+                    ip_address,
+                )
+
+            # In OTP ra terminal khi đang ở chế độ DEBUG
+            if settings.DEBUG:
+                print("\n" + "="*60)
+                print(f"[DEBUG MODE] OTP generated for {user.username} ({user.email}): {otp_code}")
+                print("="*60 + "\n")
+
+            resend_cooldown_secs = max(0, int(OTP_RESEND_COOLDOWN - (
+                (_utcnow() - otp_obj.last_sent_at).total_seconds()
+                if otp_obj.last_sent_at else 0
+            )))
             return {
                 "otp_required": True,
                 "otp_session_id": str(otp_obj.id),
                 "message": "Phát hiện đăng nhập từ thiết bị mới. Mã OTP đã được gửi về email của bạn.",
                 "email_hint": user.email[:3] + "****@" + user.email.split("@")[-1] if user.email else None,
+                "resend_cooldown_secs": resend_cooldown_secs,
             }
 
-    # ── Login bình thường (IP quen hoặc không có email) ───────────────────────
+    # ── Login bình thường (IP quen / thiết bị quen hoặc không có email) ───────────
     session_id = str(uuid.uuid4())
     device_name = request.device_name or _parse_device_name(user_agent_raw)
     expires_at = _utcnow() + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
@@ -182,6 +243,7 @@ async def login(
         user_id=user.id,
         device_name=device_name,
         ip_address=ip_address,
+        device_id=request.device_id,
         user_agent=user_agent_raw[:500],
         is_active=True,
         expires_at=expires_at,
