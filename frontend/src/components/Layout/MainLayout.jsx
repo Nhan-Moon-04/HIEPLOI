@@ -32,6 +32,7 @@ const ROUTE_META = {
   '/settings':      ['Hệ thống',     'Cài đặt'],
   '/union':         ['Công đoàn',    'Công đoàn'],
   '/user-management': ['Hệ thống',  'Quản lý người dùng'],
+  '/chat':             ['Tổng quan',  'Tin nhắn'],
 };
 
 export default function MainLayout({ children }) {

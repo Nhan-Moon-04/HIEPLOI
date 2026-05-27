@@ -29,6 +29,7 @@ import Union from './pages/Union';
 import UserManagement from './pages/UserManagement';
 import ResetPassword from './pages/ResetPassword';
 import SetupWizard from './pages/SetupWizard';
+import Chat from './pages/Chat';
 
 function PrivateRoute({ children }) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -84,6 +85,7 @@ export default function App() {
                   <Route path="/settings" element={<Settings />} />
                   <Route path="/union" element={<Union />} />
                   <Route path="/user-management" element={<UserManagement />} />
+                  <Route path="/chat" element={<Chat />} />
                 </Routes>
               </MainLayout>
             </PrivateRoute>

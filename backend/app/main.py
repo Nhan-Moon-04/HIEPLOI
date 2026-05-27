@@ -9,6 +9,7 @@ from app.models import *  # noqa: F401, F403 - Import all models so they registe
 from app.routers import auth, shifts, employees, dashboard, holidays, schedules, overtime, attendance, import_export, meal_allowance, salaries, audit, leave, union
 from app.routers import admin_users, password as password_router
 from app.routers import department as department_router
+from app.routers import chat as chat_router
 from app.services.seed import seed_database
 
 
@@ -128,6 +129,13 @@ app.include_router(union.router, prefix="/api")
 app.include_router(admin_users.router, prefix="/api")
 app.include_router(password_router.router, prefix="/api")
 app.include_router(department_router.router, prefix="/api")
+app.include_router(chat_router.router, prefix="/api")
+
+# Serve chat uploaded files
+from fastapi.staticfiles import StaticFiles
+import os
+_upload_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads", "chat")
+os.makedirs(_upload_dir, exist_ok=True)
 
 
 @app.get("/api/health")

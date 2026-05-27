@@ -12,6 +12,7 @@ from app.models.union import UnionTransaction, UnionEvent, UnionEventMember, Uni
 from app.models.session import UserSession
 from app.models.auth_tokens import PasswordResetToken, OtpCode
 from app.models.department import Department
+from app.models.chat import Conversation, ConversationMember, Message, MessageReadReceipt
 
 __all__ = [
     "AppUser",
@@ -35,5 +36,9 @@ __all__ = [
     "PasswordResetToken",
     "OtpCode",
     "Department",
+    "Conversation",
+    "ConversationMember",
+    "Message",
+    "MessageReadReceipt",
 ]
 

@@ -1,17 +1,22 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { Badge } from 'antd';
 import {
   AppstoreOutlined, TeamOutlined, ClockCircleOutlined, ScheduleOutlined,
   CalendarOutlined, DollarOutlined, FileTextOutlined, SafetyOutlined,
   BankOutlined, ImportOutlined, AuditOutlined, SettingOutlined, RiseOutlined,
-  UsergroupAddOutlined, UserSwitchOutlined, DownOutlined,
+  UsergroupAddOutlined, UserSwitchOutlined, DownOutlined, MessageOutlined,
 } from '@ant-design/icons';
 import useAuthStore from '../../stores/authStore';
+import useChatStore from '../../stores/chatStore';
 
 const sections = [
   {
     group: 'TỔNG QUAN',
-    items: [{ key: '/dashboard', icon: <AppstoreOutlined />, label: 'Dashboard' }],
+    items: [
+      { key: '/dashboard', icon: <AppstoreOutlined />, label: 'Dashboard' },
+      { key: '/chat', icon: <MessageOutlined />, label: 'Tin nhắn', hasBadge: true },
+    ],
   },
   {
     group: 'NHÂN SỰ',
@@ -61,6 +66,17 @@ export default function Sidebar({ collapsed }) {
   const navigate = useNavigate();
   const location = useLocation();
   const { hasRole } = useAuthStore();
+  const unreadTotal = useChatStore((s) => s.unreadTotal);
+  const loadUnreadCount = useChatStore((s) => s.loadUnreadCount);
+  const connectWS = useChatStore((s) => s.connectWS);
+
+  // Load unread count on mount + mỗi 30s
+  useEffect(() => {
+    loadUnreadCount();
+    connectWS();
+    const interval = setInterval(loadUnreadCount, 30000);
+    return () => clearInterval(interval);
+  }, []);
 
   const [expandedGroups, setExpandedGroups] = useState({
     'TỔNG QUAN': true,
@@ -133,7 +149,17 @@ export default function Sidebar({ collapsed }) {
                     title={collapsed ? item.label : undefined}
                   >
                     <span className="sb-item-icon">{item.icon}</span>
-                    {!collapsed && <span className="sb-item-label">{item.label}</span>}
+                    {!collapsed && (
+                      <span className="sb-item-label">
+                        {item.label}
+                        {item.hasBadge && unreadTotal > 0 && (
+                          <Badge count={unreadTotal} size="small" offset={[6, -2]} style={{ fontSize: 10 }} />
+                        )}
+                      </span>
+                    )}
+                    {collapsed && item.hasBadge && unreadTotal > 0 && (
+                      <Badge count={unreadTotal} size="small" className="sb-badge-collapsed" />
+                    )}
                   </div>
                 );
               })}
