@@ -22,11 +22,11 @@ const sections = [
     group: 'NHÂN SỰ',
     roles: ['admin', 'accountant', 'worker'],
     items: [
-      { key: '/employees', icon: <TeamOutlined />, label: 'Nhân viên' },
-      { key: '/departments', icon: <AppstoreOutlined />, label: 'Bộ phận' },
-      { key: '/schedules', icon: <CalendarOutlined />, label: 'Lịch làm' },
+      { key: '/employees', icon: <TeamOutlined />, label: 'Nhân viên', roles: ['admin', 'accountant'] },
+      { key: '/departments', icon: <AppstoreOutlined />, label: 'Bộ phận', roles: ['admin', 'accountant'] },
+      { key: '/schedules', icon: <CalendarOutlined />, label: 'Lịch làm', roles: ['admin', 'accountant'] },
       { key: '/attendance', icon: <ClockCircleOutlined />, label: 'Chấm công' },
-      { key: '/overtime', icon: <RiseOutlined />, label: 'Tăng ca' },
+      { key: '/overtime', icon: <RiseOutlined />, label: 'Tăng ca', roles: ['admin', 'accountant'] },
       { key: '/shifts', icon: <ScheduleOutlined />, label: 'Mã ca', roles: ['admin', 'accountant'] },
       { key: '/leave', icon: <CalendarOutlined />, label: 'Phép năm' },
     ],
@@ -35,8 +35,8 @@ const sections = [
     group: 'LƯƠNG & THUẾ',
     roles: ['admin', 'accountant', 'worker'],
     items: [
-      { key: '/meal-allowance', icon: <DollarOutlined />, label: 'Tiền ăn' },
-      { key: '/salaries', icon: <DollarOutlined />, label: 'Lương cơ bản' },
+      { key: '/meal-allowance', icon: <DollarOutlined />, label: 'Tiền ăn', roles: ['admin', 'accountant'] },
+      { key: '/salaries', icon: <DollarOutlined />, label: 'Lương cơ bản', roles: ['admin', 'accountant'] },
       { key: '/salaries/payroll', icon: <FileTextOutlined />, label: 'Bảng lương' },
       { key: '/insurance', icon: <SafetyOutlined />, label: 'BHXH / Thuế', roles: ['admin', 'accountant'] },
       { key: '/advances', icon: <BankOutlined />, label: 'Tạm ứng' },
@@ -51,13 +51,13 @@ const sections = [
   },
   {
     group: 'HỆ THỐNG',
-    roles: ['admin', 'worker'],
+    roles: ['admin'],
     items: [
       { key: '/holidays',        icon: <CalendarOutlined />,     label: 'Ngày OFF & Lễ', roles: ['admin'] },
       { key: '/import-export',   icon: <ImportOutlined />,       label: 'Import / Export', roles: ['admin'] },
       { key: '/audit',           icon: <AuditOutlined />,        label: 'Nhật ký', roles: ['admin'] },
       { key: '/user-management', icon: <UserSwitchOutlined />,   label: 'Quản lý user', roles: ['admin'] },
-      { key: '/settings',        icon: <SettingOutlined />,      label: 'Cài đặt' },
+      { key: '/settings',        icon: <SettingOutlined />,      label: 'Cài đặt', roles: ['admin'] },
     ],
   },
 ];

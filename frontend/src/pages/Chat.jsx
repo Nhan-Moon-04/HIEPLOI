@@ -196,8 +196,8 @@ export default function Chat() {
   const handleFileSelect = async (e) => {
     const file = e.target.files?.[0];
     if (!file || !activeConversationId) return;
-    if (file.size > 10 * 1024 * 1024) {
-      antMessage.error('File quá lớn (tối đa 10MB)');
+    if (file.size > 30 * 1024 * 1024) {
+      antMessage.error('File quá lớn (tối đa 30MB)');
       return;
     }
     try {

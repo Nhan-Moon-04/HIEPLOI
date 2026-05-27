@@ -3,7 +3,7 @@ Chat models — Conversations, Members, Messages
 Hỗ trợ: 1-1 chat, group chat, file/image, read receipts
 """
 import enum
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from sqlalchemy import (
     Column, Integer, String, Text, Boolean, DateTime, Enum,
     ForeignKey, UniqueConstraint, Index
@@ -11,9 +11,11 @@ from sqlalchemy import (
 from sqlalchemy.orm import relationship
 from app.database import Base
 
+_VN_TZ = timezone(timedelta(hours=7))
 
-def _utcnow():
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+def _vn_now():
+    return datetime.now(_VN_TZ).replace(tzinfo=None)
 
 
 class ConversationType(str, enum.Enum):
@@ -41,8 +43,8 @@ class Conversation(Base):
     type = Column(Enum(ConversationType), default=ConversationType.DIRECT, nullable=False)
     avatar_color = Column(String(20), default="#276EF1")
     created_by = Column(Integer, ForeignKey("app_users.id"), nullable=False)
-    created_at = Column(DateTime, default=_utcnow)
-    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
+    created_at = Column(DateTime, default=_vn_now)
+    updated_at = Column(DateTime, default=_vn_now, onupdate=_vn_now)
 
     # Relationships
     members = relationship("ConversationMember", back_populates="conversation", cascade="all, delete-orphan")
@@ -61,7 +63,7 @@ class ConversationMember(Base):
     conversation_id = Column(Integer, ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False)
     user_id = Column(Integer, ForeignKey("app_users.id"), nullable=False)
     role = Column(Enum(MemberRole), default=MemberRole.MEMBER, nullable=False)
-    joined_at = Column(DateTime, default=_utcnow)
+    joined_at = Column(DateTime, default=_vn_now)
     last_read_at = Column(DateTime, nullable=True)  # Thời điểm đọc cuối cùng
 
     # Relationships
@@ -88,7 +90,7 @@ class Message(Base):
     file_mime = Column(String(100), nullable=True)
 
     is_deleted = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=_utcnow)
+    created_at = Column(DateTime, default=_vn_now)
 
     # Relationships
     conversation = relationship("Conversation", back_populates="messages")
@@ -109,7 +111,7 @@ class MessageReadReceipt(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     message_id = Column(Integer, ForeignKey("messages.id", ondelete="CASCADE"), nullable=False)
     user_id = Column(Integer, ForeignKey("app_users.id"), nullable=False)
-    read_at = Column(DateTime, default=_utcnow)
+    read_at = Column(DateTime, default=_vn_now)
 
     message = relationship("Message", back_populates="read_by")
     user = relationship("AppUser")

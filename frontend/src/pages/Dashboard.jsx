@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { DatePicker, Button, Table, Tag } from 'antd';
+import { DatePicker, Button, Table, Tag, Progress, Empty } from 'antd';
 import {
   DownloadOutlined,
   TeamOutlined,
@@ -9,13 +9,24 @@ import {
   BarChartOutlined,
   ArrowUpOutlined,
   CalendarOutlined,
+  ClockCircleOutlined,
+  UserOutlined,
+  CheckCircleOutlined,
+  WarningOutlined,
+  CoffeeOutlined,
+  RiseOutlined,
 } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
 import ReactECharts from 'echarts-for-react';
 import dayjs from 'dayjs';
 import api from '../api/client';
+import useAuthStore from '../stores/authStore';
 
-export default function Dashboard() {
+// ══════════════════════════════════════════════════════════════════════════════
+// ADMIN DASHBOARD
+// ══════════════════════════════════════════════════════════════════════════════
+
+function AdminDashboard() {
   const [monthKey, setMonthKey] = useState(dayjs().format('YYYY-MM'));
   const month = dayjs(monthKey);
 
@@ -210,4 +221,281 @@ export default function Dashboard() {
       </div>
     </div>
   );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// WORKER DASHBOARD — Giao diện cá nhân cho công nhân
+// ══════════════════════════════════════════════════════════════════════════════
+
+function WorkerDashboard() {
+  const [monthKey, setMonthKey] = useState(dayjs().format('YYYY-MM'));
+  const month = dayjs(monthKey);
+  const { user } = useAuthStore();
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['my-dashboard', monthKey],
+    queryFn: () => api.get('/dashboard/my-stats', { params: { month_key: monthKey } }).then((r) => r.data),
+  });
+
+  const emp = data?.employee;
+  const att = data?.attendance || {};
+  const leave = data?.leave || {};
+  const recentDays = data?.recent_days || [];
+
+  const greeting = () => {
+    const hour = new Date().getHours();
+    if (hour < 12) return 'Chào buổi sáng';
+    if (hour < 18) return 'Chào buổi chiều';
+    return 'Chào buổi tối';
+  };
+
+  // Stats cards cho worker
+  const workerCards = [
+    {
+      label: 'NGÀY CÔNG',
+      value: att.total_present || 0,
+      sub: `/ 26 ngày`,
+      icon: <CheckCircleOutlined />,
+      color: '#10b981',
+      bg: '#ecfdf5',
+    },
+    {
+      label: 'GIỜ LÀM',
+      value: att.total_hours || 0,
+      sub: 'giờ',
+      icon: <ClockCircleOutlined />,
+      color: '#4361ee',
+      bg: '#eef1fd',
+    },
+    {
+      label: 'TĂNG CA',
+      value: att.total_ot || 0,
+      sub: 'giờ',
+      icon: <RiseOutlined />,
+      color: '#f59e0b',
+      bg: '#fffbeb',
+    },
+    {
+      label: 'TIỀN ĂN',
+      value: att.total_meal_allowance ? Number(att.total_meal_allowance).toLocaleString('vi-VN') : '0',
+      sub: 'VNĐ',
+      icon: <CoffeeOutlined />,
+      color: '#8b5cf6',
+      bg: '#f5f3ff',
+    },
+  ];
+
+  // Recent attendance columns
+  const recentColumns = [
+    {
+      title: 'Ngày',
+      dataIndex: 'date',
+      render: (d) => {
+        const dd = dayjs(d);
+        return (
+          <div>
+            <div style={{ fontWeight: 600, fontSize: 13 }}>{dd.format('DD/MM')}</div>
+            <div style={{ fontSize: 10, color: '#9ca3af' }}>{dd.format('dddd')}</div>
+          </div>
+        );
+      },
+    },
+    {
+      title: 'Vào',
+      dataIndex: 'check_in',
+      align: 'center',
+      render: (t) => t ? (
+        <Tag color="green" style={{ margin: 0 }}>{t}</Tag>
+      ) : <span style={{ color: '#d1d5db' }}>—</span>,
+    },
+    {
+      title: 'Ra',
+      dataIndex: 'check_out',
+      align: 'center',
+      render: (t) => t ? (
+        <Tag color="blue" style={{ margin: 0 }}>{t}</Tag>
+      ) : <span style={{ color: '#d1d5db' }}>—</span>,
+    },
+    {
+      title: 'Giờ',
+      dataIndex: 'hours',
+      align: 'center',
+      render: (v) => <span style={{ fontWeight: 600 }}>{v > 0 ? v.toFixed(1) : '—'}</span>,
+    },
+  ];
+
+  return (
+    <div className="worker-dash">
+      {/* Header */}
+      <div className="wd-header">
+        <div className="wd-greeting">
+          <div className="wd-greeting-icon">
+            <UserOutlined />
+          </div>
+          <div>
+            <h1 className="wd-greeting-text">
+              {greeting()}, <span className="wd-name">{emp?.full_name || user?.full_name || user?.username}</span>
+            </h1>
+            <div className="wd-greeting-sub">
+              {emp ? (
+                <>
+                  <span>{emp.employee_code}</span>
+                  <span className="wd-dot">•</span>
+                  <span>{emp.department || 'Chưa phân bộ phận'}</span>
+                  {emp.position && (
+                    <>
+                      <span className="wd-dot">•</span>
+                      <span>{emp.position}</span>
+                    </>
+                  )}
+                </>
+              ) : (
+                <span>Chưa liên kết hồ sơ nhân viên</span>
+              )}
+            </div>
+          </div>
+        </div>
+        <div className="wd-month-picker">
+          <DatePicker
+            picker="month"
+            value={month}
+            onChange={(d) => d && setMonthKey(d.format('YYYY-MM'))}
+            format="[Tháng] M / YYYY"
+            style={{ width: 160 }}
+          />
+        </div>
+      </div>
+
+      {/* Stat cards */}
+      <div className="dash-stats-grid">
+        {workerCards.map((card) => (
+          <div key={card.label} className="dash-stat-card">
+            <div className="dsc-icon" style={{ background: card.bg, color: card.color }}>
+              {card.icon}
+            </div>
+            <div className="dsc-content">
+              <div className="dsc-label">{card.label}</div>
+              <div className="dsc-value" style={{ color: card.color }}>{card.value}</div>
+              <div className="dsc-sub">{card.sub}</div>
+            </div>
+            <div className="dsc-accent" style={{ background: card.color }} />
+          </div>
+        ))}
+      </div>
+
+      {/* Content row */}
+      <div className="charts-row">
+        {/* Phép năm */}
+        <div className="card">
+          <div className="card-title">
+            <CalendarOutlined style={{ marginRight: 6 }} />
+            Phép năm {month.format('YYYY')}
+          </div>
+          <div className="wd-leave-wrap">
+            <div className="wd-leave-progress">
+              <Progress
+                type="dashboard"
+                percent={leave.total ? Math.round(((leave.total - (leave.remaining || 0)) / leave.total) * 100) : 0}
+                size={130}
+                strokeColor="#4361ee"
+                trailColor="#e8ecf1"
+                format={() => (
+                  <div style={{ textAlign: 'center' }}>
+                    <div style={{ fontSize: 24, fontWeight: 700, color: '#1a2233' }}>
+                      {leave.remaining ?? 0}
+                    </div>
+                    <div style={{ fontSize: 11, color: '#9ca3af' }}>ngày còn lại</div>
+                  </div>
+                )}
+              />
+            </div>
+            <div className="wd-leave-details">
+              <div className="wd-leave-row">
+                <span className="wd-leave-label">Tổng phép:</span>
+                <span className="wd-leave-val">{leave.total || 12} ngày</span>
+              </div>
+              <div className="wd-leave-row">
+                <span className="wd-leave-label">Đã sử dụng:</span>
+                <span className="wd-leave-val" style={{ color: '#ef4444' }}>{leave.used || 0} ngày</span>
+              </div>
+              <div className="wd-leave-row">
+                <span className="wd-leave-label">Còn lại:</span>
+                <span className="wd-leave-val" style={{ color: '#10b981', fontWeight: 700 }}>{leave.remaining ?? 0} ngày</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Thông tin cá nhân */}
+        <div className="card">
+          <div className="card-title">
+            <UserOutlined style={{ marginRight: 6 }} />
+            Thông tin cá nhân
+          </div>
+          {emp ? (
+            <div className="wd-info-grid">
+              <div className="wd-info-item">
+                <span className="wd-info-label">Mã NV</span>
+                <span className="wd-info-val">{emp.employee_code}</span>
+              </div>
+              <div className="wd-info-item">
+                <span className="wd-info-label">Họ tên</span>
+                <span className="wd-info-val">{emp.full_name}</span>
+              </div>
+              <div className="wd-info-item">
+                <span className="wd-info-label">Bộ phận</span>
+                <span className="wd-info-val">{emp.department || '—'}</span>
+              </div>
+              <div className="wd-info-item">
+                <span className="wd-info-label">Chức vụ</span>
+                <span className="wd-info-val">{emp.position || '—'}</span>
+              </div>
+              <div className="wd-info-item">
+                <span className="wd-info-label">Ngày vào</span>
+                <span className="wd-info-val">{emp.join_date ? dayjs(emp.join_date).format('DD/MM/YYYY') : '—'}</span>
+              </div>
+              <div className="wd-info-item">
+                <span className="wd-info-label">Vắng mặt</span>
+                <span className="wd-info-val" style={{ color: att.total_absent > 0 ? '#ef4444' : '#10b981' }}>
+                  {att.total_absent || 0} ngày
+                </span>
+              </div>
+            </div>
+          ) : (
+            <Empty description="Chưa liên kết hồ sơ" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+          )}
+        </div>
+      </div>
+
+      {/* Chấm công gần đây */}
+      <div className="card">
+        <div className="card-title">
+          <ClockCircleOutlined style={{ marginRight: 6 }} />
+          Chấm công gần đây — Tháng {month.format('M/YYYY')}
+        </div>
+        {recentDays.length > 0 ? (
+          <Table
+            columns={recentColumns}
+            dataSource={recentDays}
+            rowKey="date"
+            size="small"
+            pagination={false}
+          />
+        ) : (
+          <Empty description="Chưa có dữ liệu chấm công tháng này" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// MAIN EXPORT — Tự chọn layout theo role
+// ══════════════════════════════════════════════════════════════════════════════
+
+export default function Dashboard() {
+  const { user } = useAuthStore();
+  const isWorker = user?.role === 'worker';
+
+  return isWorker ? <WorkerDashboard /> : <AdminDashboard />;
 }

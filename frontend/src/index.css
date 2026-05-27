@@ -452,6 +452,37 @@ body.dark {
   margin-top: 4px;
 }
 
+/* Chat toast notification */
+.chat-toast-notification {
+  border-left: 4px solid #276EF1 !important;
+  border-radius: 10px !important;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12) !important;
+}
+
+.chat-toast-notification .ant-notification-notice-message {
+  font-weight: 700 !important;
+  font-size: 13px !important;
+  color: #1a2233 !important;
+}
+
+.chat-toast-notification .ant-notification-notice-description {
+  font-size: 12px !important;
+  color: #6b7280 !important;
+}
+
+.dark .chat-toast-notification {
+  background: #1a1f2e !important;
+  border-left-color: #4f46e5 !important;
+}
+
+.dark .chat-toast-notification .ant-notification-notice-message {
+  color: #e2e8f0 !important;
+}
+
+.dark .chat-toast-notification .ant-notification-notice-description {
+  color: #94a3b8 !important;
+}
+
 /* ===== MISA AMIS LAYOUT ===== */
 .ml {
   display: flex;
@@ -1142,6 +1173,195 @@ body.dark {
   height: 3px;
   border-radius: 0 0 14px 14px;
   opacity: 0.55;
+}
+
+/* ===== WORKER DASHBOARD ===== */
+.worker-dash {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.wd-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 18px;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.wd-greeting {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.wd-greeting-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #276EF1 0%, #4f46e5 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.wd-greeting-text {
+  font-size: 18px;
+  font-weight: 600;
+  color: #1a2233;
+  margin: 0;
+  line-height: 1.3;
+}
+
+.dark .wd-greeting-text {
+  color: #e2e8f0;
+}
+
+.wd-name {
+  color: #276EF1;
+}
+
+.wd-greeting-sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #8c98b0;
+  margin-top: 3px;
+  flex-wrap: wrap;
+}
+
+.wd-dot {
+  color: #d1d5db;
+}
+
+.wd-month-picker {
+  flex-shrink: 0;
+}
+
+/* Leave */
+.wd-leave-wrap {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 8px 0;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.wd-leave-progress {
+  flex-shrink: 0;
+}
+
+.wd-leave-details {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 150px;
+}
+
+.wd-leave-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 12px;
+  background: #f8f9fb;
+  border-radius: 8px;
+}
+
+.dark .wd-leave-row {
+  background: rgba(255,255,255,0.04);
+}
+
+.wd-leave-label {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.wd-leave-val {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1a2233;
+}
+
+.dark .wd-leave-val {
+  color: #e2e8f0;
+}
+
+/* Personal info */
+.wd-info-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.wd-info-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 12px;
+  background: #f8f9fb;
+  border-radius: 8px;
+}
+
+.dark .wd-info-item {
+  background: rgba(255,255,255,0.04);
+}
+
+.wd-info-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #9ca3af;
+}
+
+.wd-info-val {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1a2233;
+}
+
+.dark .wd-info-val {
+  color: #e2e8f0;
+}
+
+/* Mobile adjustments for worker dashboard */
+@media (max-width: 768px) {
+  .wd-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .wd-greeting-text {
+    font-size: 15px;
+  }
+
+  .wd-greeting-icon {
+    width: 40px;
+    height: 40px;
+    font-size: 18px;
+    border-radius: 10px;
+  }
+
+  .wd-info-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .wd-leave-wrap {
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .wd-leave-details {
+    width: 100%;
+  }
 }
 
 /* ===== MEAL ALLOWANCE PAGE ===== */
@@ -3362,7 +3582,345 @@ td:hover .ot-dot {
   right: 4px;
 }
 
-/* ── Responsive ─────────────────────────────────────────────────────────────── */
+/* ═══════════════════════════════════════════════════════════════════════════════
+   GLOBAL RESPONSIVE — Mobile, Tablet, iPad
+   ═══════════════════════════════════════════════════════════════════════════════ */
+
+/* ── Sidebar wrapper for mobile overlay ─────────────────────────────────────── */
+.sb-wrap {
+  /* Desktop: không ảnh hưởng gì */
+}
+
+.sb-wrap--mobile {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 200;
+  transform: translateX(-100%);
+  transition: transform 0.28s cubic-bezier(0.2, 0, 0, 1);
+  height: 100vh;
+  width: var(--sidebar-width);
+}
+
+.sb-wrap--mobile .sb {
+  width: var(--sidebar-width) !important;
+  position: relative !important;
+}
+
+.sb-wrap--mobile.sb-wrap--open {
+  transform: translateX(0);
+}
+
+/* Backdrop */
+.ml-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 199;
+  background: rgba(0, 0, 0, 0.45);
+  animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* ── MOBILE (≤768px) — Phones ───────────────────────────────────────────────── */
+@media (max-width: 768px) {
+
+  /* Sidebar: ẩn mặc định, hiện bằng hamburger overlay */
+  .sb {
+    width: var(--sidebar-width) !important;
+    position: relative !important;
+  }
+
+  /* Main body: full width, không margin left */
+  .ml-body--mobile {
+    margin-left: 0 !important;
+  }
+
+  /* Header: compact */
+  .ml-hd {
+    padding: 0 12px !important;
+    height: 44px !important;
+  }
+
+  .ml-bc {
+    display: none !important; /* Ẩn breadcrumb trên mobile */
+  }
+
+  .ml-hd-right {
+    gap: 2px !important;
+  }
+
+  /* Ẩn các nút ít dùng trên mobile */
+  .ml-hd-help-btn {
+    display: none !important;
+  }
+
+  .ml-hd-divider {
+    margin: 0 3px !important;
+  }
+
+  /* Ẩn tên user, chỉ hiện avatar */
+  .ml-user-name {
+    display: none !important;
+  }
+
+  .ml-user {
+    padding: 4px 4px !important;
+  }
+
+  /* Page content: giảm padding */
+  .ml-page {
+    padding: 12px !important;
+  }
+
+  /* ── Page headers ── */
+  .page-head {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  .page-head h1 {
+    font-size: 16px;
+  }
+
+  /* ── Stats cards ── */
+  .stats-row {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 8px !important;
+  }
+
+  .stat-card {
+    padding: 12px 14px !important;
+  }
+
+  .stat-card .value {
+    font-size: 18px !important;
+  }
+
+  /* ── Employee / Data pages ── */
+  .emp-titlebar {
+    flex-direction: column;
+    align-items: flex-start !important;
+    gap: 10px !important;
+  }
+
+  .emp-titlebar-left {
+    width: 100%;
+  }
+
+  .emp-title {
+    font-size: 16px !important;
+  }
+
+  .emp-stats {
+    display: none !important; /* Ẩn stat chips trên mobile, quá chật */
+  }
+
+  .emp-filterbar {
+    gap: 6px !important;
+  }
+
+  .emp-filterbar .ant-input-affix-wrapper {
+    min-width: 0 !important;
+    flex: 1 !important;
+  }
+
+  /* Tables: horizontal scroll */
+  .emp-table-card {
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .emp-table .ant-table {
+    min-width: 600px;
+  }
+
+  .emp-table .ant-table-thead > tr > th,
+  .emp-table .ant-table-tbody > tr > td {
+    padding: 8px 8px !important;
+    font-size: 12px !important;
+  }
+
+  /* ── Charts ── */
+  .charts-row {
+    grid-template-columns: 1fr !important;
+    gap: 10px !important;
+  }
+
+  /* ── Cards ── */
+  .card {
+    padding: 14px 14px !important;
+    border-radius: 8px !important;
+  }
+
+  .card-title {
+    font-size: 13px !important;
+  }
+
+  /* ── Login ── */
+  .login-box {
+    width: 92vw !important;
+    padding: 28px 24px !important;
+    border-radius: 12px !important;
+  }
+
+  .login-box .title h1 {
+    font-size: 18px !important;
+  }
+
+  /* ── Schedule page ── */
+  .ant-table-wrapper {
+    overflow-x: auto !important;
+  }
+
+  /* ── Settings page ── */
+  .st-profile-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* ── Import/Export ── */
+  .ie-grid-2 {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* ── Department page ── */
+  .dep-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* ── Modal ── */
+  .ant-modal {
+    max-width: 95vw !important;
+    margin: 10px auto !important;
+  }
+
+  .ant-modal-body {
+    padding: 16px !important;
+  }
+
+  /* ── Drawer ── */
+  .ant-drawer-content-wrapper {
+    max-width: 100vw !important;
+  }
+
+  /* ── Antd Table global scroll ── */
+  .ant-table-wrapper {
+    overflow-x: auto !important;
+  }
+
+  .ant-table {
+    min-width: 500px;
+  }
+
+  /* ── Pagination ── */
+  .ant-pagination {
+    flex-wrap: wrap !important;
+    gap: 4px !important;
+  }
+
+  .ant-pagination-options {
+    display: none !important; /* Ẩn page size changer trên mobile */
+  }
+
+  /* ── Payroll / Salary ── */
+  .pr-toolbar {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 8px !important;
+  }
+
+  /* ── User Management ── */
+  .um-titlebar {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 8px !important;
+  }
+
+  /* ── Advances / Tiền ăn ── */
+  .adv-titlebar,
+  .meal-titlebar {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 8px !important;
+  }
+}
+
+/* ── TABLET / iPAD (769px – 1024px) ─────────────────────────────────────────── */
+@media (min-width: 769px) and (max-width: 1024px) {
+
+  .ml-page {
+    padding: 16px !important;
+  }
+
+  .stats-row {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 10px !important;
+  }
+
+  .charts-row {
+    grid-template-columns: 1fr !important;
+  }
+
+  .emp-titlebar {
+    flex-wrap: wrap;
+  }
+
+  .emp-stats {
+    flex-wrap: wrap;
+  }
+
+  /* Tables: vẫn cho scroll nếu quá rộng */
+  .emp-table-card {
+    overflow-x: auto !important;
+  }
+
+  /* Settings */
+  .st-profile-grid {
+    grid-template-columns: 1fr 1fr !important;
+  }
+
+  .ie-grid-2 {
+    grid-template-columns: 1fr !important;
+  }
+
+  .ant-table-wrapper {
+    overflow-x: auto !important;
+  }
+}
+
+/* ── LARGE TABLET / iPAD Pro (1025px – 1200px) ─────────────────────────────── */
+@media (min-width: 1025px) and (max-width: 1200px) {
+
+  .stats-row {
+    grid-template-columns: repeat(3, 1fr) !important;
+  }
+
+  .emp-table .ant-table-thead > tr > th,
+  .emp-table .ant-table-tbody > tr > td {
+    padding: 9px 10px !important;
+  }
+}
+
+/* ── Print ───────────────────────────────────────────────────────────────────── */
+@media print {
+  .sb, .sb-wrap, .ml-hd, .ml-backdrop {
+    display: none !important;
+  }
+
+  .ml-body, .ml-body--col, .ml-body--mobile {
+    margin-left: 0 !important;
+  }
+
+  .ml-page {
+    padding: 0 !important;
+  }
+}
+
+/* ── Chat page responsive ─────────────────────────────────────────────────────── */
 @media (max-width: 768px) {
   .chat-page {
     height: calc(100vh - 48px - 20px);

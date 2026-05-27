@@ -128,10 +128,18 @@ const useChatStore = create((set, get) => ({
           };
         });
 
-        // Play sound nếu không phải tin nhắn của mình và không đang xem conv đó
+        // Play sound + show notification nếu không phải tin nhắn của mình
         const user = JSON.parse(localStorage.getItem('user') || '{}');
-        if (msg.sender_id !== user?.id && get().activeConversationId !== convId) {
+        const isOnChatPage = window.location.pathname.includes('/chat');
+        const isViewingThisConv = get().activeConversationId === convId && isOnChatPage;
+
+        if (msg.sender_id !== user?.id && !isViewingThisConv) {
+          // Luôn phát âm thanh
           get()._playNotificationSound();
+          // Hiện thông báo
+          const conv = get().conversations.find((c) => c.id === convId);
+          const convName = conv?.name || conv?.members?.find(m => m.user_id !== user?.id)?.full_name || '';
+          get()._showNotification(msg, convName);
         }
         break;
       }
@@ -231,21 +239,101 @@ const useChatStore = create((set, get) => ({
     }
   },
 
-  // Play notification sound
+  // Play notification sound nếu không phải tin nhắn của mình
   _playNotificationSound: () => {
     try {
+      // Facebook Messenger-like "ding" sound
       const ctx = new (window.AudioContext || window.webkitAudioContext)();
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.frequency.value = 880;
-      osc.type = 'sine';
-      gain.gain.setValueAtTime(0.1, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
-      osc.start(ctx.currentTime);
-      osc.stop(ctx.currentTime + 0.3);
+      const t = ctx.currentTime;
+
+      // Note 1: High ping
+      const osc1 = ctx.createOscillator();
+      const gain1 = ctx.createGain();
+      osc1.connect(gain1);
+      gain1.connect(ctx.destination);
+      osc1.frequency.value = 1046.5; // C6
+      osc1.type = 'sine';
+      gain1.gain.setValueAtTime(0, t);
+      gain1.gain.linearRampToValueAtTime(0.15, t + 0.01);
+      gain1.gain.exponentialRampToValueAtTime(0.001, t + 0.25);
+      osc1.start(t);
+      osc1.stop(t + 0.25);
+
+      // Note 2: Higher ping (harmonic)
+      const osc2 = ctx.createOscillator();
+      const gain2 = ctx.createGain();
+      osc2.connect(gain2);
+      gain2.connect(ctx.destination);
+      osc2.frequency.value = 1318.5; // E6
+      osc2.type = 'sine';
+      gain2.gain.setValueAtTime(0, t + 0.08);
+      gain2.gain.linearRampToValueAtTime(0.12, t + 0.09);
+      gain2.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
+      osc2.start(t + 0.08);
+      osc2.stop(t + 0.35);
+
+      // Clean up
+      setTimeout(() => ctx.close(), 500);
     } catch (e) { /* ignore */ }
+  },
+
+  // Hiện thông báo popup (browser notification + toast)
+  _showNotification: (msg, convName) => {
+    const senderName = msg.sender_name || msg.sender_username || 'Ai đó';
+    const preview = msg.message_type === 'image'
+      ? '📷 Hình ảnh'
+      : msg.message_type === 'file'
+      ? '📎 File'
+      : (msg.content || '').substring(0, 80);
+    const title = convName || senderName;
+    const body = `${senderName}: ${preview}`;
+
+    // Browser Notification (nếu user đang ở tab khác hoặc minimize)
+    if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
+      try {
+        const n = new Notification(title, {
+          body: body,
+          icon: '/favicon.ico',
+          tag: `chat-${msg.conversation_id}`,
+          silent: true, // Đã play sound riêng
+        });
+        n.onclick = () => {
+          window.focus();
+          window.location.hash = ''; // Clear any hash
+          if (!window.location.pathname.includes('/chat')) {
+            window.location.href = '/chat';
+          }
+          n.close();
+        };
+        setTimeout(() => n.close(), 5000);
+      } catch (e) { /* ignore */ }
+    }
+
+    // In-app toast notification (khi đang ở trang khác, không phải /chat)
+    if (!window.location.pathname.includes('/chat')) {
+      // Dispatch custom event cho MainLayout bắt và hiện toast
+      window.dispatchEvent(new CustomEvent('chat-notification', {
+        detail: { senderName, preview, conversationId: msg.conversation_id, convName: title },
+      }));
+    }
+
+    // Thay đổi title tab để gây chú ý
+    if (document.hidden) {
+      const origTitle = document.title;
+      document.title = `💬 ${senderName}: ${preview.substring(0, 30)}`;
+      const restore = () => {
+        document.title = origTitle;
+        document.removeEventListener('visibilitychange', restore);
+      };
+      document.addEventListener('visibilitychange', restore);
+    }
+  },
+
+  // Request notification permission
+  requestNotificationPermission: () => {
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
   },
 
   // ── REST API actions ────────────────────────────────────────────────────

@@ -8,7 +8,12 @@ Chat REST API + WebSocket endpoint
 import os
 import uuid
 import mimetypes
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+
+_VN_TZ = timezone(timedelta(hours=7))
+
+def _vn_now():
+    return datetime.now(_VN_TZ).replace(tzinfo=None)
 from typing import List, Optional
 
 from fastapi import (
@@ -38,10 +43,6 @@ from app.services.chat_manager import manager
 router = APIRouter(prefix="/chat", tags=["Chat"])
 
 
-def _utcnow():
-    return datetime.now(timezone.utc).replace(tzinfo=None)
-
-
 # ── Upload directory ──────────────────────────────────────────────────────────
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "uploads", "chat")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -55,7 +56,7 @@ ALLOWED_FILE_TYPES = ALLOWED_IMAGE_TYPES | {
     "text/plain", "text/csv",
     "application/zip", "application/x-rar-compressed",
 }
-MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+MAX_FILE_SIZE = 30 * 1024 * 1024  # 30MB
 
 
 # ── Helper functions ──────────────────────────────────────────────────────────
@@ -463,7 +464,7 @@ async def send_message(
     await db.execute(
         update(Conversation)
         .where(Conversation.id == conversation_id)
-        .values(updated_at=_utcnow())
+        .values(updated_at=_vn_now())
     )
 
     await db.commit()
@@ -538,7 +539,7 @@ async def upload_file(
     await db.execute(
         update(Conversation)
         .where(Conversation.id == conversation_id)
-        .values(updated_at=_utcnow())
+        .values(updated_at=_vn_now())
     )
 
     await db.commit()
@@ -585,7 +586,7 @@ async def mark_as_read(
     if not my_member:
         raise HTTPException(403, "Bạn không phải thành viên cuộc trò chuyện này")
 
-    now = _utcnow()
+    now = _vn_now()
     my_member.last_read_at = now
 
     # Tạo read receipts cho tất cả tin nhắn chưa đọc
@@ -656,7 +657,7 @@ async def update_conversation(
         conv.name = req.name.strip()
     if req.avatar_color is not None:
         conv.avatar_color = req.avatar_color
-    conv.updated_at = _utcnow()
+    conv.updated_at = _vn_now()
 
     # System message
     if req.name:
@@ -732,7 +733,7 @@ async def add_members(
             message_type=MessageType.SYSTEM,
         )
         db.add(sys_msg)
-        conv.updated_at = _utcnow()
+        conv.updated_at = _vn_now()
 
     await db.commit()
 
@@ -794,7 +795,7 @@ async def remove_member(
         message_type=MessageType.SYSTEM,
     )
     db.add(sys_msg)
-    conv.updated_at = _utcnow()
+    conv.updated_at = _vn_now()
 
     await db.commit()
 
@@ -945,7 +946,7 @@ async def websocket_endpoint(
                                 ConversationMember.conversation_id == conv_id,
                                 ConversationMember.user_id == user_id,
                             )
-                            .values(last_read_at=_utcnow())
+                            .values(last_read_at=_vn_now())
                         )
 
                         # Tạo read receipts
@@ -971,7 +972,7 @@ async def websocket_endpoint(
                                 db.add(MessageReadReceipt(
                                     message_id=msg.id,
                                     user_id=user_id,
-                                    read_at=_utcnow(),
+                                    read_at=_vn_now(),
                                 ))
                             if not last_msg_id or msg.id > last_msg_id:
                                 last_msg_id = msg.id
@@ -985,7 +986,7 @@ async def websocket_endpoint(
                             )
 
             elif action == "ping":
-                await websocket.send_json({"type": "pong", "timestamp": _utcnow().isoformat()})
+                await websocket.send_json({"type": "pong", "timestamp": _vn_now().isoformat()})
 
     except WebSocketDisconnect:
         pass

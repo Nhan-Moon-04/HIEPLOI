@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Button, Dropdown, Avatar, Tooltip, Badge } from 'antd';
+import { useState, useEffect } from 'react';
+import { Button, Dropdown, Avatar, Tooltip, Badge, notification } from 'antd';
 import {
   MenuFoldOutlined, MenuUnfoldOutlined,
   SunOutlined, MoonOutlined,
@@ -11,6 +11,8 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import useThemeStore from '../../stores/themeStore';
 import useAuthStore from '../../stores/authStore';
+import useChatStore from '../../stores/chatStore';
+import { MessageOutlined } from '@ant-design/icons';
 
 const ROUTE_META = {
   '/dashboard':     ['Tổng quan',    'Dashboard'],
@@ -37,12 +39,69 @@ const ROUTE_META = {
 
 export default function MainLayout({ children }) {
   const [collapsed, setCollapsed] = useState(false);
+  const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
+  const [mobileOpen, setMobileOpen] = useState(false);
   const { mode, toggle } = useThemeStore();
   const { user, logout } = useAuthStore();
   const location = useLocation();
   const navigate = useNavigate();
 
+  // Detect mobile / resize
+  useEffect(() => {
+    const handleResize = () => {
+      const mobile = window.innerWidth <= 768;
+      setIsMobile(mobile);
+      if (mobile) {
+        setCollapsed(true);
+        setMobileOpen(false);
+      }
+    };
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  // Tự đóng sidebar khi chuyển trang (mobile)
+  useEffect(() => {
+    if (isMobile) setMobileOpen(false);
+  }, [location.pathname]);
+
+  // Request browser notification permission
+  useEffect(() => {
+    useChatStore.getState().requestNotificationPermission();
+  }, []);
+
+  // Listen cho in-app chat notification toast
+  useEffect(() => {
+    const handleChatNotif = (e) => {
+      const { senderName, preview, conversationId, convName } = e.detail;
+      notification.info({
+        message: convName || senderName,
+        description: `${senderName}: ${preview}`,
+        placement: 'topRight',
+        duration: 4,
+        icon: <MessageOutlined style={{ color: '#276EF1' }} />,
+        className: 'chat-toast-notification',
+        onClick: () => {
+          navigate('/chat');
+          notification.destroy();
+        },
+        style: { cursor: 'pointer' },
+      });
+    };
+    window.addEventListener('chat-notification', handleChatNotif);
+    return () => window.removeEventListener('chat-notification', handleChatNotif);
+  }, [navigate]);
+
   const handleLogout = () => { logout(); navigate('/login'); };
+
+  const handleToggle = () => {
+    if (isMobile) {
+      setMobileOpen(!mobileOpen);
+    } else {
+      setCollapsed(!collapsed);
+    }
+  };
 
   const meta = ROUTE_META[location.pathname]
     || (location.pathname.startsWith('/meal-allowance/') ? ['Lương & Thuế', 'Chi tiết tiền ăn'] : null)
@@ -66,17 +125,27 @@ export default function MainLayout({ children }) {
     ],
   };
 
+  // Mobile: sidebar dùng overlay thay vì pushed layout
+  const sidebarCollapsed = isMobile ? true : collapsed;
+
   return (
     <div className={`ml ${mode === 'dark' ? 'dark' : ''}`}>
-      <Sidebar collapsed={collapsed} />
+      {/* Backdrop khi mobile sidebar mở */}
+      {isMobile && mobileOpen && (
+        <div className="ml-backdrop" onClick={() => setMobileOpen(false)} />
+      )}
 
-      <div className={`ml-body ${collapsed ? 'ml-body--col' : ''}`}>
+      <div className={`sb-wrap ${isMobile ? 'sb-wrap--mobile' : ''} ${mobileOpen ? 'sb-wrap--open' : ''}`}>
+        <Sidebar collapsed={isMobile ? false : collapsed} />
+      </div>
+
+      <div className={`ml-body ${sidebarCollapsed ? 'ml-body--col' : ''} ${isMobile ? 'ml-body--mobile' : ''}`}>
         <header className="ml-hd">
           <div className="ml-hd-left">
             <Button
               type="text" size="small"
-              icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
-              onClick={() => setCollapsed(!collapsed)}
+              icon={(!isMobile && collapsed) || (isMobile && !mobileOpen) ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+              onClick={handleToggle}
               className="ml-toggle"
             />
             {meta.length > 0 && (
@@ -98,9 +167,11 @@ export default function MainLayout({ children }) {
                 <Button type="text" size="small" icon={<BellOutlined />} className="ml-hd-btn" />
               </Badge>
             </Tooltip>
-            <Tooltip title="Trợ giúp">
-              <Button type="text" size="small" icon={<QuestionCircleOutlined />} className="ml-hd-btn" />
-            </Tooltip>
+            <span className="ml-hd-help-btn">
+              <Tooltip title="Trợ giúp">
+                <Button type="text" size="small" icon={<QuestionCircleOutlined />} className="ml-hd-btn" />
+              </Tooltip>
+            </span>
 
             <div className="ml-hd-divider" />
 
