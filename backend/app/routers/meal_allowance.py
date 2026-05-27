@@ -67,9 +67,26 @@ async def get_meal_allowance(
         emp_q = emp_q.where(Employee.id == current_user.employee_id)
     if department:
         emp_q = emp_q.where(Employee.department == department)
-    emp_q = emp_q.order_by(cast(Employee.employee_code, Integer))
+
     emp_result = await db.execute(emp_q)
-    employees = emp_result.scalars().all()
+    employees = list(emp_result.scalars().all())
+
+    # Sắp xếp nhân viên theo thứ tự bộ phận, sau đó tới thứ tự nhân viên trong bộ phận
+    from app.models.department import Department
+    dept_order_q = await db.execute(select(Department.name, Department.sort_order))
+    dept_order_map = {row[0]: row[1] for row in dept_order_q.all() if row[0]}
+
+    def get_emp_sort_key(e):
+        d_name = e.department
+        d_order = dept_order_map.get(d_name, 9999) if d_name else 9999
+        e_order = e.sort_order if e.sort_order is not None else 9999
+        try:
+            code_num = int(e.employee_code)
+        except ValueError:
+            code_num = 999999
+        return (d_order, d_name or "", e_order, code_num)
+
+    employees.sort(key=get_emp_sort_key)
 
     if not employees:
         return MealAllowanceResponse(
@@ -202,7 +219,31 @@ async def get_meal_allowance(
     total_leave_days = 0
 
     for emp in employees:
+        default_shift = shifts_by_code.get(emp.default_shift_code) if emp.default_shift_code else None
         worked_dates = att_by_emp.get(emp.id, [])
+        
+        # Nếu là ca sếp (SEP), sếp không cần chấm công nhưng vẫn tính đủ các ngày từ Thứ 2 đến Thứ 7 (trừ ngày lễ)
+        is_sep_emp = (default_shift and default_shift.code.upper() == "SEP")
+        has_sep_override = False
+        curr = start_date
+        while curr <= end_date:
+            sid = sched_map.get((emp.id, curr))
+            if sid:
+                s = shifts_by_id.get(sid)
+                if s and s.code.upper() == "SEP":
+                    has_sep_override = True
+                    break
+            curr += timedelta(days=1)
+            
+        if is_sep_emp or has_sep_override:
+            all_dates_in_period = []
+            curr = start_date
+            while curr <= end_date:
+                if curr.weekday() != 6 and curr not in holiday_dates:  # Không tính chủ nhật và ngày lễ
+                    all_dates_in_period.append(curr)
+                curr += timedelta(days=1)
+            worked_dates = all_dates_in_period
+
         meal_rates = Counter()
         work_days = 0
         night_shifts = 0
@@ -220,6 +261,24 @@ async def get_meal_allowance(
                 shift = shifts_by_code.get(emp.default_shift_code)
 
             if not shift or shift.is_leave_code:
+                continue
+
+            # Ghi đè số bữa ăn và tiền ăn động cho ca của sếp (SEP)
+            if shift.code.upper() == "SEP":
+                meal_rate_val = float(shift.meal_allowance or 40000)
+                dow_idx = work_date.weekday()
+                if dow_idx <= 4:  # Thứ 2 - Thứ 6
+                    day_meal_count = 2
+                elif dow_idx == 5:  # Thứ 7
+                    day_meal_count = 1
+                else:
+                    day_meal_count = 0
+                
+                day_meal_total = meal_rate_val * day_meal_count
+                total_emp_meal += day_meal_total
+                work_days += 1
+                meal_rates[meal_rate_val] += 1
+                emp_meal_count += day_meal_count
                 continue
 
             # Check if we have NU result for this day

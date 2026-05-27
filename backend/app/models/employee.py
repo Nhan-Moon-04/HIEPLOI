@@ -23,5 +23,6 @@ class Employee(Base):
     is_active = Column(Boolean, default=True)
     dependents = Column(Integer, default=0)  # Số người phụ thuộc giảm trừ TNCN
     notes = Column(String(255))
+    sort_order = Column(Integer, default=9999) # Thứ tự sắp xếp nhân viên trong bộ phận
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

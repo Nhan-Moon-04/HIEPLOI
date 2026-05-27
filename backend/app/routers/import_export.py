@@ -779,8 +779,29 @@ async def export_meal_allowance(
 
     # Row 8+: Data
     current_row = 8
-    # Sort by employee_code numerically
-    sorted_rows = sorted(row_map.values(), key=lambda x: int(x["employee_code"]) if str(x["employee_code"]).isdigit() else 999999)
+    
+    # Sắp xếp theo thứ tự bộ phận và thứ tự nhân viên tương tự trên giao diện web
+    from app.models.department import Department
+    dept_order_q = await db.execute(select(Department.name, Department.sort_order))
+    dept_order_map = {row[0]: row[1] for row in dept_order_q.all() if row[0]}
+
+    emp_order_q = await db.execute(select(Employee.employee_code, Employee.department, Employee.sort_order))
+    emp_data_map = {}  # employee_code -> (dept_name, employee_sort_order)
+    for e_code, e_dept, e_sort in emp_order_q.all():
+        emp_data_map[str(e_code).lstrip("'")] = (e_dept, e_sort)
+
+    def get_export_sort_key(item):
+        code = str(item["employee_code"]).lstrip("'")
+        d_name, e_order = emp_data_map.get(code, (None, 9999))
+        d_order = dept_order_map.get(d_name, 9999) if d_name else 9999
+        e_order_val = e_order if e_order is not None else 9999
+        try:
+            code_num = int(code)
+        except ValueError:
+            code_num = 999999
+        return (d_order, d_name or "", e_order_val, code_num)
+
+    sorted_rows = sorted(row_map.values(), key=get_export_sort_key)
     
     for idx, item in enumerate(sorted_rows, 1):
         # STT, MSNV, Name

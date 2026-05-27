@@ -58,6 +58,13 @@ export default function MealAllowance() {
   const [selectedRowKeys, setSelectedRowKeys] = useState([]);
   const [quickSaving, setQuickSaving] = useState(false);
 
+  // State cho Chỉnh sửa Tăng ca Thủ công (Double Click)
+  const [editManualModal, setEditManualModal] = useState(false);
+  const [editManualTarget, setEditManualTarget] = useState(null); // { cell, row }
+  const [editManualMealCount, setEditManualMealCount] = useState(0);
+  const [editManualWithNight, setEditManualWithNight] = useState(false);
+  const [editManualSaving, setEditManualSaving] = useState(false);
+
   useEffect(() => {
     const saved = localStorage.getItem('nightAllowanceRate');
     setNightAllowanceRate(saved ? Number(saved) : 100000);
@@ -94,6 +101,70 @@ export default function MealAllowance() {
       message.error('Lỗi khi lưu');
     } finally {
       setNightOtSaving(false);
+    }
+  };
+
+  // ─── XỬ LÝ DOUBLE-CLICK CHỈNH SỬA TĂNG CA THỦ CÔNG ──────────────────────────
+  const handleCellDoubleClick = (cell, row) => {
+    if (cell.status === 'no_data') return;
+    setEditManualTarget({ cell, row });
+    if (cell.has_manual_xot) {
+      setEditManualMealCount(cell.manual_meal_count || 1);
+      const hasNightTime = cell.manual_ot_end_time && cell.manual_ot_end_time >= '23:00';
+      setEditManualWithNight(hasNightTime || cell.night_allowance > 0);
+    } else {
+      setEditManualMealCount(cell.meal_count || 1);
+      setEditManualWithNight(cell.night_allowance > 0);
+    }
+    setEditManualModal(true);
+  };
+
+  const handleSaveManualOverride = async () => {
+    if (!editManualTarget) return;
+    const { cell, row } = editManualTarget;
+    setEditManualSaving(true);
+    try {
+      const payload = {
+        employee_id: row.employee_id,
+        work_date: cell.work_date,
+        meal_count: editManualMealCount,
+      };
+      if (editManualWithNight) {
+        payload.ot_end_time = '23:30';
+      } else {
+        payload.ot_end_time = null;
+      }
+      await api.put('/schedules/x-overtime', payload);
+      message.success('Đã cập nhật tăng ca thủ công');
+      setEditManualModal(false);
+      setEditManualTarget(null);
+      queryClient.invalidateQueries({ queryKey: ['attendance'] });
+    } catch {
+      message.error('Lỗi khi lưu');
+    } finally {
+      setEditManualSaving(false);
+    }
+  };
+
+  const handleDeleteManualOverride = async () => {
+    if (!editManualTarget) return;
+    const { cell, row } = editManualTarget;
+    setEditManualSaving(true);
+    try {
+      await api.delete('/schedules/x-overtime', {
+        params: {
+          employee_id: row.employee_id,
+          work_date: cell.work_date,
+        }
+      });
+      message.success('Đã xóa tăng ca thủ công (khôi phục tính tự động)');
+      setEditManualModal(false);
+      setEditManualTarget(null);
+      queryClient.invalidateQueries({ queryKey: ['attendance'] });
+    } catch {
+      message.error('Lỗi khi xóa tăng ca');
+    } finally {
+      setEditManualSaving(false);
     }
   };
 
@@ -274,9 +345,11 @@ export default function MealAllowance() {
     const amount = cell.meal_allowance;
     const shortAmount = amount >= 1000 ? `${amount / 1000}k` : amount;
 
-    const extraClass = cell.night_allowance > 0
-      ? 'ma-cell-val--night'
-      : (cell.meal_count >= 2 ? 'ma-cell-val--double' : '');
+    const extraClass = cell.has_manual_xot
+      ? (cell.night_allowance > 0 ? 'ma-cell-val--manual-night' : 'ma-cell-val--manual-meal')
+      : (cell.night_allowance > 0
+        ? 'ma-cell-val--night'
+        : (cell.meal_count >= 2 ? 'ma-cell-val--double' : ''));
 
     return (
       <Tooltip title={
@@ -290,6 +363,12 @@ export default function MealAllowance() {
           <div className="ma-tooltip-amount meal">Tiền ăn: <b>{amount.toLocaleString()} đ</b></div>
           {cell.meal_count >= 2 && <div className="ma-tooltip-row" style={{ color: '#2563eb' }}>Bữa ăn: <b>{cell.meal_count} bữa</b></div>}
           {cell.night_allowance > 0 && <div className="ma-tooltip-amount night">PC Đêm: <b>{cell.night_allowance.toLocaleString()} đ</b></div>}
+          {cell.has_manual_xot && <div className="ma-tooltip-row" style={{ color: '#7c3aed', fontWeight: 600, marginTop: 2 }}>★ Nhập thủ công</div>}
+          {!isWorker && cell.status !== 'no_data' && (
+            <div style={{ color: '#9ca3af', fontSize: 10, marginTop: 4, borderTop: '1px dashed #e5e7eb', paddingTop: 4 }}>
+              💡 Double-click để chỉnh sửa thủ công
+            </div>
+          )}
         </div>
       }>
         <div className={`ma-cell-val ${extraClass}`}>
@@ -520,7 +599,12 @@ export default function MealAllowance() {
                     {days.map((d) => {
                       const cell = row.days?.find((c) => c.day === d);
                       return (
-                        <td key={d} className="ma-td ma-td--cell">
+                        <td 
+                          key={d} 
+                          className="ma-td ma-td--cell"
+                          onDoubleClick={() => !isWorker && cell && handleCellDoubleClick(cell, row)}
+                          style={{ cursor: (!isWorker && cell && cell.status !== 'no_data') ? 'pointer' : 'default' }}
+                        >
                           {cell ? renderMealCell(cell, row.employee_id) : <span className="ma-cell-dot">·</span>}
                         </td>
                       );
@@ -659,6 +743,100 @@ export default function MealAllowance() {
             Lưu cấu hình
           </Button>
         </Form>
+      </Modal>
+
+      {/* Modal Chỉnh sửa Tăng ca Thủ công */}
+      <Modal
+        title={
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <DollarCircleOutlined style={{ color: '#276EF1' }} />
+            <span>Chỉnh sửa Tăng ca Thủ công</span>
+          </div>
+        }
+        open={editManualModal}
+        onCancel={() => {
+          setEditManualModal(false);
+          setEditManualTarget(null);
+        }}
+        footer={[
+          editManualTarget?.cell?.has_manual_xot && (
+            <Popconfirm
+              key="delete-confirm"
+              title="Xóa tăng ca thủ công?"
+              description="Hệ thống sẽ tự động tính toán lại công và tiền cơm dựa trên chấm công thực tế của ngày này."
+              onConfirm={handleDeleteManualOverride}
+              okText="Xóa"
+              cancelText="Hủy"
+              okButtonProps={{ danger: true }}
+            >
+              <Button key="delete" danger style={{ float: 'left' }}>
+                Xóa tăng ca
+              </Button>
+            </Popconfirm>
+          ),
+          <Button key="cancel" onClick={() => { setEditManualModal(false); setEditManualTarget(null); }}>Hủy</Button>,
+          <Button key="submit" type="primary" loading={editManualSaving}
+            style={{ background: '#276EF1', borderColor: '#276EF1' }}
+            onClick={handleSaveManualOverride}>
+            Lưu
+          </Button>,
+        ].filter(Boolean)}
+        centered
+        width={420}
+      >
+        {editManualTarget && (
+          <div style={{ padding: '12px 0' }}>
+            <div style={{ background: '#f9fafb', borderRadius: 8, padding: '12px', marginBottom: 16, border: '1px solid #f3f4f6' }}>
+              <div style={{ marginBottom: 6 }}>
+                <span style={{ color: '#6b7280', fontSize: 13 }}>Nhân viên: </span>
+                <strong style={{ color: '#1f2937' }}>[{editManualTarget.row.employee_code}] {editManualTarget.row.full_name}</strong>
+              </div>
+              <div style={{ marginBottom: 6 }}>
+                <span style={{ color: '#6b7280', fontSize: 13 }}>Ngày làm việc: </span>
+                <strong style={{ color: '#1f2937' }}>{dayjs(editManualTarget.cell.work_date).format('DD/MM/YYYY')} ({editManualTarget.cell.dow})</strong>
+              </div>
+              <div>
+                <span style={{ color: '#6b7280', fontSize: 13 }}>Trạng thái hiện tại: </span>
+                {editManualTarget.cell.has_manual_xot ? (
+                  <Tag color="purple" style={{ fontWeight: 600 }}>Tăng ca thủ công</Tag>
+                ) : (
+                  <Tag color="default">Tính toán tự động</Tag>
+                )}
+              </div>
+            </div>
+
+            <Form layout="vertical">
+              <Form.Item label="Số bữa ăn tăng ca (Meal count)">
+                <InputNumber
+                  min={0}
+                  max={5}
+                  value={editManualMealCount}
+                  onChange={setEditManualMealCount}
+                  style={{ width: '100%' }}
+                />
+              </Form.Item>
+
+              <Form.Item label="Cung cấp Phụ cấp ca đêm (PCCD)?">
+                <Space direction="vertical" style={{ width: '100%' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <Select
+                      value={editManualWithNight ? 'yes' : 'no'}
+                      onChange={(val) => setEditManualWithNight(val === 'yes')}
+                      style={{ width: '100%' }}
+                      options={[
+                        { value: 'no', label: 'Không có phụ cấp ca đêm (0đ)' },
+                        { value: 'yes', label: `Có phụ cấp ca đêm (+${nightAllowanceRate.toLocaleString()}đ)` },
+                      ]}
+                    />
+                  </div>
+                  <span style={{ color: '#9ca3af', fontSize: 11 }}>
+                    * Khi bật phụ cấp ca đêm, hệ thống tự động gán giờ ra OT là 23:30 để cộng tiền phụ cấp đêm.
+                  </span>
+                </Space>
+              </Form.Item>
+            </Form>
+          </div>
+        )}
       </Modal>
     </div>
   );

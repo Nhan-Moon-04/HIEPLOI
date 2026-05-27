@@ -57,6 +57,7 @@ class EmployeeResponse(BaseModel):
     is_active: bool
     dependents: Optional[int] = 0
     notes: Optional[str] = None
+    sort_order: Optional[int] = 9999
     month_salary: Optional[Decimal] = None
     created_at: Optional[datetime] = None
 

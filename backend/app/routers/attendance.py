@@ -59,6 +59,9 @@ class AttendanceCell(BaseModel):
     night_allowance: float = 0.0
     ot_eligible: bool = False
     night_eligible: bool = False
+    has_manual_xot: bool = False
+    manual_meal_count: Optional[int] = None
+    manual_ot_end_time: Optional[str] = None
 
 
 class AttendanceRow(BaseModel):
@@ -112,6 +115,37 @@ def evaluate_attendance(shift, check_in_dt, check_out_dt, work_date, is_sunday, 
         "meal_count": 0,
         "night_allowance": 0.0,
     }
+
+    if shift and (shift.code or "").upper() == "SEP":
+        # Ca của sếp: Tự động tính công và tiền ăn, không cần quét thẻ
+        standard = float(shift.standard_hours or 8)
+        if is_holiday:
+            result["status"] = "holiday"
+            result["notes"] = "Ngày lễ/nghỉ"
+            return result
+        if is_sunday:
+            result["status"] = "off"
+            result["notes"] = "Nghỉ chủ nhật"
+            return result
+            
+        result["status"] = "full"
+        result["actual_hours"] = standard
+        result["deviation"] = 0.0
+        result["notes"] = "Ca sếp (Tự động tính công)"
+        
+        # Thứ 2 - Thứ 6: 80k (2 bữa), Thứ 7: 40k (1 bữa)
+        dow_idx = work_date.weekday()
+        if dow_idx <= 4:  # Thứ 2 - Thứ 6
+            result["meal_allowance"] = float(shift.meal_allowance or 40000)
+            result["meal_count"] = 2
+        elif dow_idx == 5:  # Thứ 7
+            result["meal_allowance"] = float(shift.meal_allowance or 40000)
+            result["meal_count"] = 1
+        else:
+            result["meal_allowance"] = 0.0
+            result["meal_count"] = 0
+            
+        return result
 
     if is_holiday:
         result["status"] = "holiday"
@@ -328,9 +362,26 @@ async def get_attendance(
         emp_q = emp_q.where(Employee.id == employee_id)
     if department:
         emp_q = emp_q.where(Employee.department == department)
-    emp_q = emp_q.order_by(Employee.employee_code)
+        
     emp_result = await db.execute(emp_q)
-    employees = emp_result.scalars().all()
+    employees = list(emp_result.scalars().all())
+
+    # Sắp xếp nhân viên theo thứ tự bộ phận, sau đó tới thứ tự nhân viên trong bộ phận
+    from app.models.department import Department
+    dept_order_q = await db.execute(select(Department.name, Department.sort_order))
+    dept_order_map = {row[0]: row[1] for row in dept_order_q.all() if row[0]}
+
+    def get_emp_sort_key(e):
+        d_name = e.department
+        d_order = dept_order_map.get(d_name, 9999) if d_name else 9999
+        e_order = e.sort_order if e.sort_order is not None else 9999
+        try:
+            code_num = int(e.employee_code)
+        except ValueError:
+            code_num = 999999
+        return (d_order, d_name or "", e_order, code_num)
+
+    employees.sort(key=get_emp_sort_key)
 
     # Load schedule overrides for date range
     emp_id_list = [e.id for e in employees]
@@ -501,12 +552,17 @@ async def get_attendance(
             if override_note:
                 cell_notes = f"{cell_notes} | {override_note}" if cell_notes else override_note
 
+            # Lấy cấu hình tăng ca thủ công XOT nếu có
+            xot = xot_map.get((emp.id, dt))
+            has_manual_xot_val = xot is not None
+            manual_meal_count_val = xot.meal_count if xot else None
+            manual_ot_end_time_val = str(xot.ot_end_time)[:5] if xot and xot.ot_end_time else None
+
             # Cộng thêm tiền ăn OT cho mọi ca không-tự-động nếu có config xot, hoặc đánh dấu ot/night eligible
             is_auto_shift = nu_res is not None or (cell_shift_code or "").upper() in DRIVER_AUTO_OT_SHIFT_CODES
             ot_eligible_val = False
             night_eligible_val = False
             if not is_auto_shift and ev["status"] in ("full", "early_leave", "short", "forgot_scan"):
-                xot = xot_map.get((emp.id, dt))
                 if xot and xot.meal_count and xot.meal_count > 0:
                     x_meal_rate = float(shift.meal_allowance) if shift and shift.meal_allowance else 35000.0
                     ot_meal = x_meal_rate * int(xot.meal_count)
@@ -551,6 +607,9 @@ async def get_attendance(
                 night_allowance=ev["night_allowance"],
                 ot_eligible=ot_eligible_val,
                 night_eligible=night_eligible_val,
+                has_manual_xot=has_manual_xot_val,
+                manual_meal_count=manual_meal_count_val,
+                manual_ot_end_time=manual_ot_end_time_val,
             )
             days_cells.append(cell)
 

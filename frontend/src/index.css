@@ -1334,6 +1334,18 @@ body.dark {
   color: #2563eb;
   background: #dbeafe;
 }
+.ma-cell-val--manual-night {
+  color: #7c3aed;
+  background: #ede9fe;
+  border: 1.5px dashed #7c3aed;
+  box-shadow: 0 0 3px rgba(124, 58, 237, 0.4);
+}
+.ma-cell-val--manual-meal {
+  color: #10b981;
+  background: #d1fae5;
+  border: 1.5px dashed #10b981;
+  box-shadow: 0 0 3px rgba(16, 185, 129, 0.4);
+}
 .ma-cell-val--ot-eligible {
   color: #d97706;
   background: #fff7ed;

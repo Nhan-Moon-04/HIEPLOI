@@ -31,6 +31,7 @@ DEFAULT_SHIFTS = [
     {"code": "NU3", "name": "Ca nụ trừ 3h công (NU3)", "start_time": time(6, 0), "end_time": time(18, 0), "break_minutes": 60, "standard_hours": 5, "default_overtime_hours": 3.5, "meal_allowance": 35000, "meal_count": 1, "is_night_shift": False, "is_leave_code": False, "is_paid_leave": False},
     {"code": "NUN", "name": "Ca nụ trừ 4h công (NUN)", "start_time": time(6, 0), "end_time": time(18, 0), "break_minutes": 60, "standard_hours": 4, "default_overtime_hours": 3.5, "meal_allowance": 35000, "meal_count": 1, "is_night_shift": False, "is_leave_code": False, "is_paid_leave": False},
     {"code": "XNU", "name": "Ca XNU (XNU)", "start_time": time(6, 0), "end_time": time(14, 0), "break_minutes": 0, "standard_hours": 8, "default_overtime_hours": 0, "meal_allowance": 35000, "meal_count": 1, "is_night_shift": False, "is_leave_code": False, "is_paid_leave": False},
+    {"code": "SEP", "name": "Ca sếp (Tự động tiền ăn)", "start_time": time(8, 0), "end_time": time(17, 0), "break_minutes": 60, "standard_hours": 8, "default_overtime_hours": 0, "meal_allowance": 40000, "meal_count": 2, "is_night_shift": False, "is_leave_code": False, "is_paid_leave": False},
 ]
 
 

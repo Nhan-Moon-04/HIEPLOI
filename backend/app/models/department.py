@@ -11,5 +11,6 @@ class Department(Base):
     name = Column(String(120), unique=True, nullable=False)             # Tên bộ phận VN
     name_tw = Column(String(120), nullable=True)                        # Tên bộ phận tiếng Hoa
     description = Column(String(255), nullable=True)                    # Mô tả ngắn
+    sort_order = Column(Integer, default=0)                             # Thứ tự sắp xếp bộ phận
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

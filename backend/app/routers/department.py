@@ -56,9 +56,11 @@ async def get_department(
     if not dept:
         raise HTTPException(status_code=404, detail="Bộ phận không tồn tại")
         
-    # Lấy danh sách nhân viên thuộc bộ phận
+    # Lấy danh sách nhân viên thuộc bộ phận (sắp xếp theo sort_order trước)
     emp_q = await db.execute(
-        select(Employee).where(Employee.department == dept.name).order_by(Employee.employee_code)
+        select(Employee)
+        .where(Employee.department == dept.name)
+        .order_by(Employee.sort_order, Employee.employee_code)
     )
     employees = emp_q.scalars().all()
     
@@ -122,6 +124,45 @@ async def create_department(
     res = DepartmentResponse.model_validate(dept)
     res.employee_count = emp_count
     return res
+
+
+@router.put("/reorder", status_code=status.HTTP_200_OK)
+async def reorder_departments(
+    ids: List[int],
+    db: AsyncSession = Depends(get_db),
+    current_user: AppUser = Depends(require_roles(UserRole.ADMIN, UserRole.ACCOUNTANT)),
+):
+    """Cập nhật thứ tự hiển thị của các bộ phận"""
+    for idx, dept_id in enumerate(ids):
+        await db.execute(
+            update(Department).where(Department.id == dept_id).values(sort_order=idx)
+        )
+    await db.commit()
+    return {"message": "Đã cập nhật thứ tự bộ phận thành công."}
+
+
+@router.put("/{id}/reorder-employees", status_code=status.HTTP_200_OK)
+async def reorder_employees(
+    id: int,
+    employee_ids: List[int],
+    db: AsyncSession = Depends(get_db),
+    current_user: AppUser = Depends(require_roles(UserRole.ADMIN, UserRole.ACCOUNTANT)),
+):
+    """Cập nhật thứ tự sắp xếp nhân viên trong bộ phận"""
+    # Lấy thông tin bộ phận
+    result = await db.execute(select(Department).where(Department.id == id))
+    dept = result.scalar_one_or_none()
+    if not dept:
+        raise HTTPException(status_code=404, detail="Bộ phận không tồn tại")
+
+    for idx, emp_id in enumerate(employee_ids):
+        await db.execute(
+            update(Employee)
+            .where(and_(Employee.id == emp_id, Employee.department == dept.name))
+            .values(sort_order=idx)
+        )
+    await db.commit()
+    return {"message": "Đã cập nhật thứ tự nhân viên trong bộ phận thành công."}
 
 
 @router.put("/{id}", response_model=DepartmentResponse)
@@ -236,3 +277,4 @@ async def delete_department(
     await db.commit()
     
     return {"message": f"Đã xóa bộ phận '{dept.name}' thành công."}
+

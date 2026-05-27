@@ -37,12 +37,44 @@ async def run_migration():
             created_at DATETIME,
             updated_at DATETIME
         )""",
+        "ALTER TABLE departments ADD COLUMN sort_order INTEGER DEFAULT 0",
+        "ALTER TABLE employees ADD COLUMN sort_order INTEGER DEFAULT 9999",
     ]:
         try:
             async with engine.begin() as conn:
                 await conn.execute(text(stmt))
         except Exception:
             pass
+
+    # Tự động thêm mã ca sếp "SEP" vào database nếu chưa tồn tại
+    try:
+        from app.models.shift import ShiftTemplate
+        from app.database import AsyncSessionLocal
+        from sqlalchemy import select
+        from datetime import time
+        
+        async with AsyncSessionLocal() as session:
+            res = await session.execute(select(ShiftTemplate).where(ShiftTemplate.code == "SEP"))
+            if not res.scalar_one_or_none():
+                sep_shift = ShiftTemplate(
+                    code="SEP",
+                    name="Ca sếp (Tự động tiền ăn)",
+                    start_time=time(8, 0),
+                    end_time=time(17, 0),
+                    break_minutes=60,
+                    standard_hours=8,
+                    default_overtime_hours=0,
+                    meal_allowance=40000,
+                    meal_count=2,
+                    is_night_shift=False,
+                    is_leave_code=False,
+                    is_paid_leave=False
+                )
+                session.add(sep_shift)
+                await session.commit()
+                print("[OK] Seeded SEP shift template")
+    except Exception as e:
+        print(f"Error seeding SEP shift: {e}")
 
 
 @asynccontextmanager
