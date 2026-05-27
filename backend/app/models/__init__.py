@@ -11,6 +11,7 @@ from app.models.x_overtime import XOvertimeConfig
 from app.models.union import UnionTransaction, UnionEvent, UnionEventMember, UnionMember
 from app.models.session import UserSession
 from app.models.auth_tokens import PasswordResetToken, OtpCode
+from app.models.department import Department
 
 __all__ = [
     "AppUser",
@@ -33,5 +34,6 @@ __all__ = [
     "UserSession",
     "PasswordResetToken",
     "OtpCode",
+    "Department",
 ]
 

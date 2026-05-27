@@ -17,6 +17,7 @@ const sections = [
     roles: ['admin', 'accountant', 'worker'],
     items: [
       { key: '/employees', icon: <TeamOutlined />, label: 'Nhân viên' },
+      { key: '/departments', icon: <AppstoreOutlined />, label: 'Bộ phận' },
       { key: '/schedules', icon: <CalendarOutlined />, label: 'Lịch làm' },
       { key: '/attendance', icon: <ClockCircleOutlined />, label: 'Chấm công' },
       { key: '/overtime', icon: <RiseOutlined />, label: 'Tăng ca' },

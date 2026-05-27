@@ -100,6 +100,16 @@ async def list_departments(
     current_user: AppUser = Depends(get_current_user),
 ):
     """Danh sách bộ phận"""
+    # 1. Ưu tiên lấy từ bảng departments định nghĩa mới
+    from app.models.department import Department
+    dept_result = await db.execute(
+        select(Department.name).order_by(Department.name)
+    )
+    depts = [row[0] for row in dept_result.all() if row[0]]
+    if depts:
+        return depts
+
+    # 2. Dự phòng nếu bảng departments trống
     result = await db.execute(
         select(Employee.department).where(Employee.department.isnot(None)).distinct().order_by(Employee.department)
     )

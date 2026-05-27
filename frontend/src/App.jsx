@@ -10,6 +10,7 @@ import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Shifts from './pages/Shifts';
 import Employees from './pages/Employees';
+import Departments from './pages/Departments';
 import EmployeeDetail from './pages/EmployeeDetail';
 import Holidays from './pages/Holidays';
 import Schedules from './pages/Schedules';
@@ -66,6 +67,7 @@ export default function App() {
                   <Route path="/dashboard" element={<Dashboard />} />
                   <Route path="/shifts" element={<Shifts />} />
                   <Route path="/employees" element={<Employees />} />
+                  <Route path="/departments" element={<Departments />} />
                   <Route path="/employees/:id" element={<EmployeeDetail />} />
                   <Route path="/holidays" element={<Holidays />} />
                   <Route path="/import-export" element={<ImportExport />} />

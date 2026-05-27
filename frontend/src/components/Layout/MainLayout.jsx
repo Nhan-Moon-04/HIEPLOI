@@ -15,6 +15,7 @@ import useAuthStore from '../../stores/authStore';
 const ROUTE_META = {
   '/dashboard':     ['Tổng quan',    'Dashboard'],
   '/employees':     ['Nhân sự',      'Nhân viên'],
+  '/departments':   ['Nhân sự',      'Bộ phận'],
   '/schedules':     ['Nhân sự',      'Lịch làm'],
   '/attendance':    ['Nhân sự',      'Chấm công'],
   '/overtime':      ['Nhân sự',      'Tăng ca'],

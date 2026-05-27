@@ -8,6 +8,7 @@ from app.database import engine, Base
 from app.models import *  # noqa: F401, F403 - Import all models so they register with Base (includes UserSession)
 from app.routers import auth, shifts, employees, dashboard, holidays, schedules, overtime, attendance, import_export, meal_allowance, salaries, audit, leave, union
 from app.routers import admin_users, password as password_router
+from app.routers import department as department_router
 from app.services.seed import seed_database
 
 
@@ -94,6 +95,7 @@ app.include_router(leave.router, prefix="/api")
 app.include_router(union.router, prefix="/api")
 app.include_router(admin_users.router, prefix="/api")
 app.include_router(password_router.router, prefix="/api")
+app.include_router(department_router.router, prefix="/api")
 
 
 @app.get("/api/health")
