@@ -125,6 +125,9 @@ export default function MainLayout({ children }) {
     ],
   };
 
+  // Unread chat count cho header badge
+  const unreadTotal = useChatStore((s) => s.unreadTotal);
+
   // Mobile: sidebar dùng overlay thay vì pushed layout
   const sidebarCollapsed = isMobile ? true : collapsed;
 
@@ -162,9 +165,10 @@ export default function MainLayout({ children }) {
               <Button type="text" size="small" icon={mode === 'light' ? <MoonOutlined /> : <SunOutlined />}
                 onClick={toggle} className="ml-hd-btn" />
             </Tooltip>
-            <Tooltip title="Thông báo">
-              <Badge count={0} size="small">
-                <Button type="text" size="small" icon={<BellOutlined />} className="ml-hd-btn" />
+            <Tooltip title={unreadTotal > 0 ? `${unreadTotal} tin nhắn chưa đọc` : 'Thông báo'}>
+              <Badge count={unreadTotal} size="small" offset={[-2, 2]}>
+                <Button type="text" size="small" icon={<BellOutlined />} className="ml-hd-btn"
+                  onClick={() => navigate('/chat')} />
               </Badge>
             </Tooltip>
             <span className="ml-hd-help-btn">

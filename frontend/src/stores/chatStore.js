@@ -96,14 +96,17 @@ const useChatStore = create((set, get) => ({
 
           const newMessages = { ...state.messages, [convId]: [...convMsgs, msg] };
 
+          // Kiểm tra xem user có đang thực sự xem conversation này không
+          const isOnChatPage = window.location.pathname.includes('/chat');
+          const isViewingConv = isOnChatPage && state.activeConversationId === convId;
+
           // Update conversation list — move to top + update last_message
           const newConvs = state.conversations.map((c) => {
             if (c.id === convId) {
-              const isActive = state.activeConversationId === convId;
               return {
                 ...c,
                 last_message: msg,
-                unread_count: isActive ? c.unread_count : (c.unread_count || 0) + 1,
+                unread_count: isViewingConv ? c.unread_count : (c.unread_count || 0) + 1,
               };
             }
             return c;
@@ -118,8 +121,7 @@ const useChatStore = create((set, get) => ({
           // Update unread total
           const user = JSON.parse(localStorage.getItem('user') || '{}');
           const isMyMsg = msg.sender_id === user?.id;
-          const isActive = state.activeConversationId === convId;
-          const addUnread = !isMyMsg && !isActive ? 1 : 0;
+          const addUnread = !isMyMsg && !isViewingConv ? 1 : 0;
 
           return {
             messages: newMessages,
