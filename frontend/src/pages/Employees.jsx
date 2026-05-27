@@ -43,13 +43,31 @@ export default function Employees() {
       if (p.leave_date) p.leave_date = p.leave_date.format('YYYY-MM-DD');
       return editing ? api.put(`/employees/${editing.id}`, p) : api.post('/employees', p);
     },
-    onSuccess: () => { message.success('Luu thanh cong!'); qc.invalidateQueries(['employees']); setModal(false); setEditing(null); },
-    onError: (e) => message.error(e.response?.data?.detail || 'Loi'),
+    onSuccess: () => {
+      message.success('Lưu thành công!');
+      qc.invalidateQueries({ queryKey: ['employees'] });
+      qc.invalidateQueries({ queryKey: ['attendance'] });
+      qc.invalidateQueries({ queryKey: ['schedule'] });
+      qc.invalidateQueries({ queryKey: ['payroll-att'] });
+      qc.invalidateQueries({ queryKey: ['overtime'] });
+      qc.invalidateQueries({ queryKey: ['leave-summary'] });
+      setModal(false);
+      setEditing(null);
+    },
+    onError: (e) => message.error(e.response?.data?.detail || 'Lỗi'),
   });
 
   const del = useMutation({
     mutationFn: (id) => api.delete(`/employees/${id}`),
-    onSuccess: () => { message.success('Da xoa!'); qc.invalidateQueries(['employees']); },
+    onSuccess: () => {
+      message.success('Đã xóa!');
+      qc.invalidateQueries({ queryKey: ['employees'] });
+      qc.invalidateQueries({ queryKey: ['attendance'] });
+      qc.invalidateQueries({ queryKey: ['schedule'] });
+      qc.invalidateQueries({ queryKey: ['payroll-att'] });
+      qc.invalidateQueries({ queryKey: ['overtime'] });
+      qc.invalidateQueries({ queryKey: ['leave-summary'] });
+    },
   });
 
   const openEdit = (r) => {

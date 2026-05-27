@@ -83,8 +83,12 @@ async def get_overtime(
         holiday_dates = {h.holiday_date for h in holiday_result.scalars().all()}
 
         # Load active employees
+        from sqlalchemy import or_
         emp_q = select(Employee).where(
-            and_(Employee.is_active == True, Employee.join_date <= last_day)
+            and_(
+                Employee.is_active == True,
+                or_(Employee.join_date.is_(None), Employee.join_date <= last_day)
+            )
         )
         if current_user.role == UserRole.WORKER:
             emp_q = emp_q.where(Employee.id == current_user.employee_id)

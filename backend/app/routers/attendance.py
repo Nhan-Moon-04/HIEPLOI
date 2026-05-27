@@ -135,11 +135,12 @@ def evaluate_attendance(shift, check_in_dt, check_out_dt, work_date, is_sunday, 
         
         # Thứ 2 - Thứ 6: 80k (2 bữa), Thứ 7: 40k (1 bữa)
         dow_idx = work_date.weekday()
+        rate = float(shift.meal_allowance or 40000)
         if dow_idx <= 4:  # Thứ 2 - Thứ 6
-            result["meal_allowance"] = float(shift.meal_allowance or 40000)
+            result["meal_allowance"] = rate * 2
             result["meal_count"] = 2
         elif dow_idx == 5:  # Thứ 7
-            result["meal_allowance"] = float(shift.meal_allowance or 40000)
+            result["meal_allowance"] = rate * 1
             result["meal_count"] = 1
         else:
             result["meal_allowance"] = 0.0
@@ -354,7 +355,8 @@ async def get_attendance(
     holiday_dates = {h.holiday_date for h in holiday_result.scalars().all()}
 
     # Load employees
-    emp_filters = [Employee.join_date <= range_end]
+    from sqlalchemy import or_
+    emp_filters = [or_(Employee.join_date.is_(None), Employee.join_date <= range_end)]
     if not employee_id:
         emp_filters.append(Employee.is_active == True)
     emp_q = select(Employee).where(and_(*emp_filters))
