@@ -345,8 +345,12 @@ export default function MealAllowance() {
     const amount = cell.meal_allowance;
     const shortAmount = amount >= 1000 ? `${amount / 1000}k` : amount;
 
-    const extraClass = cell.has_manual_xot
-      ? (cell.night_allowance > 0 ? 'ma-cell-val--manual-night' : 'ma-cell-val--manual-meal')
+    const isManualNight = cell.has_manual_xot && cell.night_allowance > 0;
+    const isManualMeal = cell.has_manual_xot && (cell.manual_meal_count || 0) > 0;
+    const hasActiveManual = isManualNight || isManualMeal;
+
+    const extraClass = hasActiveManual
+      ? (isManualNight ? 'ma-cell-val--manual-night' : 'ma-cell-val--manual-meal')
       : (cell.night_allowance > 0
         ? 'ma-cell-val--night'
         : (cell.meal_count >= 2 ? 'ma-cell-val--double' : ''));
@@ -363,7 +367,7 @@ export default function MealAllowance() {
           <div className="ma-tooltip-amount meal">Tiền ăn: <b>{amount.toLocaleString()} đ</b></div>
           {cell.meal_count >= 2 && <div className="ma-tooltip-row" style={{ color: '#2563eb' }}>Bữa ăn: <b>{cell.meal_count} bữa</b></div>}
           {cell.night_allowance > 0 && <div className="ma-tooltip-amount night">PC Đêm: <b>{cell.night_allowance.toLocaleString()} đ</b></div>}
-          {cell.has_manual_xot && <div className="ma-tooltip-row" style={{ color: '#7c3aed', fontWeight: 600, marginTop: 2 }}>★ Nhập thủ công</div>}
+          {hasActiveManual && <div className="ma-tooltip-row" style={{ color: '#7c3aed', fontWeight: 600, marginTop: 2 }}>★ Nhập thủ công</div>}
           {!isWorker && cell.status !== 'no_data' && (
             <div style={{ color: '#9ca3af', fontSize: 10, marginTop: 4, borderTop: '1px dashed #e5e7eb', paddingTop: 4 }}>
               💡 Double-click để chỉnh sửa thủ công
@@ -602,8 +606,20 @@ export default function MealAllowance() {
                         <td 
                           key={d} 
                           className="ma-td ma-td--cell"
-                          onDoubleClick={() => !isWorker && cell && handleCellDoubleClick(cell, row)}
-                          style={{ cursor: (!isWorker && cell && cell.status !== 'no_data') ? 'pointer' : 'default' }}
+                          onDoubleClick={() => {
+                            if (!isWorker && cell) {
+                              const isManualNight = cell.has_manual_xot && cell.night_allowance > 0;
+                              const isManualMeal = cell.has_manual_xot && (cell.manual_meal_count || 0) > 0;
+                              if (isManualNight || isManualMeal) {
+                                handleCellDoubleClick(cell, row);
+                              }
+                            }
+                          }}
+                          style={{ 
+                            cursor: (!isWorker && cell && cell.has_manual_xot && (cell.night_allowance > 0 || (cell.manual_meal_count || 0) > 0)) 
+                              ? 'pointer' 
+                              : 'default' 
+                          }}
                         >
                           {cell ? renderMealCell(cell, row.employee_id) : <span className="ma-cell-dot">·</span>}
                         </td>

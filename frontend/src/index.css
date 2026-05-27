@@ -1321,53 +1321,64 @@ body.dark {
   font-weight: 800;
   color: #10b981;
   background: #d1fae5;
-  padding: 2px 4px;
+  padding: 2.5px 5px;
   border-radius: 5px;
   min-width: 32px;
   text-align: center;
+  transition: all 0.15s ease;
 }
 .ma-cell-val--night {
   color: #7c3aed;
   background: #ede9fe;
 }
 .ma-cell-val--double {
-  color: #2563eb;
-  background: #dbeafe;
+  color: #0891b2;
+  background: #ecfeff;
 }
+
 .ma-cell-val--manual-night {
-  color: #7c3aed;
-  background: #ede9fe;
+  color: #6d28d9;
+  background: #f3e8ff;
   border: 1.5px dashed #7c3aed;
-  box-shadow: 0 0 3px rgba(124, 58, 237, 0.4);
+  box-shadow: 0 0 4px rgba(124, 58, 237, 0.2);
+}
+.ma-cell-val--manual-night:hover {
+  transform: scale(1.05);
 }
 .ma-cell-val--manual-meal {
-  color: #10b981;
+  color: #047857;
   background: #d1fae5;
-  border: 1.5px dashed #10b981;
-  box-shadow: 0 0 3px rgba(16, 185, 129, 0.4);
+  border: 1.5px dashed #059669;
+  box-shadow: 0 0 4px rgba(16, 185, 129, 0.2);
+}
+.ma-cell-val--manual-meal:hover {
+  transform: scale(1.05);
 }
 .ma-cell-val--ot-eligible {
   color: #d97706;
   background: #fff7ed;
   border: 1.5px solid #fbbf24;
   cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
+  box-shadow: 0 0 2px rgba(245, 158, 11, 0.2);
 }
 .ma-cell-val--ot-eligible:hover {
   background: #fed7aa;
   border-color: #f59e0b;
+  transform: scale(1.05);
 }
 .ma-cell-val--night-eligible {
   color: #1d4ed8;
   background: #dbeafe;
   border: 1.5px solid #93c5fd;
   cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
+  box-shadow: 0 0 2px rgba(59, 130, 246, 0.2);
 }
 .ma-cell-val--night-eligible:hover {
   background: #bfdbfe;
   border-color: #60a5fa;
+  transform: scale(1.05);
 }
+
 .ma-cell-dot { color: #e2e8f0; font-size: 13px; }
 .ma-cell-zero { color: #d1d5db; font-size: 10px; }
 
