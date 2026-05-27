@@ -6,13 +6,13 @@ import {
   UserOutlined, LogoutOutlined,
   BellOutlined, QuestionCircleOutlined,
   DownOutlined, RightOutlined,
+  MessageOutlined,
 } from '@ant-design/icons';
 import { useLocation, useNavigate } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import useThemeStore from '../../stores/themeStore';
 import useAuthStore from '../../stores/authStore';
 import useChatStore from '../../stores/chatStore';
-import { MessageOutlined } from '@ant-design/icons';
 
 const ROUTE_META = {
   '/dashboard':     ['Tổng quan',    'Dashboard'],
