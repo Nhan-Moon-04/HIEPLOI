@@ -466,7 +466,7 @@ body.dark {
 /* Sidebar */
 .sb {
   width: var(--sidebar-width);
-  min-height: 100vh;
+  height: 100vh;
   position: fixed;
   left: 0; top: 0;
   z-index: 100;
@@ -539,25 +539,53 @@ body.dark {
   overflow-y: auto;
   overflow-x: hidden;
   padding: 8px 0 16px;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
-
-.sb-nav::-webkit-scrollbar { width: 3px; }
-.sb-nav::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.08); border-radius: 3px; }
-.dark .sb-nav::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); }
+.sb-nav::-webkit-scrollbar {
+  display: none;
+}
 
 .sb-section { margin-bottom: 4px; }
 
 .sb-group {
-  padding: 10px 16px 4px;
+  padding: 10px 16px 6px;
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.8px;
-  color: #b0b9c6;
+  color: #8a94a6;
   white-space: nowrap;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  user-select: none;
+  transition: color 0.15s ease;
 }
 
-.dark .sb-group { color: rgba(255,255,255,0.25); }
+.sb-group:hover {
+  color: #276EF1;
+}
+
+.dark .sb-group { color: rgba(255,255,255,0.35); }
+.dark .sb-group:hover {
+  color: #60a5fa;
+}
+
+.sb-group-arrow {
+  font-size: 9px;
+  opacity: 0.65;
+  transition: transform 0.2s ease, opacity 0.2s ease;
+}
+
+.sb-group:hover .sb-group-arrow {
+  opacity: 1;
+}
+
+.sb-group-arrow--collapsed {
+  transform: rotate(-90deg);
+}
 
 .sb-item {
   display: flex;

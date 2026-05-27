@@ -1,9 +1,10 @@
+import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
   AppstoreOutlined, TeamOutlined, ClockCircleOutlined, ScheduleOutlined,
   CalendarOutlined, DollarOutlined, FileTextOutlined, SafetyOutlined,
   BankOutlined, ImportOutlined, AuditOutlined, SettingOutlined, RiseOutlined,
-  UsergroupAddOutlined, UserSwitchOutlined,
+  UsergroupAddOutlined, UserSwitchOutlined, DownOutlined,
 } from '@ant-design/icons';
 import useAuthStore from '../../stores/authStore';
 
@@ -61,6 +62,34 @@ export default function Sidebar({ collapsed }) {
   const location = useLocation();
   const { hasRole } = useAuthStore();
 
+  const [expandedGroups, setExpandedGroups] = useState({
+    'TỔNG QUAN': true,
+    'NHÂN SỰ': true,
+    'LƯƠNG & THUẾ': true,
+    'CÔNG ĐOÀN': true,
+    'HỆ THỐNG': false, // default collapsed for system group as requested
+  });
+
+  useEffect(() => {
+    // Automatically expand the group containing the active item
+    const activeGroup = sections.find((sec) =>
+      sec.items.some((item) => location.pathname === item.key || location.pathname.startsWith(item.key + '/'))
+    );
+    if (activeGroup) {
+      setExpandedGroups((prev) => ({
+        ...prev,
+        [activeGroup.group]: true,
+      }));
+    }
+  }, [location.pathname]);
+
+  const toggleGroup = (group) => {
+    setExpandedGroups((prev) => ({
+      ...prev,
+      [group]: !prev[group],
+    }));
+  };
+
   return (
     <div className={`sb ${collapsed ? 'sb--col' : ''}`}>
       <div className="sb-logo" onClick={() => navigate('/dashboard')}>
@@ -76,18 +105,25 @@ export default function Sidebar({ collapsed }) {
       <div className="sb-nav">
         {sections.map((sec) => {
           if (sec.roles && !sec.roles.some((r) => hasRole(r))) return null;
-          
+
           const visibleItems = sec.items.filter((item) => {
             if (item.roles && !item.roles.some((r) => hasRole(r))) return false;
             return true;
           });
-          
+
           if (visibleItems.length === 0) return null;
+
+          const isExpanded = expandedGroups[sec.group];
 
           return (
             <div key={sec.group} className="sb-section">
-              {!collapsed && <div className="sb-group">{sec.group}</div>}
-              {visibleItems.map((item) => {
+              {!collapsed && (
+                <div className="sb-group" onClick={() => toggleGroup(sec.group)}>
+                  <span>{sec.group}</span>
+                  <DownOutlined className={`sb-group-arrow ${!isExpanded ? 'sb-group-arrow--collapsed' : ''}`} />
+                </div>
+              )}
+              {(collapsed || isExpanded) && visibleItems.map((item) => {
                 const active = location.pathname === item.key || location.pathname.startsWith(item.key + '/');
                 return (
                   <div

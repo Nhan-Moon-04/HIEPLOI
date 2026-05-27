@@ -29,6 +29,7 @@ async def list_departments(
     ).group_by(
         Department.id
     ).order_by(
+        Department.sort_order,
         Department.name
     )
     

@@ -103,7 +103,7 @@ async def list_departments(
     # 1. Ưu tiên lấy từ bảng departments định nghĩa mới
     from app.models.department import Department
     dept_result = await db.execute(
-        select(Department.name).order_by(Department.name)
+        select(Department.name).order_by(Department.sort_order, Department.name)
     )
     depts = [row[0] for row in dept_result.all() if row[0]]
     if depts:
