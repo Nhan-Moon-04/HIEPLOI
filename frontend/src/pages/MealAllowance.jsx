@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { DatePicker, Select, Spin, Tooltip, Button, Space, Modal, Input, InputNumber, Form, message, Popconfirm, Table as AntTable, Tag } from 'antd';
+import { DatePicker, Select, Spin, Tooltip, Button, Space, Modal, Input, InputNumber, Form, message, Popconfirm, Table as AntTable, Tag, Segmented } from 'antd';
 import {
   DollarCircleOutlined,
   DownloadOutlined,
@@ -10,6 +10,8 @@ import {
   SearchOutlined,
   MoonOutlined,
   ThunderboltOutlined,
+  DeleteOutlined,
+  CheckCircleOutlined,
 } from '@ant-design/icons';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import dayjs from 'dayjs';
@@ -55,8 +57,11 @@ export default function MealAllowance() {
   const [nightOtTarget, setNightOtTarget] = useState(null); // { cell, employeeId }
   const [nightOtSaving, setNightOtSaving] = useState(false);
   const [quickModal, setQuickModal] = useState(false);
+  const [quickTab, setQuickTab] = useState('eligible');
   const [selectedRowKeys, setSelectedRowKeys] = useState([]);
+  const [selectedDeleteKeys, setSelectedDeleteKeys] = useState([]);
   const [quickSaving, setQuickSaving] = useState(false);
+  const [quickDeleting, setQuickDeleting] = useState(false);
 
   // State cho Chỉnh sửa Tăng ca Thủ công (Double Click)
   const [editManualModal, setEditManualModal] = useState(false);
@@ -233,6 +238,49 @@ export default function MealAllowance() {
     return result.sort((a, b) => a.cell.work_date.localeCompare(b.cell.work_date));
   }, [att]);
 
+  // Danh sách OT đã thêm (manual XOT)
+  const addedOtList = useMemo(() => {
+    const result = [];
+    for (const row of (att?.rows || [])) {
+      for (const cell of (row.days || [])) {
+        if (cell.has_manual_xot) {
+          result.push({
+            key: `${row.employee_id}_${cell.work_date}`,
+            employee_id: row.employee_id,
+            employee_code: row.employee_code,
+            full_name: row.full_name,
+            department: row.department,
+            cell,
+            has_night: cell.night_allowance > 0 && cell.manual_ot_end_time >= '23:00',
+          });
+        }
+      }
+    }
+    return result.sort((a, b) => a.cell.work_date.localeCompare(b.cell.work_date));
+  }, [att]);
+
+  const handleBulkDeleteOt = async () => {
+    if (selectedDeleteKeys.length === 0) return;
+    setQuickDeleting(true);
+    try {
+      const selected = addedOtList.filter((r) => selectedDeleteKeys.includes(r.key));
+      await Promise.all(
+        selected.map((r) =>
+          api.delete('/schedules/x-overtime', {
+            params: { employee_id: r.employee_id, work_date: r.cell.work_date },
+          })
+        )
+      );
+      message.success(`Đã xóa ${selected.length} ngày tăng ca`);
+      setSelectedDeleteKeys([]);
+      queryClient.invalidateQueries({ queryKey: ['attendance'] });
+    } catch {
+      message.error('Lỗi khi xóa tăng ca');
+    } finally {
+      setQuickDeleting(false);
+    }
+  };
+
   const quickOtColumns = [
     {
       title: 'Họ tên',
@@ -243,6 +291,12 @@ export default function MealAllowance() {
           <div style={{ fontSize: 11, color: '#9ca3af' }}>{r.employee_code}</div>
         </div>
       ),
+    },
+    {
+      title: 'Ca',
+      key: 'shift',
+      width: 55,
+      render: (_, r) => <Tag style={{ fontSize: 10, margin: 0 }}>{r.cell.shift_code || '–'}</Tag>,
     },
     {
       title: 'Ngày',
@@ -465,14 +519,26 @@ export default function MealAllowance() {
                 Xuất Excel
               </Button>
             </div>
-            <Button
-              size="small"
-              icon={<ThunderboltOutlined />}
-              onClick={() => { setSelectedRowKeys(eligibleList.map((r) => r.key)); setQuickModal(true); }}
-              style={{ background: eligibleList.length > 0 ? '#fff7ed' : '#f9fafb', color: eligibleList.length > 0 ? '#d97706' : '#9ca3af', border: `1px solid ${eligibleList.length > 0 ? '#fbbf24' : '#e5e7eb'}`, borderRadius: 6, fontSize: 12 }}
-            >
-              Thêm nhanh OT{eligibleList.length > 0 ? ` (${eligibleList.length} ngày)` : ''}
-            </Button>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <Button
+                size="small"
+                icon={<ThunderboltOutlined />}
+                onClick={() => { setQuickTab('eligible'); setSelectedRowKeys(eligibleList.map((r) => r.key)); setQuickModal(true); }}
+                style={{ background: eligibleList.length > 0 ? '#fff7ed' : '#f9fafb', color: eligibleList.length > 0 ? '#d97706' : '#9ca3af', border: `1px solid ${eligibleList.length > 0 ? '#fbbf24' : '#e5e7eb'}`, borderRadius: 6, fontSize: 12 }}
+              >
+                Thêm nhanh OT{eligibleList.length > 0 ? ` (${eligibleList.length})` : ''}
+              </Button>
+              {addedOtList.length > 0 && (
+                <Button
+                  size="small"
+                  icon={<CheckCircleOutlined />}
+                  onClick={() => { setQuickTab('added'); setSelectedDeleteKeys([]); setQuickModal(true); }}
+                  style={{ background: '#f0fdf4', color: '#16a34a', border: '1px solid #86efac', borderRadius: 6, fontSize: 12 }}
+                >
+                  Đã thêm ({addedOtList.length})
+                </Button>
+              )}
+            </div>
           </div>
         )}
       </div>
@@ -653,12 +719,17 @@ export default function MealAllowance() {
 
       {/* Quick OT bulk modal */}
       <Modal
-        title={<><ThunderboltOutlined style={{ color: '#d97706', marginRight: 8 }} />Thêm nhanh tăng ca ({eligibleList.length} ngày)</>}
+        title={
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <ThunderboltOutlined style={{ color: '#d97706' }} />
+            <span>Quản lý tăng ca</span>
+          </div>
+        }
         open={quickModal}
         onCancel={() => setQuickModal(false)}
-        width={660}
+        width={700}
         centered
-        footer={[
+        footer={quickTab === 'eligible' ? [
           <Button key="cancel" onClick={() => setQuickModal(false)}>Hủy</Button>,
           <Button key="submit" type="primary" loading={quickSaving}
             disabled={selectedRowKeys.length === 0}
@@ -666,26 +737,124 @@ export default function MealAllowance() {
             onClick={handleQuickOtSave}>
             Áp dụng cho {selectedRowKeys.length} ngày đã chọn
           </Button>,
+        ] : [
+          <Button key="cancel" onClick={() => setQuickModal(false)}>Đóng</Button>,
+          <Popconfirm
+            key="delete-confirm"
+            title={`Xóa ${selectedDeleteKeys.length} ngày tăng ca?`}
+            description="Hệ thống sẽ tự động tính toán lại tiền cơm cho các ngày này."
+            onConfirm={handleBulkDeleteOt}
+            okText="Xóa"
+            cancelText="Hủy"
+            okButtonProps={{ danger: true }}
+            disabled={selectedDeleteKeys.length === 0}
+          >
+            <Button key="delete" danger loading={quickDeleting}
+              disabled={selectedDeleteKeys.length === 0}
+              icon={<DeleteOutlined />}>
+              Xóa {selectedDeleteKeys.length} ngày đã chọn
+            </Button>
+          </Popconfirm>,
         ]}
       >
-        <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 12 }}>
-          <Tag color="orange">OT sau 18h</Tag> → thêm 1 bữa ăn &nbsp;|&nbsp;
-          <Tag color="blue">OT sau 23h</Tag> → thêm 1 bữa + PC ca đêm ({nightAllowanceRate.toLocaleString()}đ)
-        </div>
-        {eligibleList.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: '40px 0', color: '#9ca3af', fontSize: 13 }}>
-            Không có ngày OT nào cần xử lý trong khoảng thời gian này.<br />
-            <span style={{ fontSize: 11 }}>Ô cam / xanh trên bảng mới xuất hiện ở đây.</span>
-          </div>
+        <Segmented
+          value={quickTab}
+          onChange={(val) => setQuickTab(val)}
+          options={[
+            { value: 'eligible', label: `Cần thêm (${eligibleList.length})`, icon: <ThunderboltOutlined /> },
+            { value: 'added', label: `Đã thêm (${addedOtList.length})`, icon: <CheckCircleOutlined /> },
+          ]}
+          block
+          style={{ marginBottom: 12 }}
+        />
+
+        {quickTab === 'eligible' ? (
+          <>
+            <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 12 }}>
+              <Tag color="orange">OT sau 18h</Tag> → thêm 1 bữa ăn &nbsp;|&nbsp;
+              <Tag color="blue">OT sau 23h</Tag> → thêm 1 bữa + PC ca đêm ({nightAllowanceRate.toLocaleString()}đ)
+            </div>
+            {eligibleList.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '40px 0', color: '#9ca3af', fontSize: 13 }}>
+                Không có ngày OT nào cần xử lý trong khoảng thời gian này.<br />
+                <span style={{ fontSize: 11 }}>Ô cam / xanh trên bảng mới xuất hiện ở đây.</span>
+              </div>
+            ) : (
+              <AntTable
+                dataSource={eligibleList}
+                columns={quickOtColumns}
+                rowSelection={{ selectedRowKeys, onChange: setSelectedRowKeys }}
+                size="small"
+                pagination={false}
+                scroll={{ y: 380 }}
+              />
+            )}
+          </>
         ) : (
-          <AntTable
-            dataSource={eligibleList}
-            columns={quickOtColumns}
-            rowSelection={{ selectedRowKeys, onChange: setSelectedRowKeys }}
-            size="small"
-            pagination={false}
-            scroll={{ y: 380 }}
-          />
+          <>
+            <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 12 }}>
+              Danh sách các ngày đã thêm tăng ca thủ công. Chọn để xóa nếu muốn hệ thống tính tự động lại.
+            </div>
+            {addedOtList.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '40px 0', color: '#9ca3af', fontSize: 13 }}>
+                Chưa có ngày tăng ca thủ công nào.
+              </div>
+            ) : (
+              <AntTable
+                dataSource={addedOtList}
+                columns={[
+                  {
+                    title: 'Họ tên',
+                    dataIndex: 'full_name',
+                    render: (v, r) => (
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: 13 }}>{v}</div>
+                        <div style={{ fontSize: 11, color: '#9ca3af' }}>{r.employee_code}</div>
+                      </div>
+                    ),
+                  },
+                  {
+                    title: 'Ca',
+                    key: 'shift',
+                    width: 55,
+                    render: (_, r) => <Tag style={{ fontSize: 10, margin: 0 }}>{r.cell.shift_code || '–'}</Tag>,
+                  },
+                  {
+                    title: 'Ngày',
+                    key: 'date',
+                    width: 75,
+                    render: (_, r) => dayjs(r.cell.work_date).format('DD/MM'),
+                  },
+                  {
+                    title: 'Bữa OT',
+                    key: 'meals',
+                    width: 65,
+                    render: (_, r) => <span style={{ fontWeight: 600, color: '#d97706' }}>{r.cell.manual_meal_count || 0}</span>,
+                  },
+                  {
+                    title: 'PC Đêm',
+                    key: 'night',
+                    width: 80,
+                    render: (_, r) => r.has_night
+                      ? <Tag color="blue" style={{ fontSize: 11 }}>Có</Tag>
+                      : <span style={{ color: '#d1d5db', fontSize: 11 }}>Không</span>,
+                  },
+                  {
+                    title: 'Giờ ra OT',
+                    key: 'ot_end',
+                    width: 80,
+                    render: (_, r) => r.cell.manual_ot_end_time
+                      ? <b style={{ color: r.has_night ? '#1d4ed8' : '#d97706' }}>{r.cell.manual_ot_end_time}</b>
+                      : <span style={{ color: '#d1d5db' }}>–</span>,
+                  },
+                ]}
+                rowSelection={{ selectedRowKeys: selectedDeleteKeys, onChange: setSelectedDeleteKeys }}
+                size="small"
+                pagination={false}
+                scroll={{ y: 380 }}
+              />
+            )}
+          </>
         )}
       </Modal>
 

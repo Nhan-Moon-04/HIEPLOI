@@ -6,6 +6,7 @@ import { useNavigate } from 'react-router-dom';
 import dayjs from 'dayjs';
 import api from '../api/client';
 import useAuthStore from '../stores/authStore';
+import useMonthStore from '../stores/monthStore';
 
 export default function Employees() {
   const navigate = useNavigate();
@@ -15,7 +16,7 @@ export default function Employees() {
   const [editing, setEditing] = useState(null);
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
-  const [monthKey, setMonthKey] = useState(dayjs().format('YYYY-MM'));
+  const { monthKey, setMonthKey } = useMonthStore();
   const [form] = Form.useForm();
   const qc = useQueryClient();
 

@@ -12,11 +12,12 @@ import { useQuery } from '@tanstack/react-query';
 import dayjs from 'dayjs';
 import api from '../api/client';
 import useAuthStore from '../stores/authStore';
+import useMonthStore from '../stores/monthStore';
 
 export default function Overtime() {
   const { user } = useAuthStore();
   const isWorker = user?.role === 'worker';
-  const [monthKey, setMonthKey] = useState(dayjs().format('YYYY-MM'));
+  const { monthKey, setMonthKey } = useMonthStore();
   const [dept, setDept] = useState(null);
 
   const { data: ot, isLoading } = useQuery({

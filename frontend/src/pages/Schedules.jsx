@@ -5,6 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import dayjs from 'dayjs';
 import api from '../api/client';
 import useAuthStore from '../stores/authStore';
+import useMonthStore from '../stores/monthStore';
 
 const SHIFT_COLORS = {
   X: '#4361ee', XVP: '#6366f1', D: '#7c3aed', CND: '#9333ea',
@@ -17,7 +18,7 @@ const X_OT_SHIFTS = ['X', 'X40'];
 export default function Schedules() {
   const { user } = useAuthStore();
   const isWorker = user?.role === 'worker';
-  const [monthKey, setMonthKey] = useState(dayjs().format('YYYY-MM'));
+  const { monthKey, setMonthKey } = useMonthStore();
   const [editingCell, setEditingCell] = useState(null);
   const [otPopover, setOtPopover] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');

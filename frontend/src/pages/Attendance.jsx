@@ -15,6 +15,7 @@ import dayjs from 'dayjs';
 import api from '../api/client';
 import AttendanceDetailModal from '../components/Attendance/AttendanceDetailModal';
 import useAuthStore from '../stores/authStore';
+import useMonthStore from '../stores/monthStore';
 
 const STATUS_MAP = {
   full:        { label: 'Đủ giờ',   icon: '✓' },
@@ -30,7 +31,7 @@ const STATUS_MAP = {
 export default function Attendance() {
   const { user } = useAuthStore();
   const isWorker = user?.role === 'worker';
-  const [monthKey, setMonthKey] = useState(dayjs().format('YYYY-MM'));
+  const { monthKey, setMonthKey } = useMonthStore();
   const [dept, setDept] = useState(null);
   const [selectedRow, setSelectedRow] = useState(null);
 

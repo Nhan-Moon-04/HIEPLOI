@@ -8,6 +8,7 @@ import { useQuery } from '@tanstack/react-query';
 import dayjs from 'dayjs';
 import api from '../api/client';
 import useAuthStore from '../stores/authStore';
+import useMonthStore from '../stores/monthStore';
 
 // ─── TNCN Calculator ────────────────────────────────────────────────────────
 function calcTNCN(taxable) {
@@ -140,7 +141,7 @@ function PaySlip({ row, monthKey, onClose }) {
 export default function PayrollTable() {
   const { user } = useAuthStore();
   const isWorker = user?.role === 'worker';
-  const [monthKey, setMonthKey] = useState(dayjs().format('YYYY-MM'));
+  const { monthKey, setMonthKey } = useMonthStore();
   const [nightRate, setNightRate] = useState(() => Number(localStorage.getItem('nightAllowanceRate')) || 100000);
   const [dept, setDept] = useState(null);
   const [payslipRow, setPayslipRow] = useState(null);

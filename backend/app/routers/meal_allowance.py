@@ -294,6 +294,22 @@ async def get_meal_allowance(
                     total_emp_meal += nu_res.night_allowance
                 
                 emp_meal_count += nu_res.meal_count
+
+                # XNU: cộng thêm tiền ăn OT thủ công nếu có config
+                if nu_res.shift_code == "XNU":
+                    xot = xot_map.get((emp.id, work_date))
+                    if xot and xot.meal_count and xot.meal_count > 0:
+                        ot_meal = 35000.0 * int(xot.meal_count)
+                        total_emp_meal += ot_meal
+                        emp_meal_count += int(xot.meal_count)
+                        # Nếu ot_end_time >= 23h thì cộng phụ cấp ca đêm
+                        if xot.ot_end_time:
+                            from datetime import time as dt_time
+                            ot_end = xot.ot_end_time
+                            if hasattr(ot_end, 'hour') and ot_end.hour >= 23:
+                                total_emp_meal += night_allowance
+                                if nu_res.night_allowance <= 0:
+                                    night_shifts += 1
             elif is_nu_dynamic_shift_code(shift.code):
                 # Fallback for NU shifts without logs
                 att = att_map.get((emp.id, work_date))

@@ -135,26 +135,50 @@ async def import_attendance(
 
         await db.commit()
 
-        # 2.5 Clear old data for this month
+        # 2.5 Clear old data ONLY for dates found in the file (not entire month)
+        # This preserves data from previous imports for dates not in this file
         y, m = map(int, month_key.split("-"))
         days_in_month = calendar.monthrange(y, m)[1]
         month_start = date(y, m, 1)
         month_end = date(y, m, days_in_month)
         
-        # Delete Daily records
-        await db.execute(delete(AttendanceDaily).where(and_(
-            AttendanceDaily.work_date >= month_start,
-            AttendanceDaily.work_date <= month_end
-        )))
+        # First pass: determine which dates are in the file
+        file_dates = set()
+        for _, _, _, scan_time_raw in data_rows:
+            if scan_time_raw is None:
+                continue
+            st = scan_time_raw
+            if isinstance(st, str):
+                for fmt in ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M"]:
+                    try:
+                        st = datetime.strptime(st, fmt)
+                        break
+                    except ValueError:
+                        continue
+            if isinstance(st, datetime):
+                file_dates.add(st.date())
+                # Scan trước 6h sáng thuộc ca đêm hôm trước
+                if st.time() < NIGHT_SHIFT_CUTOFF:
+                    file_dates.add(st.date() - timedelta(days=1))
         
-        # Delete Raw Logs
-        # Include a bit of buffer for night shifts (up to 12:00 on the 1st of the next month)
-        log_start = datetime.combine(month_start, time(0, 0))
-        log_end = datetime.combine(month_end + timedelta(days=1), time(12, 0))
-        await db.execute(delete(AttendanceLog).where(and_(
-            AttendanceLog.event_time >= log_start,
-            AttendanceLog.event_time <= log_end
-        )))
+        # Chỉ xóa trong phạm vi tháng được chọn
+        file_dates_in_month = sorted([d for d in file_dates if month_start <= d <= month_end])
+        
+        if file_dates_in_month:
+            # Delete Daily records chỉ cho ngày có trong file
+            await db.execute(delete(AttendanceDaily).where(
+                AttendanceDaily.work_date.in_(file_dates_in_month)
+            ))
+            
+            # Delete Raw Logs cho khoảng ngày trong file
+            min_file_date = min(file_dates_in_month)
+            max_file_date = max(file_dates_in_month)
+            log_start = datetime.combine(min_file_date, time(0, 0))
+            log_end = datetime.combine(max_file_date + timedelta(days=1), time(12, 0))
+            await db.execute(delete(AttendanceLog).where(and_(
+                AttendanceLog.event_time >= log_start,
+                AttendanceLog.event_time <= log_end
+            )))
         
         await db.commit()
 

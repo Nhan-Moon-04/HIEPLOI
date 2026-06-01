@@ -560,11 +560,42 @@ async def get_attendance(
             manual_meal_count_val = xot.meal_count if xot else None
             manual_ot_end_time_val = str(xot.ot_end_time)[:5] if xot and xot.ot_end_time else None
 
-            # Cộng thêm tiền ăn OT cho mọi ca không-tự-động nếu có config xot, hoặc đánh dấu ot/night eligible
-            is_auto_shift = nu_res is not None or (cell_shift_code or "").upper() in DRIVER_AUTO_OT_SHIFT_CODES
+            # Cộng thêm tiền ăn OT nếu có config xot, hoặc đánh dấu ot/night eligible
+            # XNU cũng hỗ trợ OT thủ công (lâu lâu tăng ca)
+            is_xnu_shift = nu_res is not None and nu_res.shift_code == "XNU"
+            is_auto_shift = (nu_res is not None and not is_xnu_shift) or (cell_shift_code or "").upper() in DRIVER_AUTO_OT_SHIFT_CODES
             ot_eligible_val = False
             night_eligible_val = False
-            if not is_auto_shift and ev["status"] in ("full", "early_leave", "short", "forgot_scan"):
+
+            # XNU: hỗ trợ OT thủ công giống X/X40
+            if is_xnu_shift and ev["status"] in ("full", "early_leave", "short", "forgot_scan"):
+                if xot and xot.meal_count and xot.meal_count > 0:
+                    x_meal_rate = 35000.0
+                    ot_meal = x_meal_rate * int(xot.meal_count)
+                    ev["meal_allowance"] = (ev["meal_allowance"] or 0) + ot_meal
+                    ev["meal_count"] = (ev["meal_count"] or 0) + int(xot.meal_count)
+                    if xot.ot_hours:
+                        ev["ot_hours"] = float(ev["ot_hours"] or 0) + float(xot.ot_hours)
+                    if xot.ot_end_time:
+                        end_t = parse_time(xot.ot_end_time)
+                        if end_t and end_t.hour >= 23:
+                            ev["night_allowance"] = (ev["night_allowance"] or 0) + night_allowance_rate
+                elif check_out_dt:
+                    # Xác định giờ kết thúc ca XNU để detect OT
+                    xnu_shift_ends = {
+                        XNU_MODE_1: time(14, 0),
+                        XNU_MODE_2: time(22, 0),
+                    }
+                    xnu_end_t = xnu_shift_ends.get(nu_res.mode)
+                    if xnu_end_t:
+                        xnu_end_dt = datetime.combine(dt, xnu_end_t)
+                        actual_ot_h = max(0.0, (check_out_dt - xnu_end_dt).total_seconds() / 3600.0)
+                        if check_out_dt >= datetime.combine(dt, time(23, 0)):
+                            night_eligible_val = True
+                        elif (check_out_dt.hour >= 18 and xnu_end_t.hour < 18) or (actual_ot_h >= 3):
+                            ot_eligible_val = True
+
+            elif not is_auto_shift and ev["status"] in ("full", "early_leave", "short", "forgot_scan"):
                 if xot and xot.meal_count and xot.meal_count > 0:
                     x_meal_rate = float(shift.meal_allowance) if shift and shift.meal_allowance else 35000.0
                     ot_meal = x_meal_rate * int(xot.meal_count)
