@@ -318,7 +318,7 @@ export default function MealAllowance() {
       width: 115,
       render: (_, r) => r.is_night
         ? <Tag color="blue" style={{ fontSize: 11 }}>OT sau 23h</Tag>
-        : <Tag color="orange" style={{ fontSize: 11 }}>OT sau 18h</Tag>,
+        : <Tag color="orange" style={{ fontSize: 11 }}>OT sau 17h50</Tag>,
     },
     {
       title: 'Sẽ thêm',
@@ -340,6 +340,32 @@ export default function MealAllowance() {
 
   const renderMealCell = (cell, employeeId) => {
     if (cell.status === 'no_data') return <span className="ma-cell-dot">·</span>;
+
+    if (cell.status === 'forgot_scan') {
+      const amount = cell.meal_allowance || 0;
+      const shortAmount = amount >= 1000 ? `${amount / 1000}k` : (amount ? String(amount) : '?');
+      return (
+        <Tooltip title={
+          <div className="ma-tooltip">
+            <div style={{ color: '#f87171', fontWeight: 700, marginBottom: 4 }}>⚠ Quên chấm công</div>
+            {!cell.check_in && <div style={{ color: '#fca5a5' }}>Thiếu giờ vào</div>}
+            {!cell.check_out && <div style={{ color: '#fca5a5' }}>Thiếu giờ ra</div>}
+            {cell.check_in && <div className="ma-tooltip-row">Vào: <b>{dayjs(cell.check_in).format('HH:mm')}</b></div>}
+            {cell.check_out && <div className="ma-tooltip-row">Ra: <b>{dayjs(cell.check_out).format('HH:mm')}</b></div>}
+            {amount > 0 && <div className="ma-tooltip-amount meal">Tiền ăn tạm tính: <b>{amount.toLocaleString()} đ</b></div>}
+          </div>
+        }>
+          <div style={{
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            minWidth: 32, padding: '1px 5px', borderRadius: 5,
+            fontSize: 11, fontWeight: 700,
+            background: '#fee2e2', color: '#b91c1c', border: '1px solid #fca5a5',
+          }}>
+            {shortAmount || '!'}
+          </div>
+        </Tooltip>
+      );
+    }
 
     if (cell.night_eligible) {
       const amount = cell.meal_allowance || 0;
@@ -370,7 +396,7 @@ export default function MealAllowance() {
       return (
         <Popconfirm
           title="Thêm bữa tăng ca?"
-          description={`Ngày ${dayjs(cell.work_date).format('DD/MM')} — OT sau 18h hoặc ≥ 3h`}
+          description={`Ngày ${dayjs(cell.work_date).format('DD/MM')} — OT sau 17h50 hoặc ≥ 3h`}
           onConfirm={async () => {
             try {
               await api.put('/schedules/x-overtime', {
@@ -669,8 +695,8 @@ export default function MealAllowance() {
                     {days.map((d) => {
                       const cell = row.days?.find((c) => c.day === d);
                       return (
-                        <td 
-                          key={d} 
+                        <td
+                          key={d}
                           className="ma-td ma-td--cell"
                           onDoubleClick={() => {
                             if (!isWorker && cell) {
@@ -681,10 +707,11 @@ export default function MealAllowance() {
                               }
                             }
                           }}
-                          style={{ 
-                            cursor: (!isWorker && cell && cell.has_manual_xot && (cell.night_allowance > 0 || (cell.manual_meal_count || 0) > 0)) 
-                              ? 'pointer' 
-                              : 'default' 
+                          style={{
+                            cursor: (!isWorker && cell && cell.has_manual_xot && (cell.night_allowance > 0 || (cell.manual_meal_count || 0) > 0))
+                              ? 'pointer'
+                              : 'default',
+                            backgroundColor: cell?.status === 'forgot_scan' ? 'rgba(254,226,226,0.55)' : undefined,
                           }}
                         >
                           {cell ? renderMealCell(cell, row.employee_id) : <span className="ma-cell-dot">·</span>}
@@ -771,7 +798,7 @@ export default function MealAllowance() {
         {quickTab === 'eligible' ? (
           <>
             <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 12 }}>
-              <Tag color="orange">OT sau 18h</Tag> → thêm 1 bữa ăn &nbsp;|&nbsp;
+              <Tag color="orange">OT sau 17h50</Tag> → thêm 1 bữa ăn &nbsp;|&nbsp;
               <Tag color="blue">OT sau 23h</Tag> → thêm 1 bữa + PC ca đêm ({nightAllowanceRate.toLocaleString()}đ)
             </div>
             {eligibleList.length === 0 ? (

@@ -279,14 +279,16 @@ def evaluate_attendance(shift, check_in_dt, check_out_dt, work_date, is_sunday, 
             if is_auto:
                 # Quy tắc thời gian cho ca tự động (TX1, TX2, NU, XNU):
                 #   Bữa sáng : check-in trước 9h
-                #   Bữa tối  : check-out >= 18h HOẶC check-in >= 18h HOẶC OT >= 3h
+                #   Bữa tối  : check-out >= 17h50 HOẶC check-in >= 18h HOẶC OT >= 3h
                 ci = original_check_in or check_in_dt
                 ot = result.get("ot_hours") or 0.0
                 has_morning = bool(ci and ci.hour < 9)
+                # Chủ nhật/ngày lễ: toàn bộ giờ làm tính OT → không dùng ot>=3 để xét bữa tối
+                # (tránh tính 2 bữa khi tài xế về trước 17h50)
                 has_late = bool(
-                    (check_out_dt and check_out_dt.hour >= 18)
+                    (check_out_dt and (check_out_dt.hour * 60 + check_out_dt.minute) >= 17 * 60 + 50)
                     or (ci and ci.hour >= 18)
-                    or (ot >= 3)
+                    or (not (is_sunday or is_holiday) and ot >= 3)
                 )
                 meal_count = (1 if has_morning else 0) + (1 if has_late else 0)
             else:
@@ -592,7 +594,7 @@ async def get_attendance(
                         actual_ot_h = max(0.0, (check_out_dt - xnu_end_dt).total_seconds() / 3600.0)
                         if check_out_dt >= datetime.combine(dt, time(23, 0)):
                             night_eligible_val = True
-                        elif (check_out_dt.hour >= 18 and xnu_end_t.hour < 18) or (actual_ot_h >= 3):
+                        elif ((check_out_dt.hour * 60 + check_out_dt.minute) >= 17 * 60 + 50 and xnu_end_t.hour < 18) or (actual_ot_h >= 3):
                             ot_eligible_val = True
 
             elif not is_auto_shift and ev["status"] in ("full", "early_leave", "short", "forgot_scan"):
@@ -614,7 +616,7 @@ async def get_attendance(
                     # Checkout từ 23h trở lên → đề xuất thêm PCCD ca đêm (ưu tiên hơn ot_eligible)
                     if check_out_dt >= datetime.combine(dt, time(23, 0)):
                         night_eligible_val = True
-                    elif (check_out_dt.hour >= 18 and shift_end_t.hour < 18) or (actual_ot_h >= 3):
+                    elif ((check_out_dt.hour * 60 + check_out_dt.minute) >= 17 * 60 + 50 and shift_end_t.hour < 18) or (actual_ot_h >= 3):
                         ot_eligible_val = True
 
             cell = AttendanceCell(

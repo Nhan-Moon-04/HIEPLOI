@@ -90,10 +90,20 @@ def _detect_daily_mode(today_events, next_day_events, is_sunday=False, shift_cod
             return None, False
 
         # XNU: detect by A/B/C segments (A: 06-10, B: 10-18, C: 18-24; next-day A for shift 3)
+        has_very_early_today = any(item.hour < 6 for item in today_events)
         has_a_today = any(6 <= item.hour < 10 for item in today_events)
         has_b_today = any(10 <= item.hour < 18 for item in today_events)
         has_c_today = any(item.hour >= 18 for item in today_events)
         has_a_next = any(item.hour < 10 for item in next_day_events)
+
+        # Check-in rất sớm (< 6h) + checkout 18-21h cùng ngày = Ca1 làm OT dài, KHÔNG phải Ca3
+        # Ca3 check-in luôn >= 21h (ca bắt đầu 22h, công nhân vào ~21:30-22:30)
+        # Nếu C scan >= 21h thì đó là Ca3 check-in mới, scan sớm là checkout Ca3 đêm trước
+        if has_very_early_today and has_c_today:
+            has_ca3_entry = any(item.hour >= 21 for item in today_events)
+            if not has_ca3_entry:
+                has_midday = any(10 <= item.hour <= 13 for item in today_events)
+                return XNU_MODE_1, has_midday
 
         if has_c_today and has_a_next and not has_b_today:
             return XNU_MODE_3, False
@@ -318,10 +328,10 @@ def _build_result(mode, week_mode, shift_code, has_midday_check, warning_note, c
         )
         overtime_hours += NU_EXTRA_OT_BY_CODE.get(code, 0.0)
         
-        # Quy tắc thống nhất: check-in < 9h → bữa sáng; check-out >= 18h HOẶC check-in >= 18h HOẶC OT >= 3h → bữa tối
+        # Quy tắc thống nhất: check-in < 9h → bữa sáng; check-out >= 17h50 HOẶC check-in >= 18h HOẶC OT >= 3h → bữa tối
         meal_has_morning = bool(check_in and check_in.hour < 9)
         meal_has_late = bool(
-            (check_out and check_out.hour >= 18)
+            (check_out and (check_out.hour * 60 + check_out.minute) >= 17 * 60 + 50)
             or (check_in and check_in.hour >= 18)
             or (overtime_hours >= 3)
         )

@@ -324,7 +324,22 @@ async def get_meal_allowance(
                 if meal > 35000: emp_meal_count += 1
             else:
                 meal_rate_val = to_float(shift.meal_allowance)
-                day_meal_count = int(shift.meal_count or 1)  # số bữa mặc định của ca
+                is_sunday_or_holiday = work_date.weekday() == 6 or work_date in holiday_dates
+
+                if shift.code.upper() in ("TX1", "TX2") and is_sunday_or_holiday:
+                    # Chủ nhật/lễ: dùng giờ thực tế, không dùng ot>=3 (tránh tính 2 bữa khi về trước 18h)
+                    att = att_map.get((emp.id, work_date))
+                    ci = att.first_check_in if att else None
+                    co = att.last_check_out if att else None
+                    has_morning = bool(ci and ci.hour < 9)
+                    has_late = bool(
+                        (co and (co.hour * 60 + co.minute) >= 17 * 60 + 50)
+                        or (ci and ci.hour >= 18)
+                    )
+                    day_meal_count = (1 if has_morning else 0) + (1 if has_late else 0)
+                else:
+                    day_meal_count = int(shift.meal_count or 1)  # số bữa mặc định của ca
+
                 if meal_rate_val <= 0:
                     continue
 
