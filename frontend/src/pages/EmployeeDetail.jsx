@@ -32,9 +32,23 @@ const STATUS_LABELS = {
 export default function EmployeeDetail() {
   const { user } = useAuthStore();
   const isAdmin = user?.role === 'admin';
+  const isWorker = user?.role === 'worker';
   const { id } = useParams();
   const navigate = useNavigate();
   const employeeId = Number(id);
+
+  if (isWorker && employeeId !== user?.employee_id) {
+    return (
+      <div style={{ padding: '24px 30px' }}>
+        <Alert
+          message="Không có quyền truy cập"
+          description="Bạn không có quyền xem chi tiết thông tin của nhân viên khác."
+          type="error"
+          showIcon
+        />
+      </div>
+    );
+  }
 
   const [monthKey, setMonthKey] = useState(dayjs().format('YYYY-MM'));
   const [nightAllowanceRate, setNightAllowanceRate] = useState(0);

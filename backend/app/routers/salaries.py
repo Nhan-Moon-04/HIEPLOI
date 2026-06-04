@@ -658,6 +658,11 @@ async def get_loan_installments(
     current_user: AppUser = Depends(get_current_user),
 ):
     """Danh sách kỳ trả của 1 khoản ứng"""
+    if current_user.role == UserRole.WORKER:
+        loan = await db.get(AdvanceLoan, loan_id)
+        if not loan or loan.employee_id != current_user.employee_id:
+            raise HTTPException(status_code=403, detail="Không có quyền xem chi tiết khoản ứng của nhân viên khác")
+
     result = await db.execute(
         select(AdvancePayment)
         .where(AdvancePayment.loan_id == loan_id)

@@ -46,6 +46,7 @@ export default function Attendance() {
   const { data: departments = [] } = useQuery({
     queryKey: ['departments'],
     queryFn: () => api.get('/employees/departments').then((r) => r.data),
+    enabled: !isWorker,
   });
 
   const s = att || { rows: [], days_in_month: 30 };

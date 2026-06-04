@@ -18,7 +18,7 @@ router = APIRouter(prefix="/departments", tags=["Departments - Bộ Phận"])
 @router.get("", response_model=List[DepartmentResponse])
 async def list_departments(
     db: AsyncSession = Depends(get_db),
-    current_user: AppUser = Depends(get_current_user),
+    current_user: AppUser = Depends(require_roles(UserRole.ADMIN, UserRole.ACCOUNTANT)),
 ):
     """Lấy danh sách bộ phận kèm số lượng nhân viên thực tế"""
     query = select(
@@ -49,7 +49,7 @@ async def list_departments(
 async def get_department(
     id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: AppUser = Depends(get_current_user),
+    current_user: AppUser = Depends(require_roles(UserRole.ADMIN, UserRole.ACCOUNTANT)),
 ):
     """Lấy chi tiết bộ phận kèm danh sách nhân viên thuộc bộ phận đó"""
     result = await db.execute(select(Department).where(Department.id == id))

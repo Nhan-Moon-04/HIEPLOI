@@ -9,6 +9,7 @@ import {
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import dayjs from 'dayjs';
 import api from '../api/client';
+import useAuthStore from '../stores/authStore';
 
 const { Option } = Select;
 
@@ -229,6 +230,8 @@ function CreateLoanModal({ employees, salariesData, open, onClose, onCreated }) 
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function Advances() {
+  const { user } = useAuthStore();
+  const isWorker = user?.role === 'worker';
   const qc = useQueryClient();
   const [filterEmp, setFilterEmp] = useState(null);
   const [filterStatus, setFilterStatus] = useState('active');
@@ -239,18 +242,20 @@ export default function Advances() {
   const { data: employees = [] } = useQuery({
     queryKey: ['employees-list'],
     queryFn: () => api.get('/employees', { params: { page_size: 500 } }).then((r) => r.data?.items || r.data || []),
+    enabled: !isWorker,
   });
 
   const { data: salariesData } = useQuery({
     queryKey: ['payroll-sal', monthKey],
     queryFn: () => api.get('/salaries/base', { params: { month_key: monthKey } }).then((r) => r.data),
+    enabled: !isWorker,
   });
 
   const { data: loans = [], isLoading } = useQuery({
-    queryKey: ['advance-loans', filterEmp, filterStatus],
+    queryKey: ['advance-loans', isWorker ? user?.employee_id : filterEmp, filterStatus],
     queryFn: () => api.get('/salaries/loans', {
       params: {
-        ...(filterEmp ? { employee_id: filterEmp } : {}),
+        ...(isWorker ? { employee_id: user?.employee_id } : filterEmp ? { employee_id: filterEmp } : {}),
         ...(filterStatus ? { status: filterStatus } : {}),
       },
     }).then((r) => r.data),
@@ -350,7 +355,7 @@ export default function Advances() {
           <Tooltip title="Xem kế hoạch trả">
             <Button size="small" icon={<InfoCircleOutlined />} onClick={() => setDetailLoanId(r.id)} />
           </Tooltip>
-          {r.status === 'active' && (
+          {!isWorker && r.status === 'active' && (
             <Popconfirm
               title="Hủy các kỳ trả chưa đến hạn?"
               okText="Hủy khoản ứng"
@@ -376,10 +381,12 @@ export default function Advances() {
           <div style={{ fontSize: 20, fontWeight: 700, color: '#111827' }}>Quản lý Tạm ứng</div>
           <div style={{ fontSize: 13, color: '#6b7280' }}>Theo dõi khoản ứng và kế hoạch trả lương</div>
         </div>
-        <Button type="primary" icon={<PlusOutlined />} style={{ background: '#276EF1' }}
-          onClick={() => setCreateOpen(true)}>
-          Tạo tạm ứng
-        </Button>
+        {!isWorker && (
+          <Button type="primary" icon={<PlusOutlined />} style={{ background: '#276EF1' }}
+            onClick={() => setCreateOpen(true)}>
+            Tạo tạm ứng
+          </Button>
+        )}
       </div>
 
       {/* Thống kê */}
@@ -399,16 +406,18 @@ export default function Advances() {
 
       {/* Filter */}
       <div style={{ display: 'flex', gap: 10, marginBottom: 14 }}>
-        <Select
-          allowClear
-          placeholder="Lọc theo nhân viên"
-          style={{ width: 240 }}
-          options={empOptions}
-          value={filterEmp}
-          onChange={setFilterEmp}
-          showSearch
-          optionFilterProp="label"
-        />
+        {!isWorker && (
+          <Select
+            allowClear
+            placeholder="Lọc theo nhân viên"
+            style={{ width: 240 }}
+            options={empOptions}
+            value={filterEmp}
+            onChange={setFilterEmp}
+            showSearch
+            optionFilterProp="label"
+          />
+        )}
         <Select
           value={filterStatus}
           onChange={setFilterStatus}

@@ -97,7 +97,7 @@ async def list_employees(
 @router.get("/departments", response_model=List[str])
 async def list_departments(
     db: AsyncSession = Depends(get_db),
-    current_user: AppUser = Depends(get_current_user),
+    current_user: AppUser = Depends(require_roles(UserRole.ADMIN, UserRole.ACCOUNTANT)),
 ):
     """Danh sách bộ phận"""
     # 1. Ưu tiên lấy từ bảng departments định nghĩa mới

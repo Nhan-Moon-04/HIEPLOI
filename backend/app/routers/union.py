@@ -176,7 +176,7 @@ async def get_transactions(
     transaction_type: Optional[str] = Query(None),
     quarter: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
-    current_user: AppUser = Depends(get_current_user),
+    current_user: AppUser = Depends(require_roles(UserRole.ADMIN, UserRole.ACCOUNTANT)),
 ):
     q = select(UnionTransaction).where(UnionTransaction.year == year)
     if transaction_type:
@@ -291,7 +291,7 @@ async def recalc_balances(db: AsyncSession, year: int, transaction_type: str):
 async def get_summary(
     year: int = Query(2025),
     db: AsyncSession = Depends(get_db),
-    current_user: AppUser = Depends(get_current_user),
+    current_user: AppUser = Depends(require_roles(UserRole.ADMIN, UserRole.ACCOUNTANT)),
 ):
     # Bank totals
     bank_q = await db.execute(
@@ -355,7 +355,7 @@ async def get_summary(
 async def get_events(
     year: int = Query(2025),
     db: AsyncSession = Depends(get_db),
-    current_user: AppUser = Depends(get_current_user),
+    current_user: AppUser = Depends(require_roles(UserRole.ADMIN, UserRole.ACCOUNTANT)),
 ):
     result = await db.execute(
         select(UnionEvent).where(UnionEvent.year == year).order_by(UnionEvent.event_date)
@@ -437,7 +437,7 @@ async def delete_event(
 async def get_event_members(
     eid: int,
     db: AsyncSession = Depends(get_db),
-    current_user: AppUser = Depends(get_current_user),
+    current_user: AppUser = Depends(require_roles(UserRole.ADMIN, UserRole.ACCOUNTANT)),
 ):
     result = await db.execute(
         select(UnionEventMember).where(UnionEventMember.event_id == eid).order_by(UnionEventMember.id)
@@ -780,7 +780,7 @@ class UnionMemberCreate(BaseModel):
 async def get_union_members(
     is_active: Optional[bool] = Query(None),
     db: AsyncSession = Depends(get_db),
-    current_user: AppUser = Depends(get_current_user),
+    current_user: AppUser = Depends(require_roles(UserRole.ADMIN, UserRole.ACCOUNTANT)),
 ):
     q = select(UnionMember)
     if is_active is not None:

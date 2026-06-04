@@ -9,7 +9,7 @@ from app.models.user import AppUser, UserRole
 from app.models.schedule import WorkSchedule
 from app.models.shift import ShiftTemplate
 from app.models.holiday import CompanyHoliday
-from app.middleware.auth import get_current_user
+from app.middleware.auth import get_current_user, require_roles
 
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 
@@ -18,7 +18,7 @@ router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 async def get_dashboard_stats(
     month_key: str = Query(..., description="Tháng (YYYY-MM)", example="2026-05"),
     db: AsyncSession = Depends(get_db),
-    current_user: AppUser = Depends(get_current_user),
+    current_user: AppUser = Depends(require_roles(UserRole.ADMIN, UserRole.ACCOUNTANT)),
 ):
     """Lấy thống kê dashboard theo tháng (admin view)"""
     # Total active employees

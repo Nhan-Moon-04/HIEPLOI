@@ -319,11 +319,13 @@ export default function PayrollTable() {
   const { data: empList = [] } = useQuery({
     queryKey: ['employees-list'],
     queryFn: () => api.get('/employees', { params: { page_size: 500 } }).then((r) => r.data?.items || r.data || []),
+    enabled: !isWorker,
   });
 
   const { data: departmentsList = [] } = useQuery({
     queryKey: ['departments_list'],
     queryFn: () => api.get('/departments').then((r) => r.data),
+    enabled: !isWorker,
   });
   const departments = departmentsList.map((d) => d.name);
 

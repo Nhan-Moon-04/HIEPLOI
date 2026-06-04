@@ -24,6 +24,7 @@ export default function LeaveBalance() {
   const { data: departmentsList = [] } = useQuery({
     queryKey: ['departments_list'],
     queryFn: () => api.get('/departments').then(r => r.data),
+    enabled: !isWorker,
   });
   const departments = departmentsList.map(d => d.name);
 

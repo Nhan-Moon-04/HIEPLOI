@@ -13,9 +13,10 @@ import {
   MinusCircleOutlined,
 } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
-import { Spin, Button } from 'antd';
+import { Spin, Button, Alert } from 'antd';
 import dayjs from 'dayjs';
 import api from '../api/client';
+import useAuthStore from '../stores/authStore';
 
 const DOW_VN = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
 const SUMMARY_KEYS = [
@@ -91,6 +92,21 @@ export default function MealAllowanceDetail() {
   const { id } = useParams();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const { user } = useAuthStore();
+  const isWorker = user?.role === 'worker';
+
+  if (isWorker && Number(id) !== user?.employee_id) {
+    return (
+      <div style={{ padding: '24px 30px' }}>
+        <Alert
+          message="Không có quyền truy cập"
+          description="Bạn không có quyền xem chi tiết tiền ăn của nhân viên khác."
+          type="error"
+          showIcon
+        />
+      </div>
+    );
+  }
 
   const monthKey = searchParams.get('month_key');
   const startDate = searchParams.get('start_date');
