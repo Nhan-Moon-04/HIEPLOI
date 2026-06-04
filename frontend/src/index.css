@@ -2592,13 +2592,384 @@ td:hover .ot-dot {
 .ot-td--total  { font-size: 13px; font-weight: 800; }
 
 /* OT total footer row */
-.ot-total-row > td { background: #f8fafc !important; border-top: 2px solid #e8ecf1; }
-.dark .ot-total-row > td { background: #1e2538 !important; border-color: rgba(255,255,255,0.1); }
-.ot-total-label {
-  font-weight: 700; font-size: 12px; color: #374151;
-  position: sticky; left: 0; z-index: 2; background: #f8fafc !important;
+.ot-total-row > td {
+  background: #f1f5f9 !important;
+  border-top: 2.5px double #cbd5e1;
+  border-bottom: 2.5px double #cbd5e1;
 }
-.dark .ot-total-label { color: #94a3b8; background: #1e2538 !important; }
+.dark .ot-total-row > td {
+  background: #1e293b !important;
+  border-color: rgba(255,255,255,0.15);
+}
+.ot-total-label {
+  font-weight: 700;
+  font-size: 12.5px;
+  color: #0f172a;
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: #f1f5f9 !important;
+}
+.dark .ot-total-label {
+  color: #cbd5e1;
+  background: #1e293b !important;
+}
+
+/* ═══ ACTUAL OT MODAL (aot-*) ═══ */
+.aot-modal .ant-modal-content {
+  border-radius: 16px !important;
+  overflow: hidden;
+  padding: 0 !important;
+}
+
+.aot-modal .ant-modal-close {
+  top: 18px;
+  right: 18px;
+  color: #6b7280;
+}
+
+.aot-modal .ant-modal-body {
+  padding: 0 !important;
+}
+
+/* Header */
+.aot-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 24px 16px;
+  border-bottom: 1px solid #f0f2f5;
+  background: linear-gradient(135deg, #f8fffe 0%, #f0fdf4 100%);
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.dark .aot-header {
+  background: linear-gradient(135deg, #1a2e28 0%, #1a2538 100%);
+  border-color: rgba(255,255,255,0.06);
+}
+
+.aot-header-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.aot-header-icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #10b981, #059669);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  flex-shrink: 0;
+}
+
+.aot-title {
+  font-size: 17px;
+  font-weight: 700;
+  color: #1a2233;
+  margin: 0;
+  letter-spacing: -0.2px;
+}
+
+.dark .aot-title { color: #e2e8f0; }
+
+.aot-subtitle {
+  font-size: 12px;
+  color: #6b7280;
+  margin: 2px 0 0;
+}
+
+.dark .aot-subtitle { color: #94a3b8; }
+
+.aot-header-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.aot-summary-chips {
+  display: flex;
+  gap: 8px;
+}
+
+.aot-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.aot-chip--blue {
+  background: #eef2ff;
+  color: #4f46e5;
+}
+
+.aot-chip--green {
+  background: #ecfdf5;
+  color: #059669;
+}
+
+.dark .aot-chip--blue { background: rgba(79,70,229,0.15); }
+.dark .aot-chip--green { background: rgba(5,150,105,0.15); }
+
+/* Body */
+.aot-body {
+  max-height: calc(100vh - 220px);
+  overflow: auto;
+}
+
+/* Empty state */
+.aot-empty {
+  text-align: center;
+  padding: 60px 20px;
+  color: #6b7280;
+  font-size: 14px;
+}
+
+.aot-empty-sub {
+  font-size: 12px;
+  color: #9ca3af;
+  margin-top: 6px;
+}
+
+/* Table */
+.aot-table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.aot-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+  min-width: 900px;
+}
+
+.aot-th {
+  padding: 10px 12px;
+  text-align: left;
+  font-weight: 700;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: #6b7280;
+  background: #f8f9fb;
+  border-bottom: 2px solid #e8ecf1;
+  white-space: nowrap;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.dark .aot-th {
+  background: #1a1f2e;
+  color: #94a3b8;
+  border-color: rgba(255,255,255,0.08);
+}
+
+.aot-th--stt { width: 44px; text-align: center; }
+.aot-th--code { width: 72px; }
+.aot-th--name { width: 160px; }
+.aot-th--dow { width: 40px; text-align: center; }
+.aot-th--time { width: 65px; text-align: center; }
+.aot-th--ot { width: 80px; text-align: center; }
+.aot-th--hours { width: 70px; text-align: center; }
+.aot-th--total { width: 80px; text-align: center; }
+
+.aot-td {
+  padding: 8px 12px;
+  border-bottom: 1px solid #f1f5f9;
+  vertical-align: middle;
+  color: #374151;
+}
+
+.dark .aot-td {
+  border-color: rgba(255,255,255,0.04);
+  color: #cbd5e1;
+}
+
+.aot-td--stt { text-align: center; color: #9ca3af; font-size: 11px; }
+.aot-td--code { font-weight: 600; color: #276EF1; font-family: 'SF Mono', monospace; font-size: 12px; }
+.aot-td--name { font-weight: 500; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.aot-td--dow { text-align: center; font-size: 11px; color: #9ca3af; }
+.aot-td--time { text-align: center; font-family: 'SF Mono', monospace; font-size: 12px; }
+.aot-td--checkout { color: #dc2626; font-weight: 600; }
+.aot-td--shift-time { font-size: 11.5px; color: #6b7280; white-space: nowrap; }
+.aot-td--ot { text-align: center; }
+.aot-td--hours { text-align: center; color: #374151; }
+.aot-td--total { text-align: center; font-weight: 700; color: #059669; }
+
+.aot-row--alt > td { background: #fafbfc; }
+.dark .aot-row--alt > td { background: rgba(255,255,255,0.02); }
+
+/* Shift badge */
+.aot-shift-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  padding: 2px 8px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 700;
+  background: #eef2ff;
+  color: #4f46e5;
+}
+
+.dark .aot-shift-badge {
+  background: rgba(79,70,229,0.15);
+}
+
+/* OT badge */
+.aot-ot-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 48px;
+  padding: 3px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  background: linear-gradient(135deg, #fef3c7, #fde68a);
+  color: #92400e;
+  letter-spacing: -0.2px;
+}
+
+.dark .aot-ot-badge {
+  background: linear-gradient(135deg, rgba(251,191,36,0.2), rgba(245,158,11,0.15));
+  color: #fbbf24;
+}
+
+.aot-ot-badge--total {
+  background: linear-gradient(135deg, #dbeafe, #bfdbfe);
+  color: #1e40af;
+  font-size: 12.5px;
+}
+
+.dark .aot-ot-badge--total {
+  background: rgba(59,130,246,0.15);
+  color: #60a5fa;
+}
+
+.aot-ot-badge--grand {
+  background: linear-gradient(135deg, #10b981, #059669);
+  color: #fff;
+  font-size: 13px;
+  padding: 4px 14px;
+}
+
+/* Subtotal row (Yellow/Amber highlight) */
+.aot-subtotal-row > td {
+  background: #fef9c3 !important;
+  border-bottom: 2px solid #fef08a;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #854d0e;
+}
+
+.dark .aot-subtotal-row > td {
+  background: rgba(245, 158, 11, 0.15) !important;
+  border-color: rgba(245, 158, 11, 0.25);
+  color: #fbbf24;
+}
+
+.aot-subtotal-row > .aot-td--hours {
+  color: #854d0e !important;
+}
+.dark .aot-subtotal-row > .aot-td--hours {
+  color: #fbbf24 !important;
+}
+
+.aot-subtotal-row > .aot-td--total {
+  color: #ca8a04 !important;
+}
+.dark .aot-subtotal-row > .aot-td--total {
+  color: #facc15 !important;
+}
+
+.aot-subtotal-count {
+  font-weight: 500;
+  color: #854d0e;
+  opacity: 0.8;
+  font-size: 11px;
+}
+
+/* Sunday rows in Actual OT (Rose/Pink highlight) */
+.aot-row--sunday > td {
+  background: #fff1f2 !important;
+  color: #9f1239;
+}
+.dark .aot-row--sunday > td {
+  background: rgba(244, 63, 94, 0.06) !important;
+  color: #fda4af;
+}
+.aot-row--sunday .aot-shift-badge {
+  background: #ffe4e6;
+  color: #e11d48;
+}
+.dark .aot-row--sunday .aot-shift-badge {
+  background: rgba(225, 29, 72, 0.15);
+  color: #fb7185;
+}
+.aot-row--sunday .aot-td--checkout {
+  color: #e11d48;
+}
+.aot-row--sunday .aot-td--total {
+  color: #be123c;
+}
+.dark .aot-row--sunday .aot-td--total {
+  color: #fb7185;
+}
+
+/* Grand total row */
+.aot-grand-total-row > td {
+  background: #ecfdf5 !important;
+  border-top: 3px solid #10b981;
+  border-bottom: none;
+  font-size: 13px;
+  padding: 12px;
+}
+
+.dark .aot-grand-total-row > td {
+  background: rgba(16,185,129,0.1) !important;
+  border-color: #10b981;
+}
+
+/* Footer */
+.aot-footer {
+  padding: 12px 24px;
+  border-top: 1px solid #f0f2f5;
+  background: #f8f9fb;
+}
+
+.dark .aot-footer {
+  background: #151a28;
+  border-color: rgba(255,255,255,0.06);
+}
+
+.aot-footer-rules {
+  font-size: 11.5px;
+  color: #6b7280;
+  line-height: 1.6;
+}
+
+.dark .aot-footer-rules { color: #94a3b8; }
+
+.aot-footer-rules strong {
+  color: #374151;
+}
+
+.dark .aot-footer-rules strong { color: #cbd5e1; }
+
 
 /* ===== USER MANAGEMENT PAGE (um-*) ===== */
 .um-table-card {
