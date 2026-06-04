@@ -1,10 +1,13 @@
 from typing import List, Optional, Literal
 from datetime import date, datetime, time, timedelta
 import calendar
+import re
 from decimal import Decimal
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+from io import BytesIO
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, delete
+from sqlalchemy import select, and_, or_, delete
 from app.database import get_db
 from app.models.attendance import AttendanceDaily, AttendanceDetail, AttendanceLog
 from app.models.employee import Employee
@@ -24,8 +27,40 @@ from app.services.nu_shift import (
 )
 from app.utils.audit_helper import log_audit
 from pydantic import BaseModel
-from app.utils.lock_helper import check_date_locked
+from app.utils.lock_helper import check_date_locked, check_month_locked
 from app.models.salary import MonthlyWorkdayConfig
+
+
+def parse_input_time(time_str: str) -> Optional[time]:
+    if not time_str:
+        return None
+    time_str = str(time_str).strip().lower()
+    if not time_str:
+        return None
+    
+    # Try HH:MM:SS or HH:MM
+    m = re.match(r'^(\d{1,2}):(\d{2})(?::(\d{2}))?$', time_str)
+    if m:
+        h, m_val = int(m.group(1)), int(m.group(2))
+        if 0 <= h < 24 and 0 <= m_val < 60:
+            return time(h, m_val)
+            
+    # Try HHhMM or HHh
+    m = re.match(r'^(\d{1,2})h(\d{2})?$', time_str)
+    if m:
+        h = int(m.group(1))
+        m_val = int(m.group(2)) if m.group(2) else 0
+        if 0 <= h < 24 and 0 <= m_val < 60:
+            return time(h, m_val)
+            
+    # Try just an integer HH
+    if time_str.isdigit():
+        h = int(time_str)
+        if 0 <= h < 24:
+            return time(h, 0)
+            
+    return None
+
 
 router = APIRouter(prefix="/attendance", tags=["Attendance - Cham Cong"])
 
@@ -973,3 +1008,633 @@ async def manual_attendance_action(
         return {"message": f"Da doi sang ca {new_shift.code}"}
 
     raise HTTPException(status_code=400, detail="Hanh dong khong hop le")
+
+
+# Models for Forgotten Scans
+class ForgottenScanFixItem(BaseModel):
+    employee_id: int
+    work_date: date
+    time_value: str
+
+
+class ForgottenScanFixRequest(BaseModel):
+    items: List[ForgottenScanFixItem]
+
+
+@router.get("/forgot-scans")
+async def get_forgot_scans(
+    month_key: str = Query(..., description="YYYY-MM"),
+    db: AsyncSession = Depends(get_db),
+    current_user: AppUser = Depends(require_roles(UserRole.ADMIN, UserRole.ACCOUNTANT)),
+):
+    """Lấy danh sách các trường hợp quên quẹt thẻ trong tháng"""
+    try:
+        year, month = map(int, month_key.split("-"))
+    except ValueError:
+        raise HTTPException(400, "month_key phai la YYYY-MM")
+
+    month_days = calendar.monthrange(year, month)[1]
+    month_start = date(year, month, 1)
+    month_end = date(year, month, month_days)
+
+    # 1. Load shifts
+    shift_result = await db.execute(select(ShiftTemplate))
+    shifts_by_id = {}
+    shifts_by_code = {}
+    for s in shift_result.scalars().all():
+        shifts_by_id[s.id] = s
+        shifts_by_code[s.code] = s
+
+    # 2. Load employees active in the month
+    emp_q = select(Employee).where(
+        and_(
+            Employee.is_active == True,
+            or_(Employee.join_date.is_(None), Employee.join_date <= month_end),
+            or_(Employee.leave_date.is_(None), Employee.leave_date >= month_start)
+        )
+    )
+    emp_result = await db.execute(emp_q)
+    employees = list(emp_result.scalars().all())
+    emp_map = {e.id: e for e in employees}
+    emp_id_list = [e.id for e in employees]
+
+    if not emp_id_list:
+        return []
+
+    # 3. Load schedule overrides
+    schedule_q = select(WorkSchedule).where(
+        and_(
+            WorkSchedule.work_date >= month_start,
+            WorkSchedule.work_date <= month_end,
+            WorkSchedule.employee_id.in_(emp_id_list)
+        )
+    )
+    schedule_result = await db.execute(schedule_q)
+    override_map = {}
+    for ws in schedule_result.scalars().all():
+        override_map[(ws.employee_id, ws.work_date)] = ws.shift_id
+
+    # 4. Load attendance records with missing scans
+    att_q = select(AttendanceDaily).where(
+        and_(
+            AttendanceDaily.work_date >= month_start,
+            AttendanceDaily.work_date <= month_end,
+            AttendanceDaily.employee_id.in_(emp_id_list),
+            or_(
+                AttendanceDaily.first_check_in.is_(None),
+                AttendanceDaily.last_check_out.is_(None)
+            )
+        )
+    )
+    att_result = await db.execute(att_q)
+    forgot_records_raw = att_result.scalars().all()
+
+    # Filter out records where both are null or both are present (forgot scan is exactly 1 missing)
+    forgot_records = []
+    for a in forgot_records_raw:
+        if a.first_check_in is None and a.last_check_out is None:
+            continue
+        if a.first_check_in is not None and a.last_check_out is not None:
+            continue
+        forgot_records.append(a)
+
+    # 5. Department order
+    from app.models.department import Department
+    dept_order_q = await db.execute(select(Department.name, Department.sort_order))
+    dept_order_map = {row[0]: row[1] for row in dept_order_q.all() if row[0]}
+
+    def get_sort_key(item):
+        emp = emp_map.get(item.employee_id)
+        d_name = emp.department if emp else ""
+        d_order = dept_order_map.get(d_name, 9999) if d_name else 9999
+        code_num = 999999
+        if emp:
+            try:
+                code_num = int(emp.employee_code)
+            except ValueError:
+                pass
+        return (d_order, d_name or "", code_num, item.work_date)
+
+    forgot_records.sort(key=get_sort_key)
+
+    # 6. Format response list
+    results = []
+    for a in forgot_records:
+        emp = emp_map.get(a.employee_id)
+        if not emp:
+            continue
+
+        # Shift resolution
+        override_id = override_map.get((a.employee_id, a.work_date))
+        if override_id:
+            shift = shifts_by_id.get(override_id)
+        else:
+            shift = shifts_by_code.get(emp.default_shift_code)
+
+        dow = DOW_VN[a.work_date.weekday()]
+        shift_start_end = f"{str(shift.start_time)[:5]} - {str(shift.end_time)[:5]}" if shift and shift.start_time and shift.end_time else "Chưa xếp ca"
+
+        ci_str = a.first_check_in.strftime("%H:%M") if a.first_check_in else None
+        co_str = a.last_check_out.strftime("%H:%M") if a.last_check_out else None
+
+        notes = "Quên check in" if not ci_str else "Quên check out"
+
+        results.append({
+            "employee_id": a.employee_id,
+            "employee_code": emp.employee_code,
+            "full_name": emp.full_name,
+            "department": emp.department,
+            "work_date": str(a.work_date),
+            "dow": dow,
+            "shift_code": shift.code if shift else None,
+            "shift_start_end": shift_start_end,
+            "first_check_in": ci_str,
+            "last_check_out": co_str,
+            "actual_hours": float(a.total_hours) if a.total_hours is not None else 0.0,
+            "notes": notes,
+        })
+
+    return results
+
+
+@router.post("/forgot-scans/quick-fix")
+async def quick_fix_forgot_scans(
+    request: ForgottenScanFixRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: AppUser = Depends(require_roles(UserRole.ADMIN, UserRole.ACCOUNTANT)),
+):
+    """Cập nhật nhanh các lỗi quên quẹt thẻ từ giao diện"""
+    # Load shift OFF
+    off_shift = (await db.execute(select(ShiftTemplate).where(ShiftTemplate.code == "OFF"))).scalar_one_or_none()
+    if not off_shift:
+        raise HTTPException(400, "Mã ca OFF không tồn tại trong hệ thống")
+
+    shift_result = await db.execute(select(ShiftTemplate))
+    shifts_by_code = {s.code: s for s in shift_result.scalars().all()}
+    shifts_by_id = {s.id: s for s in shift_result.scalars().all()}
+
+    updated_count = 0
+
+    for item in request.items:
+        work_date = item.work_date
+        employee_id = item.employee_id
+        time_val = item.time_value.strip()
+
+        if not time_val:
+            continue
+
+        # Check date lock
+        await check_date_locked(db, work_date)
+
+        emp = await db.get(Employee, employee_id)
+        if not emp:
+            continue
+
+        if time_val.upper() == "X":
+            # 1. Đổi ca làm việc sang OFF
+            ws_res = await db.execute(select(WorkSchedule).where(and_(
+                WorkSchedule.employee_id == employee_id,
+                WorkSchedule.work_date == work_date
+            )))
+            ws = ws_res.scalar_one_or_none()
+            ws_before = {c.name: getattr(ws, c.name) for c in ws.__table__.columns} if ws else None
+            if ws:
+                ws.shift_id = off_shift.id
+                ws.notes = "Công ty cho nghỉ (Cập nhật hàng loạt)"
+            else:
+                ws = WorkSchedule(
+                    employee_id=employee_id,
+                    work_date=work_date,
+                    month_key=work_date.strftime("%Y-%m"),
+                    shift_id=off_shift.id,
+                    notes="Công ty cho nghỉ (Cập nhật hàng loạt)"
+                )
+                db.add(ws)
+
+            await log_audit(
+                db, "work_schedules", f"{employee_id}:{work_date}",
+                "UPDATE" if ws_before else "CREATE", current_user.username,
+                ws_before, {c.name: getattr(ws, c.name) for c in ws.__table__.columns},
+                notes="Company off override via quick-fix"
+            )
+
+            # 2. Xóa AttendanceDaily
+            await db.execute(delete(AttendanceDaily).where(and_(
+                AttendanceDaily.employee_id == employee_id,
+                AttendanceDaily.work_date == work_date
+            )))
+            await log_audit(
+                db, "attendance_daily", f"{employee_id}:{work_date}",
+                "DELETE", current_user.username,
+                None, None,
+                notes="Deleted attendance record due to Company Off override"
+            )
+            updated_count += 1
+
+        else:
+            parsed_time = parse_input_time(time_val)
+            if not parsed_time:
+                raise HTTPException(400, f"Định dạng thời gian không hợp lệ: {time_val}")
+
+            # Find existing AttendanceDaily record
+            att_res = await db.execute(select(AttendanceDaily).where(and_(
+                AttendanceDaily.employee_id == employee_id,
+                AttendanceDaily.work_date == work_date
+            )))
+            att = att_res.scalar_one_or_none()
+            att_before = {c.name: getattr(att, c.name) for c in att.__table__.columns} if att else None
+
+            # Resolve active shift template
+            ws_res = await db.execute(select(WorkSchedule).where(and_(
+                WorkSchedule.employee_id == employee_id,
+                WorkSchedule.work_date == work_date
+            )))
+            ws = ws_res.scalar_one_or_none()
+
+            shift = None
+            if ws:
+                shift = shifts_by_id.get(ws.shift_id)
+            if not shift and emp.default_shift_code:
+                shift = shifts_by_code.get(emp.default_shift_code)
+            if not shift:
+                shift = shifts_by_code.get("D")
+
+            break_mins = int(shift.break_minutes or 60) if shift else 60
+            is_night_shift = bool(shift.is_night_shift) if shift else False
+
+            if att:
+                # Update based on which punch is missing
+                if att.first_check_in is None:
+                    att.first_check_in = datetime.combine(work_date, parsed_time)
+                elif att.last_check_out is None:
+                    # Night shift checkout wrapping
+                    if is_night_shift and att.first_check_in and parsed_time < att.first_check_in.time():
+                        att.last_check_out = datetime.combine(work_date + timedelta(days=1), parsed_time)
+                    else:
+                        att.last_check_out = datetime.combine(work_date, parsed_time)
+                else:
+                    # Fallback (both present, shouldn't be here)
+                    att.last_check_out = datetime.combine(work_date, parsed_time)
+
+                if att.first_check_in and att.last_check_out:
+                    att.total_hours = round((att.last_check_out - att.first_check_in).total_seconds() / 3600.0, 2)
+                else:
+                    att.total_hours = 0.0
+
+                att.import_batch = "manual_fix"
+            else:
+                # Fallback create
+                new_in = datetime.combine(work_date, parsed_time)
+                att = AttendanceDaily(
+                    employee_id=employee_id,
+                    work_date=work_date,
+                    first_check_in=new_in,
+                    last_check_out=None,
+                    total_hours=0.0,
+                    import_batch="manual_fix"
+                )
+                db.add(att)
+
+            await log_audit(
+                db, "attendance_daily", f"{employee_id}:{work_date}",
+                "UPDATE" if att_before else "CREATE", current_user.username,
+                att_before, {c.name: getattr(att, c.name) for c in att.__table__.columns},
+                notes="Quick fix forgotten scan"
+            )
+            updated_count += 1
+
+    await db.commit()
+    return {"message": f"Đã cập nhật thành công {updated_count} dòng"}
+
+
+@router.get("/forgot-scans/export")
+async def export_forgot_scans(
+    month_key: str = Query(..., description="YYYY-MM"),
+    db: AsyncSession = Depends(get_db),
+    current_user: AppUser = Depends(require_roles(UserRole.ADMIN, UserRole.ACCOUNTANT)),
+):
+    """Xuất file Excel mẫu các lỗi quên quẹt thẻ trong tháng"""
+    import openpyxl
+    from openpyxl.styles import Font, Alignment, PatternFill, Side, Border
+
+    # 1. Fetch forgotten scans
+    scans = await get_forgot_scans(month_key=month_key, db=db, current_user=current_user)
+
+    # 2. Create workbook
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Quen quet the"
+
+    # Styling helpers
+    thin_border = Border(
+        left=Side(style='thin', color='000000'),
+        right=Side(style='thin', color='000000'),
+        top=Side(style='thin', color='000000'),
+        bottom=Side(style='thin', color='000000')
+    )
+    header_font = Font(name="Times New Roman", bold=True, size=11)
+    title_font = Font(name="Times New Roman", bold=True, size=14)
+    normal_font = Font(name="Times New Roman", size=11)
+    
+    center_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    left_align = Alignment(horizontal="left", vertical="center")
+
+    header_fill = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
+
+    # Title lines
+    ws.merge_cells("A1:L1")
+    ws["A1"] = "CÔNG TY TNHH HIỆP LỢI"
+    ws["A1"].font = Font(name="Times New Roman", bold=True, size=12)
+    ws["A1"].alignment = left_align
+
+    ws.merge_cells("A2:L2")
+    ws["A2"] = "MST: 3701609885"
+    ws["A2"].font = Font(name="Times New Roman", size=11)
+    ws["A2"].alignment = left_align
+
+    ws.merge_cells("A3:L3")
+    ws["A3"] = f"DANH SÁCH QUÊN QUẸT THẺ - THÁNG {month_key}"
+    ws["A3"].font = title_font
+    ws["A3"].alignment = center_align
+
+    # Header Row
+    headers = [
+        "STT", "Mã nhân viên", "Họ tên", "Ngày", "Mã ca", 
+        "Thứ", "Thời gian quy định", "Thời gian vào", "Thời gian ra", 
+        "Giờ thực", "Ghi chú", "Thêm thời gian"
+    ]
+    
+    for col_idx, h in enumerate(headers, 1):
+        cell = ws.cell(row=5, column=col_idx)
+        cell.value = h
+        cell.font = header_font
+        cell.alignment = center_align
+        cell.border = thin_border
+        cell.fill = header_fill
+
+    # Color fills for Note column
+    red_fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
+    red_font = Font(name="Times New Roman", size=11, color="9C0006")
+    yellow_fill = PatternFill(start_color="FFEB9C", end_color="FFEB9C", fill_type="solid")
+    yellow_font = Font(name="Times New Roman", size=11, color="9C6500")
+
+    # Populate data
+    current_row = 6
+    for idx, scan in enumerate(scans, 1):
+        ws.cell(row=current_row, column=1, value=idx).alignment = center_align
+        ws.cell(row=current_row, column=2, value=scan["employee_code"]).alignment = center_align
+        ws.cell(row=current_row, column=3, value=scan["full_name"]).alignment = left_align
+        ws.cell(row=current_row, column=4, value=scan["work_date"]).alignment = center_align
+        ws.cell(row=current_row, column=5, value=scan["shift_code"]).alignment = center_align
+        ws.cell(row=current_row, column=6, value=scan["dow"]).alignment = center_align
+        ws.cell(row=current_row, column=7, value=scan["shift_start_end"]).alignment = center_align
+        ws.cell(row=current_row, column=8, value=scan["first_check_in"] or "").alignment = center_align
+        ws.cell(row=current_row, column=9, value=scan["last_check_out"] or "").alignment = center_align
+        ws.cell(row=current_row, column=10, value=scan["actual_hours"]).alignment = center_align
+        
+        # Note styling
+        note_cell = ws.cell(row=current_row, column=11, value=scan["notes"])
+        note_cell.alignment = center_align
+        if scan["notes"] == "Quên check in":
+            note_cell.fill = red_fill
+            note_cell.font = red_font
+        else:
+            note_cell.fill = yellow_fill
+            note_cell.font = yellow_font
+
+        # Blank input column
+        ws.cell(row=current_row, column=12, value="").alignment = center_align
+
+        # Apply borders & font to all columns in the row
+        for c in range(1, 13):
+            cell = ws.cell(row=current_row, column=c)
+            cell.border = thin_border
+            if c != 11:  # Note has custom font
+                cell.font = normal_font
+
+        current_row += 1
+
+    # Widths
+    col_widths = {
+        "A": 6, "B": 15, "C": 25, "D": 15, "E": 10, "F": 8,
+        "G": 22, "H": 18, "I": 18, "J": 12, "K": 18, "L": 20
+    }
+    for col, w in col_widths.items():
+        ws.column_dimensions[col].width = w
+
+    # Save to stream
+    stream = BytesIO()
+    wb.save(stream)
+    stream.seek(0)
+
+    filename = f"quen_quet_the_{month_key}.xlsx"
+    return StreamingResponse(
+        stream,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
+
+@router.post("/forgot-scans/import")
+async def import_forgot_scans(
+    file: UploadFile = File(...),
+    month_key: str = Form(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: AppUser = Depends(require_roles(UserRole.ADMIN, UserRole.ACCOUNTANT)),
+):
+    """Nhập Excel đã sửa đổi thời gian lỗi quên quẹt thẻ"""
+    # Check lock
+    await check_month_locked(db, month_key)
+
+    # Load shift OFF
+    off_shift = (await db.execute(select(ShiftTemplate).where(ShiftTemplate.code == "OFF"))).scalar_one_or_none()
+    if not off_shift:
+        raise HTTPException(400, "Mã ca OFF không tồn tại trong hệ thống")
+
+    shift_result = await db.execute(select(ShiftTemplate))
+    shifts_by_code = {s.code: s for s in shift_result.scalars().all()}
+    shifts_by_id = {s.id: s for s in shift_result.scalars().all()}
+
+    content = await file.read()
+    import openpyxl
+    wb = openpyxl.load_workbook(BytesIO(content), data_only=True)
+    ws = wb.active
+
+    # Parse headers starting at row 5
+    # Row 6 is data start
+    processed_count = 0
+    errors = []
+
+    for r in range(6, ws.max_row + 1):
+        emp_code_raw = ws.cell(r, 2).value
+        work_date_raw = ws.cell(r, 4).value
+        time_val_raw = ws.cell(r, 12).value  # Col 12 is "Thêm thời gian"
+
+        if emp_code_raw is None or work_date_raw is None:
+            continue
+
+        if time_val_raw is None:
+            continue
+
+        time_val = str(time_val_raw).strip()
+        if not time_val:
+            continue
+
+        # Format employee code
+        emp_code = str(int(emp_code_raw) if isinstance(emp_code_raw, (float, int)) else str(emp_code_raw).split('.')[0] if '.' in str(emp_code_raw) else emp_code_raw).strip().lstrip("'")
+
+        # Parse work_date
+        work_date = None
+        if isinstance(work_date_raw, (date, datetime)):
+            work_date = work_date_raw if isinstance(work_date_raw, date) else work_date_raw.date()
+        elif isinstance(work_date_raw, str):
+            # Try parsing
+            for fmt in ["%Y-%m-%d", "%d/%m/%Y"]:
+                try:
+                    work_date = datetime.strptime(work_date_raw.strip(), fmt).date()
+                    break
+                except ValueError:
+                    continue
+
+        if not work_date:
+            errors.append(f"Dòng {r}: Định dạng ngày không hợp lệ '{work_date_raw}'")
+            continue
+
+        # Validate that date belongs to month_key
+        if work_date.strftime("%Y-%m") != month_key:
+            errors.append(f"Dòng {r}: Ngày {work_date} không thuộc tháng {month_key}")
+            continue
+
+        # Look up employee
+        emp_res = await db.execute(select(Employee).where(Employee.employee_code == emp_code))
+        emp = emp_res.scalar_one_or_none()
+        if not emp:
+            errors.append(f"Dòng {r}: Không tìm thấy nhân viên với mã '{emp_code}'")
+            continue
+
+        # Apply override/quick-fix logic
+        if time_val.upper() == "X":
+            # Company off
+            # 1. Update WorkSchedule
+            ws_res = await db.execute(select(WorkSchedule).where(and_(
+                WorkSchedule.employee_id == emp.id,
+                WorkSchedule.work_date == work_date
+            )))
+            ws = ws_res.scalar_one_or_none()
+            ws_before = {c.name: getattr(ws, c.name) for c in ws.__table__.columns} if ws else None
+            if ws:
+                ws.shift_id = off_shift.id
+                ws.notes = "Công ty cho nghỉ (Nhập từ file Excel)"
+            else:
+                ws = WorkSchedule(
+                    employee_id=emp.id,
+                    work_date=work_date,
+                    month_key=month_key,
+                    shift_id=off_shift.id,
+                    notes="Công ty cho nghỉ (Nhập từ file Excel)"
+                )
+                db.add(ws)
+
+            await log_audit(
+                db, "work_schedules", f"{emp.id}:{work_date}",
+                "UPDATE" if ws_before else "CREATE", current_user.username,
+                ws_before, {c.name: getattr(ws, c.name) for c in ws.__table__.columns},
+                notes="Company off override via Excel import"
+            )
+
+            # 2. Delete AttendanceDaily
+            await db.execute(delete(AttendanceDaily).where(and_(
+                AttendanceDaily.employee_id == emp.id,
+                AttendanceDaily.work_date == work_date
+            )))
+            await log_audit(
+                db, "attendance_daily", f"{emp.id}:{work_date}",
+                "DELETE", current_user.username,
+                None, None,
+                notes="Deleted attendance record due to Company Off (Excel)"
+            )
+            processed_count += 1
+
+        else:
+            parsed_time = parse_input_time(time_val)
+            if not parsed_time:
+                errors.append(f"Dòng {r}: Giờ '{time_val}' không đúng định dạng (HH:MM hoặc X)")
+                continue
+
+            # Check date lock
+            await check_date_locked(db, work_date)
+
+            # Find existing AttendanceDaily record
+            att_res = await db.execute(select(AttendanceDaily).where(and_(
+                AttendanceDaily.employee_id == emp.id,
+                AttendanceDaily.work_date == work_date
+            )))
+            att = att_res.scalar_one_or_none()
+            att_before = {c.name: getattr(att, c.name) for c in att.__table__.columns} if att else None
+
+            # Resolve active shift template
+            ws_res = await db.execute(select(WorkSchedule).where(and_(
+                WorkSchedule.employee_id == emp.id,
+                WorkSchedule.work_date == work_date
+            )))
+            ws = ws_res.scalar_one_or_none()
+
+            shift = None
+            if ws:
+                shift = shifts_by_id.get(ws.shift_id)
+            if not shift and emp.default_shift_code:
+                shift = shifts_by_code.get(emp.default_shift_code)
+            if not shift:
+                shift = shifts_by_code.get("D")
+
+            break_mins = int(shift.break_minutes or 60) if shift else 60
+            is_night_shift = bool(shift.is_night_shift) if shift else False
+
+            if att:
+                # Update based on which punch is missing
+                if att.first_check_in is None:
+                    att.first_check_in = datetime.combine(work_date, parsed_time)
+                elif att.last_check_out is None:
+                    if is_night_shift and att.first_check_in and parsed_time < att.first_check_in.time():
+                        att.last_check_out = datetime.combine(work_date + timedelta(days=1), parsed_time)
+                    else:
+                        att.last_check_out = datetime.combine(work_date, parsed_time)
+                else:
+                    att.last_check_out = datetime.combine(work_date, parsed_time)
+
+                if att.first_check_in and att.last_check_out:
+                    att.total_hours = round((att.last_check_out - att.first_check_in).total_seconds() / 3600.0, 2)
+                else:
+                    att.total_hours = 0.0
+
+                att.import_batch = "manual_fix_excel"
+            else:
+                # Fallback create
+                new_in = datetime.combine(work_date, parsed_time)
+                att = AttendanceDaily(
+                    employee_id=emp.id,
+                    work_date=work_date,
+                    first_check_in=new_in,
+                    last_check_out=None,
+                    total_hours=0.0,
+                    import_batch="manual_fix_excel"
+                )
+                db.add(att)
+
+            await log_audit(
+                db, "attendance_daily", f"{emp.id}:{work_date}",
+                "UPDATE" if att_before else "CREATE", current_user.username,
+                att_before, {c.name: getattr(att, c.name) for c in att.__table__.columns},
+                notes="Excel import fix forgotten scan"
+            )
+            processed_count += 1
+
+    await db.commit()
+
+    if errors:
+        return {
+            "message": f"Nhập hoàn tất với {processed_count} bản ghi được cập nhật và {len(errors)} lỗi.",
+            "errors": errors
+        }
+    return {"message": f"Đã cập nhật thành công {processed_count} bản ghi từ file Excel"}
+

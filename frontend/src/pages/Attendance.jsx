@@ -14,6 +14,7 @@ import { useQuery } from '@tanstack/react-query';
 import dayjs from 'dayjs';
 import api from '../api/client';
 import AttendanceDetailModal from '../components/Attendance/AttendanceDetailModal';
+import ForgotScanModal from '../components/Attendance/ForgotScanModal';
 import useAuthStore from '../stores/authStore';
 import useMonthStore from '../stores/monthStore';
 
@@ -34,8 +35,9 @@ export default function Attendance() {
   const { monthKey, setMonthKey } = useMonthStore();
   const [dept, setDept] = useState(null);
   const [selectedRow, setSelectedRow] = useState(null);
+  const [forgotModalVisible, setForgotModalVisible] = useState(false);
 
-  const { data: att, isLoading } = useQuery({
+  const { data: att, isLoading, refetch } = useQuery({
     queryKey: ['attendance', monthKey, dept],
     queryFn: () =>
       api.get('/attendance', {
@@ -125,6 +127,13 @@ export default function Attendance() {
         </div>
         {!isWorker && (
           <div style={{ display: 'flex', gap: 8 }}>
+            <Button
+              icon={<WarningOutlined />}
+              onClick={() => setForgotModalVisible(true)}
+              style={{ background: '#f59e0b', borderColor: '#f59e0b', color: '#fff', borderRadius: 7 }}
+            >
+              Xử lý quên quẹt thẻ
+            </Button>
             <Button
               icon={<DownloadOutlined />}
               type="primary"
@@ -282,6 +291,12 @@ export default function Attendance() {
         visible={!!selectedRow}
         onClose={() => setSelectedRow(null)}
         data={selectedRow}
+      />
+      <ForgotScanModal
+        visible={forgotModalVisible}
+        onClose={() => setForgotModalVisible(false)}
+        monthKey={monthKey}
+        onSaveSuccess={refetch}
       />
     </div>
   );
