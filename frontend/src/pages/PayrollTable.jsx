@@ -43,23 +43,28 @@ function PaySlip({ row, monthKey, onClose }) {
     const content = printRef.current.innerHTML;
     const win = window.open('', '_blank');
     win.document.write(`<html><head><title>Phiếu lương</title><style>
-      body{font-family:Arial,sans-serif;font-size:12px;padding:20px;color:#111}
-      h2{text-align:center;font-size:15px;margin:0 0 4px}
-      .sub{text-align:center;font-size:13px;margin:0 0 16px;color:#444}
-      table{width:100%;border-collapse:collapse}
-      td,th{padding:5px 8px;border:1px solid #ccc;font-size:12px}
-      th{background:#f0f0f0;font-weight:600}
-      .total-row td{font-weight:700;background:#f9fafb}
-      .net-row td{font-weight:800;background:#e0f2fe;font-size:14px}
-      .info{display:flex;gap:40px;margin-bottom:12px;font-size:12px}
-      .info div{flex:1}
-      .right{text-align:right}
+      body{font-family:Arial,sans-serif;font-size:12px;padding:20px;color:#000;background-color:#fff;}
+      table{width:100%;border-collapse:collapse;border:2px solid #000;color:#000;background:#fff;}
+      td{padding:6px 8px;border:1px solid #000;font-size:12px;}
+      .text-center{text-align:center;}
+      .text-right{text-align:right;}
+      .font-bold{font-weight:bold;}
     </style></head><body>${content}</body></html>`);
     win.document.close();
     win.print();
   };
 
   const r = row;
+  const lastDayStr = dayjs(monthKey).endOf('month').format('DD/MM/YYYY');
+  const monthYearStr = dayjs(monthKey).format('M/YYYY');
+
+  const fmtVal = (val) => {
+    if (val === undefined || val === null || val === 0 || val === '' || val === '0' || val === '-') {
+      return '-';
+    }
+    return Math.round(val).toLocaleString('vi-VN');
+  };
+
   return (
     <Modal
       title={<><PrinterOutlined style={{ color: '#276EF1', marginRight: 8 }} />Phiếu lương tháng {dayjs(monthKey).format('MM/YYYY')}</>}
@@ -76,64 +81,189 @@ function PaySlip({ row, monthKey, onClose }) {
         </Button>,
       ]}
     >
-      <div ref={printRef}>
-        <h2>CÔNG TY TNHH HIỆP LỢI</h2>
-        <div className="sub" style={{ textAlign: 'center', color: '#555', marginBottom: 16 }}>
-          PHIẾU LƯƠNG THÁNG {dayjs(monthKey).format('MM/YYYY')}
-        </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 32px', marginBottom: 16, fontSize: 13 }}>
-          <div><b>Họ tên:</b> {r.full_name}</div>
-          <div><b>Mã NV:</b> {r.employee_code}</div>
-          <div><b>Bộ phận:</b> {r.department || '–'}</div>
-          <div><b>Ngày công:</b> {r.actual_days}/{r.standard_days}</div>
-          <div><b>Lương cơ bản:</b> {fmt(r.base_salary)} đ</div>
-          <div><b>Người phụ thuộc:</b> {r.dependents}</div>
-        </div>
-
-        <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 8 }}>
-          <thead>
-            <tr>
-              <th style={{ background: '#f0f4ff', border: '1px solid #dde', padding: '6px 10px', textAlign: 'left' }} colSpan={2}>THU NHẬP</th>
-              <th style={{ background: '#fff4f0', border: '1px solid #dde', padding: '6px 10px', textAlign: 'left' }} colSpan={2}>KHẤU TRỪ</th>
-            </tr>
-          </thead>
+      <div ref={printRef} style={{ padding: '10px 0' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000', color: '#000', backgroundColor: '#fff' }}>
           <tbody>
-            {[
-              ['Lương ngày công', r.salary_from_days, 'BHXH (10.5%)', r.bhxh],
-              ['Tăng ca thường (1.5x)', r.ot_pay_wd || 0, 'Công đoàn (1%)', r.union_fee],
-              ['Tăng ca CN (2x)', r.ot_pay_sun || 0, 'TNCN', r.tncn],
-              ['Tăng ca Lễ (3x)', r.ot_pay_hol || 0, 'Tạm ứng', r.advance],
-              ['Phụ cấp cố định', r.fixed_allowance, '', ''],
-              ['Tiền ăn', r.meal_allowance, '', ''],
-              ['PC ca đêm', r.night_allowance, '', ''],
-            ].map(([e1, v1, e2, v2], i) => (
-              <tr key={i}>
-                <td style={{ border: '1px solid #e5e7eb', padding: '5px 10px', width: '30%' }}>{e1}</td>
-                <td style={{ border: '1px solid #e5e7eb', padding: '5px 10px', textAlign: 'right', width: '20%', fontWeight: v1 ? 600 : 400, color: v1 ? '#10b981' : '#9ca3af' }}>{v1 ? fmt(v1) : '–'}</td>
-                <td style={{ border: '1px solid #e5e7eb', padding: '5px 10px', width: '30%' }}>{e2}</td>
-                <td style={{ border: '1px solid #e5e7eb', padding: '5px 10px', textAlign: 'right', width: '20%', fontWeight: v2 ? 600 : 400, color: v2 ? '#ef4444' : '#9ca3af' }}>{v2 ? fmt(v2) : '–'}</td>
+            {/* Header Block */}
+            <tr>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontWeight: 'bold', backgroundColor: '#ffff00', width: '30%', fontSize: '13px' }}>Bảng lương</td>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontWeight: 'bold', backgroundColor: '#ffff00', textAlign: 'center', width: '40%', fontSize: '13px' }}>{lastDayStr}</td>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontWeight: 'bold', backgroundColor: '#ffff00', textAlign: 'center', width: '30%', fontSize: '13px' }}>THÁNG {monthYearStr}</td>
+            </tr>
+            <tr>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontWeight: 'bold', fontSize: '13px' }}>
+                HỌ TÊN :<br/>
+                <span style={{ fontSize: '11px', fontWeight: 'normal', color: '#333' }}>姓名 :</span>
+              </td>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontWeight: 'bold', textAlign: 'center', fontSize: '14px' }}>{r.full_name}</td>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontWeight: 'bold', textAlign: 'center', fontSize: '14px' }}>{r.employee_code}</td>
+            </tr>
+            <tr>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontWeight: 'bold', fontSize: '13px' }}>
+                CHỨC VỤ :<br/>
+                <span style={{ fontSize: '11px', fontWeight: 'normal', color: '#333' }}>職位 :</span>
+              </td>
+              <td colSpan={2} style={{ border: '1px solid #000', padding: '6px 8px', fontWeight: 'bold', textAlign: 'center', fontSize: '13px' }}>
+                {r.department || '-'}
+              </td>
+            </tr>
+            
+            {/* Base Salary */}
+            <tr>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '12px', fontWeight: 'bold' }}>基本薪資</td>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '12px' }}>Lương căn bản</td>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '13px', textAlign: 'right', fontWeight: 'bold' }}>{fmtVal(r.base_salary)}</td>
+            </tr>
+            {/* Working Days */}
+            <tr>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '12px', fontWeight: 'bold' }}>考勤日</td>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '12px' }}>Ngày đi làm</td>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '13px', textAlign: 'right' }}>{fmtVal(r.actual_days - r.total_paid_leave)}</td>
+            </tr>
+            {/* Used Paid Leaves */}
+            <tr>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '12px', fontWeight: 'bold' }}>本月休年假天數</td>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '12px' }}>Số ngày phép sử dụng tháng</td>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '13px', textAlign: 'right' }}>{r.total_paid_leave > 0 ? r.total_paid_leave.toFixed(2) : '-'}</td>
+            </tr>
+            {/* Leave Remaining (purple background) */}
+            <tr style={{ backgroundColor: '#e2dbf0' }}>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '12px', fontWeight: 'bold' }}>年假存</td>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '12px' }}>Số ngày Phép năm tồn</td>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '13px', textAlign: 'right' }}>-</td>
+            </tr>
+            {/* Total Workdays of the month */}
+            <tr>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '12px', fontWeight: 'bold' }}>本月上班日數</td>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '12px' }}>Tổng Ngày công tháng</td>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '13px', textAlign: 'right', fontWeight: 'bold' }}>{fmtVal(r.actual_days)}</td>
+            </tr>
+            {/* Salary from days */}
+            <tr>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '12px', fontWeight: 'bold' }}>考勤金額</td>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '12px' }}>LƯƠNG NGÀY CÔNG THÁNG</td>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '13px', textAlign: 'right', fontWeight: 'bold' }}>{fmtVal(r.salary_from_days)}</td>
+            </tr>
+            {/* Regular OT hours */}
+            <tr>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '12px', fontWeight: 'bold' }}>加班時間</td>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '12px' }}>Tổng giờ tăng ca thường</td>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '13px', textAlign: 'right' }}>{r.ot_wd > 0 ? r.ot_wd : '-'}</td>
+            </tr>
+            {/* Regular OT Pay */}
+            <tr>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '12px', fontWeight: 'bold' }}>加班平常</td>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '12px' }}>Tăng ca ngày thường (*1.5)</td>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '13px', textAlign: 'right' }}>{fmtVal(r.ot_pay_wd)}</td>
+            </tr>
+            {/* Sunday OT Hours */}
+            <tr>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '12px', fontWeight: 'bold' }}>加班時間</td>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '12px' }}>Tổng giờ tăng ca Chủ nhật</td>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '13px', textAlign: 'right' }}>{r.ot_sun > 0 ? r.ot_sun : '-'}</td>
+            </tr>
+            {/* Sunday OT Pay */}
+            <tr>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '12px', fontWeight: 'bold' }}>加班星期日</td>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '12px' }}>Tăng ca ngày CN (*2)</td>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '13px', textAlign: 'right' }}>{fmtVal(r.ot_pay_sun)}</td>
+            </tr>
+            {/* Total OT Pay */}
+            <tr>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '12px', fontWeight: 'bold' }}>共加班費</td>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '12px' }}>Tổng tiền tăng ca</td>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '13px', textAlign: 'right', fontWeight: 'bold' }}>{fmtVal(r.ot_pay)}</td>
+            </tr>
+            {/* Responsibility/Position Allowance */}
+            <tr>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '12px', fontWeight: 'bold' }}>職務獎</td>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '12px' }}>Bồi dưỡng chức vụ & trách nhiệm</td>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '13px', textAlign: 'right' }}>{fmtVal(r.fixed_allowance)}</td>
+            </tr>
+            {/* Child Allowance under 6 years (blank placeholder) */}
+            <tr>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '12px', fontWeight: 'bold' }}></td>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '12px' }}>Bồi dưỡng /Phụ cấp nuôi con nhỏ &lt; 6 tuổi</td>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '13px', textAlign: 'right' }}>-</td>
+            </tr>
+            {/* Petrol & Phone Allowance (blank placeholder) */}
+            <tr>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '12px', fontWeight: 'bold' }}>考勤薪資</td>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '12px' }}>Tiền xăng & điện thoại, Thưởng</td>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '13px', textAlign: 'right' }}>-</td>
+            </tr>
+            {/* Lunch Allowance (blank placeholder) */}
+            <tr>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '12px', fontWeight: 'bold' }}>餐費</td>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '12px' }}>Tiền cơm</td>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '13px', textAlign: 'right' }}>-</td>
+            </tr>
+            {/* Diligent Allowance (blank placeholder) */}
+            <tr>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '12px', fontWeight: 'bold' }}>考勤薪資</td>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '12px' }}>Tiền chuyên cần</td>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '13px', textAlign: 'right' }}>-</td>
+            </tr>
+            {/* Night Allowance (if > 0, show it) */}
+            {r.night_allowance > 0 && (
+              <tr>
+                <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '12px', fontWeight: 'bold' }}></td>
+                <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '12px' }}>Phụ cấp ca đêm</td>
+                <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '13px', textAlign: 'right' }}>{fmtVal(r.night_allowance)}</td>
               </tr>
-            ))}
-            <tr style={{ background: '#f9fafb', fontWeight: 700 }}>
-              <td style={{ border: '1px solid #e5e7eb', padding: '6px 10px' }}>TỔNG THU NHẬP</td>
-              <td style={{ border: '1px solid #e5e7eb', padding: '6px 10px', textAlign: 'right', color: '#059669' }}>{fmt(r.gross)}</td>
-              <td style={{ border: '1px solid #e5e7eb', padding: '6px 10px' }}>TỔNG KHẤU TRỪ</td>
-              <td style={{ border: '1px solid #e5e7eb', padding: '6px 10px', textAlign: 'right', color: '#dc2626' }}>{fmt(r.total_deductions)}</td>
+            )}
+            
+            {/* Gross Salary (yellow background) */}
+            <tr style={{ backgroundColor: '#ffff00' }}>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '12px', fontWeight: 'bold' }}>合計薪資</td>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '12px', fontWeight: 'bold' }}>TỔNG LƯƠNG</td>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '13px', textAlign: 'right', fontWeight: 'bold' }}>{fmtVal(r.gross)}</td>
+            </tr>
+            
+            {/* Deductions */}
+            {/* Social Insurance */}
+            <tr>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '12px', fontWeight: 'bold' }}>醫療保險</td>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '12px' }}>Trừ BHXH*10.5%</td>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '13px', textAlign: 'right', color: '#ef4444' }}>{fmtVal(r.bhxh)}</td>
+            </tr>
+            {/* Union Fee */}
+            <tr>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '12px', fontWeight: 'bold' }}>工團費</td>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '12px' }}>Tiền công đoàn</td>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '13px', textAlign: 'right', color: '#ef4444' }}>{fmtVal(r.union_fee)}</td>
+            </tr>
+            {/* Income Tax */}
+            <tr>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '12px', fontWeight: 'bold' }}>個人所得稅</td>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '12px' }}>Thuế TNCN</td>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '13px', textAlign: 'right', color: '#ef4444' }}>{fmtVal(r.tncn)}</td>
+            </tr>
+            {/* Advance Payment (pink background) */}
+            <tr style={{ backgroundColor: '#f5e0e0' }}>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '12px', fontWeight: 'bold' }}></td>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '12px' }}>TRỪ TIỀN TẠM ỨNG</td>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '13px', textAlign: 'right', color: '#ef4444' }}>{fmtVal(r.advance)}</td>
+            </tr>
+            
+            {/* Net Salary (yellow background) */}
+            <tr style={{ backgroundColor: '#ffff00' }}>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '12px', fontWeight: 'bold' }}>實領金額</td>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '12px', fontWeight: 'bold' }}>LƯƠNG THỰC LÃNH</td>
+              <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '14px', textAlign: 'right', fontWeight: '800', color: '#1d4ed8' }}>{fmtVal(r.net)}</td>
+            </tr>
+            
+            {/* Signature Row */}
+            <tr>
+              <td style={{ border: '1px solid #000', padding: '12px 8px', fontSize: '13px', fontWeight: 'bold', textAlign: 'center' }}>
+                簽名
+              </td>
+              <td colSpan={2} style={{ border: '1px solid #000', padding: '12px 8px', fontSize: '13px', fontWeight: 'bold', textAlign: 'center' }}>
+                Ký nhận tiền ( ghi họ tên )
+              </td>
             </tr>
           </tbody>
         </table>
-
-        {r.taxable > 0 && (
-          <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 8, padding: '6px 10px', background: '#f9fafb', borderRadius: 6 }}>
-            Thu nhập tính thuế: {fmt(r.taxable)} đ &nbsp;→&nbsp; TNCN: {fmt(r.tncn)} đ
-          </div>
-        )}
-
-        <div style={{ background: '#eff6ff', border: '2px solid #3b82f6', borderRadius: 8, padding: '12px 16px', textAlign: 'center' }}>
-          <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 4 }}>THỰC LĨNH</div>
-          <div style={{ fontSize: 22, fontWeight: 800, color: '#1d4ed8' }}>{fmt(r.net)} đ</div>
-        </div>
       </div>
     </Modal>
   );
@@ -805,7 +935,12 @@ export default function PayrollTable() {
     <div className="att-page">
       <div className="emp-titlebar">
         <div className="emp-titlebar-left">
-          <h2 className="emp-title">Bảng lương tháng {dayjs(monthKey).format('MM/YYYY')}</h2>
+          <h2 className="emp-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            Bảng lương tháng {dayjs(monthKey).format('MM/YYYY')}
+            <Tag color={otStyle === 'new' ? 'success' : 'default'} style={{ fontSize: 12, margin: 0 }}>
+              OT: {otStyle === 'new' ? 'Duyệt thực tế (Kiểu mới)' : 'Tự động (Kiểu cũ)'}
+            </Tag>
+          </h2>
           <div className="emp-stats">
             <div className="emp-stat-chip"><b style={{ color: '#1e40af' }}>{fmt(totals.gross)}</b> đ tổng gộp</div>
             <div className="emp-stat-chip"><b style={{ color: '#ef4444' }}>{fmt(totals.bhxh)}</b> đ BHXH</div>
