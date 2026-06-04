@@ -31,7 +31,10 @@
       "PowerShell(py -3.11 --version 2>$null)",
       "PowerShell(py -3.10 --version 2>$null)",
       "PowerShell(py --version 2>$null)",
-      "PowerShell($env:PATH = [System.Environment]::GetEnvironmentVariable\\(\"PATH\",\"Machine\"\\) + \";\" + [System.Environment]::GetEnvironmentVariable\\(\"PATH\",\"User\"\\); \\(Get-Command ffmpeg\\).Source)"
+      "PowerShell($env:PATH = [System.Environment]::GetEnvironmentVariable\\(\"PATH\",\"Machine\"\\) + \";\" + [System.Environment]::GetEnvironmentVariable\\(\"PATH\",\"User\"\\); \\(Get-Command ffmpeg\\).Source)",
+      "Bash(Get-Content \"D:\\\\CODE\\\\HIEPLOI\\\\backend\\\\app\\\\routers\\\\overtime.py\")",
+      "Bash(Select-Object -First 249)",
+      "Bash(Set-Content -Encoding utf8 \"D:\\\\CODE\\\\HIEPLOI\\\\backend\\\\app\\\\routers\\\\overtime.py\")"
     ]
   }
 }

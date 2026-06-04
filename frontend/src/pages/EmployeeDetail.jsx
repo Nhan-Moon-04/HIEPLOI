@@ -25,6 +25,7 @@ const STATUS_LABELS = {
   forgot_scan: { text: 'Quên quẹt', color: 'orange' },
   holiday: { text: 'Ngày lễ', color: 'purple' },
   off: { text: 'Nghỉ phép', color: 'default' },
+  sunday_off: { text: 'Nghỉ CN', color: 'blue' },
   no_data: { text: '–', color: 'default' },
 };
 
@@ -149,8 +150,9 @@ export default function EmployeeDetail() {
     },
     {
       title: 'Trạng thái', dataIndex: 'status', key: 'status', width: 100,
-      render: (v) => {
-        const s = STATUS_LABELS[v] || STATUS_LABELS.no_data;
+      render: (v, r) => {
+        const key = (v === 'off' && r.is_sunday) ? 'sunday_off' : v;
+        const s = STATUS_LABELS[key] || STATUS_LABELS.no_data;
         return <Tag color={s.color} style={{ fontSize: 10, padding: '0 5px' }}>{s.text}</Tag>;
       },
     },
@@ -347,7 +349,7 @@ export default function EmployeeDetail() {
             rowKey="day"
             pagination={false}
             size="small"
-            scroll={{ y: 380 }}
+            scroll={{ x: 1100, y: 380 }}
             columns={dayColumnsWithActions}
             rowClassName={(r) => r.status === 'absent' ? 'ed-row-absent' : r.is_sunday || r.is_holiday ? 'ed-row-off' : ''}
             locale={{ emptyText: 'Chưa có dữ liệu chấm công' }}

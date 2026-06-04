@@ -298,6 +298,72 @@ async def update_dependents(
     return {"message": f"Đã cập nhật {emp.full_name}: {emp.dependents} người phụ thuộc"}
 
 
+class UpdateBaseSalaryRequest(BaseModel):
+    employee_id: int
+    month_key: str
+    base_salary: float
+
+
+@router.put("/base")
+async def update_base_salary(
+    req: UpdateBaseSalaryRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: AppUser = Depends(require_roles(UserRole.ADMIN)),
+):
+    """Admin cập nhật lương cơ bản của nhân viên cho tháng cụ thể."""
+    await check_month_locked(db, req.month_key)
+
+    emp = await db.get(Employee, req.employee_id)
+    if not emp:
+        raise HTTPException(404, "Không tìm thấy nhân viên")
+
+    # Lấy standard_days từ config tháng
+    config_res = await db.execute(
+        select(MonthlyWorkdayConfig).where(MonthlyWorkdayConfig.month_key == req.month_key)
+    )
+    config = config_res.scalar_one_or_none()
+    standard_days = float(config.company_work_days) if config else 26.0
+
+    # Upsert MonthlySalary
+    sal_res = await db.execute(
+        select(MonthlySalary).where(
+            and_(MonthlySalary.employee_id == req.employee_id, MonthlySalary.month_key == req.month_key)
+        )
+    )
+    sal = sal_res.scalar_one_or_none()
+
+    if sal:
+        sal.base_salary = req.base_salary
+        sal.base_daily_wage = req.base_salary / standard_days if standard_days > 0 else 0
+        sal.updated_at = datetime.utcnow()
+    else:
+        sal = MonthlySalary(
+            employee_id=req.employee_id,
+            month_key=req.month_key,
+            base_salary=req.base_salary,
+            allowance=0,
+            base_daily_wage=req.base_salary / standard_days if standard_days > 0 else 0,
+        )
+        db.add(sal)
+
+    # Đồng bộ ngược lại bảng Employee
+    emp.base_salary = req.base_salary
+
+    await db.commit()
+
+    await log_audit(
+        db, "monthly_salaries", req.month_key, "UPDATE_BASE",
+        current_user.username,
+        notes=f"Sửa lương cơ bản {emp.full_name} ({emp.employee_code}): {req.base_salary:,.0f}đ"
+    )
+    await db.commit()
+
+    return {
+        "message": f"Đã cập nhật lương cơ bản {emp.full_name}: {req.base_salary:,.0f}đ",
+        "base_salary": req.base_salary,
+    }
+
+
 # ─── Advance Loans ────────────────────────────────────────────────────────────
 
 class CreateLoanRequest(BaseModel):

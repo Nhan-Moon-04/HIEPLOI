@@ -6,14 +6,15 @@
 
 ## ⚠️ Yêu Cầu Hệ Điều Hành
 
-| Hệ điều hành | Hỗ trợ |
-|---|---|
-| Windows 10 64-bit (1903 trở lên) | ✅ |
-| Windows 11 | ✅ |
-| Windows 7, 8, 8.1 | ❌ Không hỗ trợ |
-| macOS 12+ | ✅ (đổi `.\venv\Scripts\activate` → `source venv/bin/activate`) |
+| Hệ điều hành                     | Hỗ trợ                                                          |
+| -------------------------------- | --------------------------------------------------------------- |
+| Windows 10 64-bit (1903 trở lên) | ✅                                                              |
+| Windows 11                       | ✅                                                              |
+| Windows 7, 8, 8.1                | ❌ Không hỗ trợ                                                 |
+| macOS 12+                        | ✅ (đổi `.\venv\Scripts\activate` → `source venv/bin/activate`) |
 
 > **Lý do Windows 7 không chạy được:**
+>
 > - Node.js 18+ (bắt buộc cho Vite 8) đã ngừng hỗ trợ Windows 7 từ phiên bản Node.js 14
 > - Python 3.12 đã ngừng hỗ trợ Windows 7 từ Python 3.9
 > - Docker Desktop yêu cầu Windows 10 Pro/Enterprise
@@ -22,12 +23,12 @@
 
 ## Tech Stack
 
-| Layer | Công nghệ |
-|---|---|
-| **Frontend** | React 19 + Vite 8 + Ant Design 6 |
-| **Backend** | Python 3.12 + FastAPI + SQLAlchemy 2.0 |
-| **Database** | PostgreSQL 16 |
-| **Auth** | JWT (python-jose + bcrypt) + OTP email |
+| Layer        | Công nghệ                              |
+| ------------ | -------------------------------------- |
+| **Frontend** | React 19 + Vite 8 + Ant Design 6       |
+| **Backend**  | Python 3.12 + FastAPI + SQLAlchemy 2.0 |
+| **Database** | PostgreSQL 16                          |
+| **Auth**     | JWT (python-jose + bcrypt) + OTP email |
 
 ---
 
@@ -35,12 +36,12 @@
 
 ### 1. Cài đặt phần mềm cần thiết
 
-| Phần mềm | Phiên bản | Link tải |
-|---|---|---|
-| Python | 3.12.x | https://www.python.org/downloads/ |
-| Node.js | 20 LTS | https://nodejs.org/ |
-| PostgreSQL | 16 | https://www.postgresql.org/download/windows/ |
-| Git | mới nhất | https://git-scm.com/ |
+| Phần mềm   | Phiên bản | Link tải                                     |
+| ---------- | --------- | -------------------------------------------- |
+| Python     | 3.12.x    | https://www.python.org/downloads/            |
+| Node.js    | 20 LTS    | https://nodejs.org/                          |
+| PostgreSQL | 16        | https://www.postgresql.org/download/windows/ |
+| Git        | mới nhất  | https://git-scm.com/                         |
 
 > **Lưu ý khi cài Python:** Tick vào ô **"Add Python to PATH"** trước khi nhấn Install.
 >
@@ -107,6 +108,7 @@ EMAIL_FROM_NAME=Hiệp Lợi HR
 ```
 
 > **Tạo App Password Gmail:**
+>
 > 1. Vào https://myaccount.google.com/security
 > 2. Bật **Xác minh 2 bước** (bắt buộc)
 > 3. Vào **App passwords** → chọn "Mail" → Copy 16 ký tự
@@ -147,6 +149,7 @@ npm install
 Double-click vào `D:\CODE\HIEPLOI\s.bat`
 
 File này tự động mở 2 cửa sổ CMD:
+
 - **Cửa sổ 1:** Backend FastAPI tại `http://localhost:8000`
 - **Cửa sổ 2:** Frontend Vite tại `http://localhost:5173`
 
@@ -157,6 +160,7 @@ File này tự động mở 2 cửa sổ CMD:
 ### Cách thủ công
 
 **Terminal 1 — Backend:**
+
 ```bash
 cd D:\CODE\HIEPLOI\backend
 .\venv\Scripts\activate
@@ -164,6 +168,7 @@ python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 **Terminal 2 — Frontend:**
+
 ```bash
 cd D:\CODE\HIEPLOI\frontend
 npm run dev -- --host
@@ -173,11 +178,11 @@ npm run dev -- --host
 
 ### Truy cập hệ thống
 
-| URL | Mô tả |
-|---|---|
-| `http://localhost:5173` | Giao diện chính (dùng hàng ngày) |
-| `http://192.168.1.xxx:5173` | Truy cập từ máy khác trong mạng LAN |
-| `http://localhost:8000/docs` | API documentation (Swagger) |
+| URL                          | Mô tả                               |
+| ---------------------------- | ----------------------------------- |
+| `http://localhost:5173`      | Giao diện chính (dùng hàng ngày)    |
+| `http://192.168.1.xxx:5173`  | Truy cập từ máy khác trong mạng LAN |
+| `http://localhost:8000/docs` | API documentation (Swagger)         |
 
 > Tìm IP LAN của máy chủ: chạy `ipconfig` trong CMD → xem **IPv4 Address**.
 
@@ -185,10 +190,10 @@ npm run dev -- --host
 
 ## Tài Khoản Đăng Nhập Mặc Định
 
-| Username | Password | Vai trò |
-|---|---|---|
-| `admin` | `admin123` | Admin — toàn quyền |
-| `ketoan` | `ketoan123` | Kế toán |
+| Username | Password    | Vai trò            |
+| -------- | ----------- | ------------------ |
+| `admin`  | `admin123`  | Admin — toàn quyền |
+| `ketoan` | `ketoan123` | Kế toán            |
 
 > **Bảo mật:** Đổi mật khẩu ngay sau lần đăng nhập đầu tiên tại mục **Cài đặt tài khoản**.
 
@@ -196,22 +201,22 @@ npm run dev -- --host
 
 ## Tính Năng Hệ Thống
 
-| Trang | Đường dẫn | Mô tả |
-|---|---|---|
-| Dashboard | `/dashboard` | Thống kê tổng quan, biểu đồ |
-| Chấm công | `/attendance` | Bảng chấm công tháng, tính giờ OT |
-| Lịch làm | `/schedules` | Phân ca theo tháng, kéo thả |
-| Nhân viên | `/employees` | Hồ sơ, thông tin cá nhân |
-| Mã ca | `/shifts` | Cấu hình các ca làm việc |
-| Ngày nghỉ | `/holidays` | Lễ tết, nghỉ bù |
-| OT Tăng ca X | `/overtime` | Config tăng ca đặc biệt |
-| Tiền ăn | `/meal-allowance` | Phụ cấp tiền cơm, ca đêm |
-| Lương cơ bản | `/base-salary` | Mức lương tháng từng NV |
-| Bảng lương | `/payroll` | Tính lương đầy đủ (BHXH, TNCN) |
-| Tạm ứng | `/advances` | Quản lý vay tạm ứng lương |
-| Công đoàn | `/union` | Thu chi, sự kiện, danh sách đoàn viên |
-| Import/Export | `/import-export` | Import chấm công, backup/restore dữ liệu |
-| Kiểm toán | `/audit` | Lịch sử thao tác hệ thống |
+| Trang         | Đường dẫn         | Mô tả                                    |
+| ------------- | ----------------- | ---------------------------------------- |
+| Dashboard     | `/dashboard`      | Thống kê tổng quan, biểu đồ              |
+| Chấm công     | `/attendance`     | Bảng chấm công tháng, tính giờ OT        |
+| Lịch làm      | `/schedules`      | Phân ca theo tháng, kéo thả              |
+| Nhân viên     | `/employees`      | Hồ sơ, thông tin cá nhân                 |
+| Mã ca         | `/shifts`         | Cấu hình các ca làm việc                 |
+| Ngày nghỉ     | `/holidays`       | Lễ tết, nghỉ bù                          |
+| OT Tăng ca X  | `/overtime`       | Config tăng ca đặc biệt                  |
+| Tiền ăn       | `/meal-allowance` | Phụ cấp tiền cơm, ca đêm                 |
+| Lương cơ bản  | `/base-salary`    | Mức lương tháng từng NV                  |
+| Bảng lương    | `/payroll`        | Tính lương đầy đủ (BHXH, TNCN)           |
+| Tạm ứng       | `/advances`       | Quản lý vay tạm ứng lương                |
+| Công đoàn     | `/union`          | Thu chi, sự kiện, danh sách đoàn viên    |
+| Import/Export | `/import-export`  | Import chấm công, backup/restore dữ liệu |
+| Kiểm toán     | `/audit`          | Lịch sử thao tác hệ thống                |
 
 ---
 
@@ -219,8 +224,8 @@ npm run dev -- --host
 
 File Excel từ máy chấm công phải có format:
 
-| Cột 1 | Cột 2 | Cột 3 | Cột 4 |
-|---|---|---|---|
+| Cột 1 | Cột 2  | Cột 3   | Cột 4          |
+| ----- | ------ | ------- | -------------- |
 | Mã NV | Họ tên | Bộ phận | Thời gian scan |
 
 - Định dạng hỗ trợ: `.xlsx`, `.xls`, `.csv`
@@ -286,6 +291,7 @@ HIEPLOI/
 ### Backend lỗi `connection refused` khi khởi động
 
 → PostgreSQL chưa chạy. Kiểm tra:
+
 ```bash
 # Xem PostgreSQL có đang chạy không
 services.msc   # Tìm "postgresql-x64-16" → Start
@@ -330,6 +336,7 @@ FRONTEND_URL=https://your-domain.com
 ```
 
 Tạo SECRET_KEY ngẫu nhiên:
+
 ```bash
 python -c "import secrets; print(secrets.token_hex(32))"
 ```

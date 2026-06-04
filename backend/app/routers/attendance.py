@@ -159,6 +159,10 @@ def evaluate_attendance(shift, check_in_dt, check_out_dt, work_date, is_sunday, 
         if (is_sunday or is_holiday) and (check_in_dt or check_out_dt):
             # Tu dong dung default_shift hoac gia dinh ca 8h de tinh tang ca
             result["notes"] = "Lam viec ngay nghi/le"
+        elif is_sunday:
+            result["status"] = "off"
+            result["notes"] = "Nghỉ chủ nhật"
+            return result
         else:
             result["status"] = "no_data"
             return result
@@ -172,10 +176,13 @@ def evaluate_attendance(shift, check_in_dt, check_out_dt, work_date, is_sunday, 
 
     if not check_in_dt and not check_out_dt:
         # Ko co du lieu cham cong nao
-        if is_sunday and (is_night_override or is_nu_dynamic_shift_code(shift.code if shift else None)):
-            # Ca NU nghi chu nhat
+        if is_sunday:
+            # Chủ nhật mặc định nghỉ — chỉ tính đi làm nếu có chấm công
             result["status"] = "off"
-            result["notes"] = "Nghi chu nhat (NU)"
+            result["notes"] = "Nghỉ chủ nhật"
+        elif is_holiday:
+            result["status"] = "holiday"
+            result["notes"] = "Ngày lễ/nghỉ"
         else:
             result["status"] = "absent"
             result["deviation"] = -standard

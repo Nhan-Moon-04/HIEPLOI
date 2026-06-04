@@ -96,11 +96,11 @@ def _detect_daily_mode(today_events, next_day_events, is_sunday=False, shift_cod
         has_c_today = any(item.hour >= 18 for item in today_events)
         has_a_next = any(item.hour < 10 for item in next_day_events)
 
-        # Check-in rất sớm (< 6h) + checkout 18-21h cùng ngày = Ca1 làm OT dài, KHÔNG phải Ca3
-        # Ca3 check-in luôn >= 21h (ca bắt đầu 22h, công nhân vào ~21:30-22:30)
-        # Nếu C scan >= 21h thì đó là Ca3 check-in mới, scan sớm là checkout Ca3 đêm trước
+        # Check-in rất sớm (< 6h) + checkout 18-20h cùng ngày = Ca1 làm OT dài, KHÔNG phải Ca3
+        # Ca3 check-in thường >= 20h (ca bắt đầu 22h, công nhân vào ~20:30-22:30)
+        # Nếu C scan >= 20h thì đó là Ca3 check-in mới, scan sớm là checkout Ca3 đêm trước
         if has_very_early_today and has_c_today:
-            has_ca3_entry = any(item.hour >= 21 for item in today_events)
+            has_ca3_entry = any(item.hour >= 20 for item in today_events)
             if not has_ca3_entry:
                 has_midday = any(10 <= item.hour <= 13 for item in today_events)
                 return XNU_MODE_1, has_midday
@@ -200,10 +200,12 @@ def _pick_check_times(mode, today_events, next_day_events, is_sunday=False):
         evening_candidates = [item for item in today_events if item.hour >= 14]
 
         check_in = morning_candidates[0] if morning_candidates else (today_events[0] if today_events else None)
-        # On Sunday, early morning punches are check-outs from Sat night.
-        # They should NOT be check-ins for Sunday Morning shift.
+        # On Sunday, early morning punches (< 12h) are usually Ca3 checkouts from Sat night.
+        # Exception: if there's a midday scan (10-13h), this is genuine Sunday morning work.
         if is_sunday and check_in and check_in.hour < 12:
-            return None, None
+            has_midday_activity = any(10 <= item.hour <= 13 for item in today_events)
+            if not has_midday_activity:
+                return None, None
 
         check_out = (
             evening_candidates[-1]

@@ -25,6 +25,7 @@ const ROUTE_META = {
   '/leave':         ['Nhân sự',      'Phép năm'],
   '/meal-allowance':['Lương & Thuế', 'Tiền ăn'],
   '/salaries':      ['Lương & Thuế', 'Lương cơ bản'],
+  '/salaries/payroll': ['Lương & Thuế', 'Bảng lương'],
   '/payslips':      ['Lương & Thuế', 'Phiếu lương'],
   '/insurance':     ['Lương & Thuế', 'BHXH / Thuế'],
   '/advances':      ['Lương & Thuế', 'Tạm ứng'],

@@ -140,7 +140,15 @@ export default function Sidebar({ collapsed }) {
                 </div>
               )}
               {(collapsed || isExpanded) && visibleItems.map((item) => {
-                const active = location.pathname === item.key || location.pathname.startsWith(item.key + '/');
+                const isExactMatch = location.pathname === item.key;
+                const isSubRoute = location.pathname.startsWith(item.key + '/');
+                // Avoid false positive: don't mark /salaries active when on /salaries/payroll
+                // Only use startsWith if no other sibling item is a better (more specific) match
+                const hasBetterMatch = isSubRoute && visibleItems.some(
+                  (other) => other.key !== item.key && location.pathname.startsWith(other.key)
+                    && other.key.length > item.key.length
+                );
+                const active = isExactMatch || (isSubRoute && !hasBetterMatch);
                 return (
                   <div
                     key={item.key}

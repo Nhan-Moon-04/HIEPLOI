@@ -2,9 +2,9 @@ import { useState, useMemo, useRef } from 'react';
 import { DatePicker, Select, Spin, Button, Modal, Tag, Tooltip, InputNumber, message, Table } from 'antd';
 import {
   PrinterOutlined, DownloadOutlined, TeamOutlined, DollarOutlined,
-  UserOutlined, BankOutlined, SafetyCertificateOutlined,
+  UserOutlined, BankOutlined, SafetyCertificateOutlined, EditOutlined,
 } from '@ant-design/icons';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import dayjs from 'dayjs';
 import api from '../api/client';
 import useAuthStore from '../stores/authStore';
@@ -140,11 +140,15 @@ function PaySlip({ row, monthKey, onClose }) {
 // ─── Main Component ──────────────────────────────────────────────────────────
 export default function PayrollTable() {
   const { user } = useAuthStore();
+  const isAdmin = user?.role === 'admin';
   const isWorker = user?.role === 'worker';
   const { monthKey, setMonthKey } = useMonthStore();
   const [nightRate, setNightRate] = useState(() => Number(localStorage.getItem('nightAllowanceRate')) || 100000);
   const [dept, setDept] = useState(null);
   const [payslipRow, setPayslipRow] = useState(null);
+  const [editingKey, setEditingKey] = useState(null);
+  const [editValue, setEditValue] = useState(null);
+  const queryClient = useQueryClient();
 
   const { data: att, isLoading: loadingAtt } = useQuery({
     queryKey: ['payroll-att', monthKey, nightRate, dept],
@@ -172,6 +176,37 @@ export default function PayrollTable() {
     queryKey: ['departments'],
     queryFn: () => api.get('/employees/departments').then((r) => r.data),
   });
+
+  const isLocked = salariesData?.is_locked || false;
+
+  const updateSalaryMut = useMutation({
+    mutationFn: ({ employee_id, base_salary }) =>
+      api.put('/salaries/base', { employee_id, month_key: monthKey, base_salary }),
+    onSuccess: (res) => {
+      message.success(res.data?.message || 'Đã cập nhật lương');
+      queryClient.invalidateQueries({ queryKey: ['payroll-sal', monthKey] });
+      setEditingKey(null);
+      setEditValue(null);
+    },
+    onError: (err) => {
+      message.error(err.response?.data?.detail || 'Lỗi cập nhật lương');
+    },
+  });
+
+  const handleSaveSalary = (employeeId, originalValue) => {
+    if (editValue == null || editValue < 0) {
+      setEditingKey(null);
+      setEditValue(null);
+      return;
+    }
+    // Không gọi API nếu giá trị không thay đổi
+    if (editValue === originalValue) {
+      setEditingKey(null);
+      setEditValue(null);
+      return;
+    }
+    updateSalaryMut.mutate({ employee_id: employeeId, base_salary: editValue });
+  };
 
   const payrollRows = useMemo(() => {
     if (!att || !salariesData) return [];
@@ -278,8 +313,46 @@ export default function PayrollTable() {
     {
       title: 'L.Cơ bản',
       dataIndex: 'base_salary',
-      width: 110,
-      render: (v) => <span style={{ fontSize: 12 }}>{fmt(v)}</span>,
+      width: 130,
+      render: (v, r) => {
+        if (editingKey === r.employee_id) {
+          return (
+            <InputNumber
+              autoFocus
+              size="small"
+              value={editValue}
+              onChange={setEditValue}
+              onPressEnter={() => handleSaveSalary(r.employee_id, v)}
+              onBlur={() => handleSaveSalary(r.employee_id, v)}
+              formatter={(val) => `${val}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
+              parser={(val) => val.replace(/,/g, '')}
+              min={0}
+              step={100000}
+              style={{ width: 120 }}
+              status={updateSalaryMut.isPending ? 'warning' : undefined}
+            />
+          );
+        }
+        return (
+          <div
+            style={{
+              display: 'flex', alignItems: 'center', gap: 4,
+              cursor: isAdmin && !isLocked ? 'pointer' : 'default',
+            }}
+            onClick={() => {
+              if (isAdmin && !isLocked) {
+                setEditingKey(r.employee_id);
+                setEditValue(v);
+              }
+            }}
+          >
+            <span style={{ fontSize: 12 }}>{fmt(v)}</span>
+            {isAdmin && !isLocked && (
+              <EditOutlined style={{ fontSize: 10, color: '#9ca3af', opacity: 0.5 }} />
+            )}
+          </div>
+        );
+      },
     },
     {
       title: 'NC (TT/TC)',
@@ -441,6 +514,7 @@ export default function PayrollTable() {
         </div>
         <div style={{ marginLeft: 'auto', fontSize: 12, color: '#6b7280' }}>
           {isWorker ? 'Nhấp dòng lương để xem/in phiếu chi tiết' : 'Nhấp tên nhân viên để xem phiếu lương'}
+          {isAdmin && !isLocked && <span style={{ marginLeft: 8, color: '#6366f1' }}>· Nhấp L.Cơ bản để sửa</span>}
         </div>
       </div>
 
