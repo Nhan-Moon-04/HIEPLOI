@@ -113,6 +113,124 @@ async def get_salary_history(
     return rows
 
 
+@router.get("/export-template")
+async def export_salaries_template(
+    month_key: str = Query(..., description="YYYY-MM"),
+    db: AsyncSession = Depends(get_db),
+    current_user: AppUser = Depends(require_roles(UserRole.ADMIN, UserRole.ACCOUNTANT)),
+):
+    """Xuất file Excel mẫu lương cơ bản cố định chứa danh sách nhân viên hiện tại để điền và import lại."""
+    from fastapi.responses import StreamingResponse
+    import openpyxl
+    from openpyxl.styles import Font, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+    from io import BytesIO
+    
+    # 1. Query month workday config to get standard days
+    config_result = await db.execute(
+        select(MonthlyWorkdayConfig).where(MonthlyWorkdayConfig.month_key == month_key)
+    )
+    config = config_result.scalar_one_or_none()
+    standard_days = float(config.company_work_days) if config else 26.0
+
+    # 2. Query active employees
+    emp_q = select(Employee).where(Employee.is_active == True).order_by(Employee.employee_code)
+    emp_res = await db.execute(emp_q)
+    employees = emp_res.scalars().all()
+    
+    # 3. Query existing monthly salaries for this month to prefill if exists
+    salary_q = select(MonthlySalary).where(MonthlySalary.month_key == month_key)
+    salary_res = await db.execute(salary_q)
+    sal_map = {s.employee_id: s for s in salary_res.scalars().all()}
+
+    # Initialize workbook
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Bang Luong"
+    ws.views.sheetView[0].showGridLines = True
+
+    # Styling
+    thin_border = Border(
+        left=Side(style='thin', color='000000'),
+        right=Side(style='thin', color='000000'),
+        top=Side(style='thin', color='000000'),
+        bottom=Side(style='thin', color='000000')
+    )
+    font_bold = Font(name='Arial', size=10, bold=True)
+    font_regular = Font(name='Arial', size=10)
+    align_center = Alignment(horizontal='center', vertical='center')
+    align_left = Alignment(horizontal='left', vertical='center')
+    align_right = Alignment(horizontal='right', vertical='center')
+
+    # Row 1: Title
+    ws['A1'] = f"BẢNG LƯƠNG CỐ ĐỊNH - THÁNG {month_key}"
+    ws['A1'].font = Font(name='Arial', size=12, bold=True)
+
+    # Row 2: Workdays coefficient configuration
+    ws['F2'] = "He so luong"
+    ws['F2'].font = font_bold
+    ws['G2'] = standard_days
+    ws['G2'].font = font_regular
+    ws['G2'].number_format = '0.0'
+
+    # Row 3: Headers
+    headers = ["STT", "Mã NV", "Họ Tên", "Lương cơ bản", "Phụ cấp"]
+    for col_idx, header in enumerate(headers, 1):
+        cell = ws.cell(row=3, column=col_idx, value=header)
+        cell.font = font_bold
+        cell.alignment = align_center
+        cell.border = thin_border
+
+    # Row 4 onwards: Data
+    stt = 1
+    current_row = 4
+    for emp in employees:
+        sal = sal_map.get(emp.id)
+        # Fallback to employee profile salary if monthly salary not present
+        base_val = float(sal.base_salary) if (sal and sal.base_salary is not None) else float(emp.base_salary or 0.0)
+        allowance_val = float(sal.allowance) if (sal and sal.allowance is not None) else 0.0
+
+        row_data = [
+            stt,
+            emp.employee_code,
+            emp.full_name,
+            base_val,
+            allowance_val
+        ]
+        
+        for col_idx, val in enumerate(row_data, 1):
+            cell = ws.cell(row=current_row, column=col_idx, value=val)
+            cell.font = font_regular
+            cell.border = thin_border
+            if col_idx in (1, 2):
+                cell.alignment = align_center
+            elif col_idx == 3:
+                cell.alignment = align_left
+            else:
+                cell.alignment = align_right
+                cell.number_format = '#,##0'
+                
+        current_row += 1
+        stt += 1
+
+    # Column widths
+    column_widths = {1: 8, 2: 12, 3: 25, 4: 18, 5: 18, 6: 12, 7: 12}
+    for col_idx, width in column_widths.items():
+        col_letter = get_column_letter(col_idx)
+        ws.column_dimensions[col_letter].width = width
+
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    filename = f"Mau_nhap_luong_{month_key}.xlsx"
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
 @router.post("/import-base")
 async def import_base_salaries(
     month_key: str = Form(...),

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { DatePicker, Button, Table, message, Modal, Upload, Tag, Alert, Popconfirm } from 'antd';
-import { DollarOutlined, UploadOutlined, LockOutlined, UnlockOutlined, FileExcelOutlined } from '@ant-design/icons';
+import { DollarOutlined, UploadOutlined, LockOutlined, UnlockOutlined, FileExcelOutlined, DownloadOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import dayjs from 'dayjs';
 import api from '../api/client';
@@ -33,6 +33,25 @@ export default function BaseSalary() {
     },
     onError: (e) => message.error(e.response?.data?.detail || 'Lỗi import'),
   });
+
+  const handleDownloadTemplate = async () => {
+    try {
+      const response = await api.get('/salaries/export-template', {
+        params: { month_key: monthKey },
+        responseType: 'blob'
+      });
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `Mau_nhap_luong_${monthKey}.xlsx`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      message.success('Tải file mẫu thành công!');
+    } catch (e) {
+      message.error('Lỗi tải file mẫu: ' + (e.response?.data?.detail || e.message));
+    }
+  };
 
   const toggleLockMut = useMutation({
     mutationFn: (action) => {
@@ -87,6 +106,9 @@ export default function BaseSalary() {
                 </Popconfirm>
               ) : (
                 <>
+                  <Button icon={<DownloadOutlined />} onClick={handleDownloadTemplate}>
+                    Tải file mẫu
+                  </Button>
                   <Button icon={<UploadOutlined />} type="primary" onClick={() => setImportModal(true)}>
                     Import Excel
                   </Button>
@@ -165,6 +187,14 @@ export default function BaseSalary() {
           }
           style={{ marginBottom: 16 }}
         />
+        <Button 
+          icon={<DownloadOutlined />} 
+          onClick={handleDownloadTemplate} 
+          style={{ marginBottom: 12 }} 
+          block
+        >
+          Tải file mẫu Excel nhân viên hiện tại
+        </Button>
         <Upload
           accept=".xlsx,.xls"
           showUploadList={false}
