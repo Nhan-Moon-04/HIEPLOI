@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Form, Input, Button, message } from 'antd';
+import { Form, Input, Button, message, Radio } from 'antd';
 import {
   UserOutlined,
   LockOutlined,
@@ -31,6 +31,7 @@ const NAV_ITEMS = [
   { key: 'profile',     icon: <IdcardOutlined />,      label: 'Hồ sơ & Mật khẩu' },
   { key: 'company',    icon: <BankOutlined />,          label: 'Công ty' },
   { key: 'appearance', icon: <FormatPainterOutlined />, label: 'Giao diện' },
+  { key: 'salary_config', icon: <SaveOutlined />, label: 'Cấu hình tính lương' },
 ];
 
 const ROLE_LABELS = {
@@ -45,6 +46,14 @@ export default function Settings() {
   const { mode, primaryColor, setTheme } = useThemeStore();
   const [activeTab, setActiveTab] = useState('profile');
   const [profileLoading, setProfileLoading] = useState(false);
+  const [otStyle, setOtStyle] = useState(() => localStorage.getItem('otCalculationStyle') || 'old');
+
+  const handleOtStyleChange = (e) => {
+    const val = e.target.value;
+    setOtStyle(val);
+    localStorage.setItem('otCalculationStyle', val);
+    message.success('Đã lưu cấu hình tính tăng ca');
+  };
   const [pwLoading, setPwLoading] = useState(false);
   const [pwForm] = Form.useForm();
 
@@ -359,6 +368,40 @@ export default function Settings() {
                     </button>
                   ))}
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── Cấu hình tính lương ── */}
+          {activeTab === 'salary_config' && (
+            <div className="st-card st-card--single">
+              <div className="st-card-head">
+                <SaveOutlined className="st-card-icon st-card-icon--blue" style={{ color: '#276EF1' }} />
+                <div>
+                  <div className="st-card-title">Cấu hình tính lương &amp; tăng ca (OT)</div>
+                  <div className="st-card-desc">Thiết lập hình thức tính toán công và OT cho bảng lương</div>
+                </div>
+              </div>
+              <div style={{ marginTop: 20 }}>
+                <h4 style={{ marginBottom: 12, fontSize: 14 }}>Hình thức tính tăng ca (OT):</h4>
+                <Radio.Group value={otStyle} onChange={handleOtStyleChange} size="middle" className="ot-radio-group">
+                  <div style={{ marginBottom: 16 }}>
+                    <Radio value="old">
+                      <span style={{ fontWeight: '600' }}>Kiểu cũ (Tự động)</span>
+                    </Radio>
+                    <div style={{ paddingLeft: 24, color: '#6b7280', fontSize: 12, marginTop: 4 }}>
+                      Tự động tính giờ tăng ca (OT) dựa trên ca làm việc và log quẹt thẻ của nhân viên (tự động cộng OT ngày thường, nhân hệ số ngày Chủ nhật/Lễ).
+                    </div>
+                  </div>
+                  <div>
+                    <Radio value="new">
+                      <span style={{ fontWeight: '600' }}>Kiểu mới (Theo OT thực tế duyệt)</span>
+                    </Radio>
+                    <div style={{ paddingLeft: 24, color: '#6b7280', fontSize: 12, marginTop: 4 }}>
+                      Chỉ tính tăng ca dựa trên giờ OT thực tế đã được duyệt thủ công hoặc import từ file Excel trên bảng lương. Nếu không có duyệt, giờ OT mặc định là 0.
+                    </div>
+                  </div>
+                </Radio.Group>
               </div>
             </div>
           )}

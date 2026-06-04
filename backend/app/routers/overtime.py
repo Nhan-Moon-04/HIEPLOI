@@ -15,6 +15,7 @@ from app.models.employee import Employee
 from app.models.shift import ShiftTemplate
 from app.models.attendance import AttendanceDaily, AttendanceLog
 from app.models.holiday import CompanyHoliday
+from app.models.x_overtime import XOvertimeConfig
 from app.models.user import AppUser, UserRole
 from app.middleware.auth import get_current_user
 from app.routers.attendance import evaluate_attendance, parse_time
@@ -334,6 +335,7 @@ class OvertimeMonthResponse(BaseModel):
 @router.get("", response_model=OvertimeMonthResponse)
 async def get_overtime(
     month_key: str = Query(..., description="YYYY-MM"),
+    ot_style: Optional[str] = Query("old", description="old or new"),
     db: AsyncSession = Depends(get_db),
     current_user: AppUser = Depends(get_current_user),
 ):
@@ -437,6 +439,19 @@ async def get_overtime(
             attendance_log_rows=logs_with_id
         )
 
+        # Load X overtime configs cho tháng
+        xot_map = {}
+        if emp_id_list:
+            xot_q = select(XOvertimeConfig).where(
+                and_(
+                    XOvertimeConfig.work_date >= first_day,
+                    XOvertimeConfig.work_date <= last_day,
+                    XOvertimeConfig.employee_id.in_(emp_id_list),
+                )
+            )
+            xot_result = await db.execute(xot_q)
+            xot_map = {(c.employee_id, c.work_date): c for c in xot_result.scalars().all()}
+
         # Build OT data
         rows = []
         grand_ot_normal = 0
@@ -482,6 +497,11 @@ async def get_overtime(
                     ev = evaluate_attendance(shift, check_in_dt, check_out_dt, dt, is_sunday, is_holiday)
                     ot_hours = float(ev["ot_hours"])
                     shift_code = shift.code if shift else None
+
+                # Apply new ot_style override if needed
+                if ot_style == "new":
+                    xot = xot_map.get((emp.id, dt))
+                    ot_hours = float(xot.ot_hours) if (xot and xot.ot_hours is not None) else 0.0
 
                 # Categorize OT
                 if is_holiday:
@@ -564,6 +584,24 @@ async def export_actual_ot(
     try:
         rows = await _compute_actual_ot(month_key, db, current_user)
 
+        from decimal import Decimal
+        # Map employee code to ID
+        emp_r = await db.execute(select(Employee))
+        emp_map = {str(e.employee_code).lstrip("'"): e.id for e in emp_r.scalars().all()}
+
+        # Load X overtime configs cho tháng
+        year, month = map(int, month_key.split("-"))
+        first_day = date(year, month, 1)
+        last_day = date(year, month, calendar.monthrange(year, month)[1])
+        xot_q = select(XOvertimeConfig).where(
+            and_(
+                XOvertimeConfig.work_date >= first_day,
+                XOvertimeConfig.work_date <= last_day,
+            )
+        )
+        xot_result = await db.execute(xot_q)
+        xot_map = {(c.employee_id, c.work_date): c for c in xot_result.scalars().all()}
+
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = f"OT Thuc Te {month_key}"
@@ -583,7 +621,7 @@ async def export_actual_ot(
         left   = Alignment(horizontal="left",   vertical="center")
 
         # ── Header ─────────────────────────────────────────────────────────
-        headers = ["STT", "Mã NV", "Họ tên", "Ngày", "Thứ", "Giờ ca", "Giờ vào", "Giờ ra", "OT (giờ)"]
+        headers = ["STT", "Mã NV", "Họ tên", "Ngày", "Thứ", "Giờ ca", "Giờ vào", "Giờ ra", "OT (giờ)", "Chấp Nhận"]
         for col, h in enumerate(headers, 1):
             c = ws.cell(row=1, column=col, value=h)
             c.fill = hdr_fill
@@ -591,7 +629,7 @@ async def export_actual_ot(
             c.alignment = hdr_align
         ws.row_dimensions[1].height = 24
 
-        for i, w in enumerate([6, 9, 28, 11, 6, 16, 10, 10, 10], 1):
+        for i, w in enumerate([6, 9, 28, 11, 6, 16, 10, 10, 10, 12], 1):
             ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = w
         ws.freeze_panes = "A2"
 
@@ -608,10 +646,24 @@ async def export_actual_ot(
                 is_sun = row["is_sunday"]
                 # Format "HH:MM - HH:MM" with spaces for readability
                 shift_disp = row["shift_hours"].replace("-", " - ") if "-" in row["shift_hours"] else row["shift_hours"]
+                
+                # Check current approved config
+                work_date_obj = datetime.strptime(row["work_date"], "%d/%m/%Y").date()
+                eid = emp_map.get(str(row["employee_code"]).lstrip("'"))
+                xot = xot_map.get((eid, work_date_obj)) if eid else None
+                
+                approve_val = ""
+                if xot:
+                    if xot.ot_hours == Decimal(str(row["ot_hours"])):
+                        approve_val = "x"
+                    else:
+                        approve_val = float(xot.ot_hours) if xot.ot_hours else ""
+
                 vals = [
                     row["stt"], row["employee_code"], row["full_name"],
                     row["work_date"], row["weekday"], shift_disp,
                     row["check_in"], row["check_out"], row["ot_hours"],
+                    approve_val
                 ]
                 for col, val in enumerate(vals, 1):
                     c = ws.cell(row=excel_row, column=col, value=val)
@@ -632,7 +684,7 @@ async def export_actual_ot(
             c_code.alignment = center
             c_ot.alignment   = center
             # Fill remaining cells of subtotal row with same bg
-            for col in [1, 4, 5, 6, 7, 8]:
+            for col in [1, 4, 5, 6, 7, 8, 10]:
                 ws.cell(row=excel_row, column=col).fill = sub_fill
             excel_row += 1
             excel_row += 1  # dòng trống ngăn cách giữa các nhân viên

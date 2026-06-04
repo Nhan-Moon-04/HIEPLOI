@@ -316,6 +316,7 @@ async def get_attendance(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     night_allowance_rate: Optional[float] = 0.0,
+    ot_style: Optional[str] = Query("old", description="old or new"),
     db: AsyncSession = Depends(get_db),
     current_user: AppUser = Depends(get_current_user),
 ):
@@ -486,6 +487,7 @@ async def get_attendance(
         total_ot_holiday = 0.0
         total_meal_count = 0
         total_meal_allowance = 0.0
+        total_paid_leave = 0.0
 
         for dt in range_dates:
             d = dt.day
@@ -508,6 +510,15 @@ async def get_attendance(
                     shift = default_shift if (default_shift and (default_shift.code or "").upper() in DRIVER_AUTO_OT_SHIFT_CODES) else None
                 else:
                     shift = default_shift
+
+            # Calculate paid leave contribution
+            if shift and shift.is_leave_code and shift.is_paid_leave:
+                if shift.code == "P":
+                    total_paid_leave += 1.0
+                elif shift.code in ("S", "C"):
+                    total_paid_leave += 0.5
+                else:
+                    total_paid_leave += 1.0
 
             # Get attendance record
             att = att_map.get((emp.id, dt))
@@ -626,6 +637,10 @@ async def get_attendance(
                     elif ((check_out_dt.hour * 60 + check_out_dt.minute) >= 17 * 60 + 50 and shift_end_t.hour < 18) or (actual_ot_h >= 3):
                         ot_eligible_val = True
 
+            if ot_style == "new":
+                xot = xot_map.get((emp.id, dt))
+                ev["ot_hours"] = float(xot.ot_hours) if (xot and xot.ot_hours is not None) else 0.0
+
             cell = AttendanceCell(
                 work_date=str(dt),
                 day=d,
@@ -695,7 +710,7 @@ async def get_attendance(
                 "total_meal_count": total_meal_count,
                 "total_meal_allowance": sum(c.meal_allowance for c in days_cells),
                 "total_night_allowance": sum(c.night_allowance for c in days_cells),
-                "total_paid_leave": len([c for c in days_cells if c.status == "off" and c.notes and "Nghi" not in c.notes]) # Gian luoc
+                "total_paid_leave": total_paid_leave
             },
         ))
 

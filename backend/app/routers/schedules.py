@@ -3,7 +3,7 @@ from datetime import date
 import calendar
 import re
 from io import BytesIO
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, delete, cast, Integer
 from app.database import get_db
@@ -431,5 +431,181 @@ async def delete_x_overtime_range(
         "deleted_count": result.rowcount,
         "start_date": str(start_date),
         "end_date": str(end_date),
+    }
+
+
+class XOvertimeBatchItem(BaseModel):
+    employee_id: int
+    work_date: date
+    ot_hours: Optional[Decimal] = None
+    meal_count: Optional[int] = None
+    ot_end_time: Optional[str] = None
+
+
+@router.put("/x-overtime/batch")
+async def batch_upsert_x_overtime_config(
+    request: List[XOvertimeBatchItem],
+    db: AsyncSession = Depends(get_db),
+    current_user: AppUser = Depends(require_roles(UserRole.ADMIN, UserRole.ACCOUNTANT)),
+):
+    from datetime import time as dt_time
+
+    for item in request:
+        await check_date_locked(db, item.work_date)
+        
+        result = await db.execute(
+            select(XOvertimeConfig).where(
+                and_(
+                    XOvertimeConfig.employee_id == item.employee_id,
+                    XOvertimeConfig.work_date == item.work_date,
+                )
+            )
+        )
+        cfg = result.scalar_one_or_none()
+        
+        parsed_end_time = None
+        if item.ot_end_time:
+            parts = item.ot_end_time.split(":")
+            parsed_end_time = dt_time(int(parts[0]), int(parts[1]))
+        
+        if item.ot_hours is None or item.ot_hours <= 0:
+            if cfg:
+                await db.delete(cfg)
+        else:
+            if cfg:
+                cfg.ot_end_time = parsed_end_time
+                cfg.ot_hours = item.ot_hours
+                cfg.meal_count = item.meal_count or 0
+            else:
+                cfg = XOvertimeConfig(
+                    employee_id=item.employee_id,
+                    work_date=item.work_date,
+                    ot_end_time=parsed_end_time,
+                    ot_hours=item.ot_hours,
+                    meal_count=item.meal_count or 0,
+                )
+                db.add(cfg)
+    
+    await db.commit()
+    return {"message": "Đã lưu phê duyệt tăng ca hàng loạt"}
+
+
+@router.post("/x-overtime/import-actual")
+async def import_actual_overtime(
+    month_key: str = Form(...),
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: AppUser = Depends(require_roles(UserRole.ADMIN, UserRole.ACCOUNTANT)),
+):
+    await check_month_locked(db, month_key)
+    
+    content = await file.read()
+    try:
+        import openpyxl
+        wb = openpyxl.load_workbook(BytesIO(content), data_only=True)
+    except Exception:
+        raise HTTPException(400, "File không hợp lệ. Vui lòng upload file Excel (.xlsx)")
+    
+    ws = wb.active
+    headers = [str(ws.cell(1, col).value or "").strip() for col in range(1, ws.max_column + 1)]
+    
+    try:
+        col_emp_code = headers.index("Mã NV") + 1
+        col_date = headers.index("Ngày") + 1
+        col_ot_actual = headers.index("OT (giờ)") + 1
+    except ValueError:
+        raise HTTPException(400, "File Excel thiếu các cột bắt buộc: 'Mã NV', 'Ngày', 'OT (giờ)'")
+        
+    col_approve = None
+    for col_idx, h in enumerate(headers, 1):
+        if "chap nhan" in h.lower().replace("ấ", "a").replace("ậ", "a"):
+            col_approve = col_idx
+            break
+    
+    if not col_approve:
+        raise HTTPException(400, "File Excel thiếu cột 'Chấp Nhận'")
+        
+    emp_r = await db.execute(select(Employee))
+    emp_map = {str(e.employee_code).lstrip("'"): e.id for e in emp_r.scalars().all()}
+    
+    created = 0
+    updated = 0
+    deleted = 0
+    
+    from datetime import datetime as dt_datetime
+    
+    for r in range(2, ws.max_row + 1):
+        emp_code = ws.cell(r, col_emp_code).value
+        if emp_code is None:
+            continue
+        emp_code = str(int(emp_code) if isinstance(emp_code, float) else emp_code).strip().lstrip("'")
+        if emp_code not in emp_map:
+            continue
+        emp_id = emp_map[emp_code]
+        
+        date_val = ws.cell(r, col_date).value
+        if not date_val:
+            continue
+            
+        if isinstance(date_val, (date, dt_datetime)):
+            work_date = date_val.date() if isinstance(date_val, dt_datetime) else date_val
+        else:
+            try:
+                parts = str(date_val).strip().split("/")
+                work_date = date(int(parts[2]), int(parts[1]), int(parts[0]))
+            except Exception:
+                continue
+        
+        if work_date.strftime("%Y-%m") != month_key:
+            continue
+            
+        approve_val = ws.cell(r, col_approve).value
+        ot_actual_val = ws.cell(r, col_ot_actual).value
+        
+        ot_hours = None
+        if approve_val is not None:
+            approve_str = str(approve_val).strip().lower()
+            if approve_str == "x":
+                try:
+                    ot_hours = Decimal(str(ot_actual_val or 0))
+                except Exception:
+                    ot_hours = Decimal(0)
+            else:
+                try:
+                    ot_hours = Decimal(approve_str)
+                except Exception:
+                    pass
+        
+        ex_q = await db.execute(
+            select(XOvertimeConfig).where(
+                and_(XOvertimeConfig.employee_id == emp_id, XOvertimeConfig.work_date == work_date)
+            )
+        )
+        cfg = ex_q.scalar_one_or_none()
+        
+        if ot_hours is not None and ot_hours > 0:
+            if cfg:
+                cfg.ot_hours = ot_hours
+                updated += 1
+            else:
+                cfg = XOvertimeConfig(
+                    employee_id=emp_id,
+                    work_date=work_date,
+                    ot_hours=ot_hours,
+                    meal_count=0
+                )
+                db.add(cfg)
+                created += 1
+        else:
+            if cfg:
+                await db.delete(cfg)
+                deleted += 1
+                
+    await db.commit()
+    return {
+        "message": f"Import thành công! Đã duyệt mới {created}, cập nhật {updated}, xóa {deleted} dòng tăng ca.",
+        "created": created,
+        "updated": updated,
+        "deleted": deleted
     }
 
