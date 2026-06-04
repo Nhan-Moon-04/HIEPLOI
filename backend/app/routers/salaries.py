@@ -557,3 +557,425 @@ async def get_loan_installments(
             "notes": p.notes,
         })
     return rows
+
+
+def calc_tncn(taxable: float) -> int:
+    if taxable <= 0:
+        return 0
+    tax = 0.0
+    tax += min(taxable, 10000000.0) * 0.05
+    tax += min(max(taxable - 10000000.0, 0.0), 20000000.0) * 0.10
+    tax += min(max(taxable - 30000000.0, 0.0), 30000000.0) * 0.20
+    tax += min(max(taxable - 60000000.0, 0.0), 40000000.0) * 0.30
+    tax += max(taxable - 100000000.0, 0.0) * 0.35
+    return int(round(tax))
+
+
+def vietnamese_number_to_words(number: int) -> str:
+    if number == 0:
+        return "Không đồng"
+    
+    units = ["", "một", "hai", "ba", "bốn", "năm", "sáu", "bảy", "tám", "chín"]
+    
+    def read_three_digits(n: int, show_zero_hundred: bool = False) -> str:
+        hundred = n // 100
+        ten = (n % 100) // 10
+        unit = n % 10
+        
+        res = []
+        if hundred > 0 or show_zero_hundred:
+            res.append(units[hundred] + " trăm")
+            
+        if ten > 1:
+            res.append(units[ten] + " mươi")
+            if unit == 1:
+                res.append("mốt")
+            elif unit == 5:
+                res.append("lăm")
+            elif unit > 0:
+                res.append(units[unit])
+        elif ten == 1:
+            res.append("mười")
+            if unit == 5:
+                res.append("lăm")
+            elif unit > 0:
+                res.append(units[unit])
+        else: # ten == 0
+            if (hundred > 0 or show_zero_hundred) and unit > 0:
+                res.append("lẻ")
+            if unit > 0:
+                res.append(units[unit])
+                
+        return " ".join(res)
+
+    groups = []
+    temp = number
+    while temp > 0:
+        groups.append(temp % 1000)
+        temp //= 1000
+        
+    scales = ["", "nghìn", "triệu", "tỷ", "nghìn tỷ", "triệu tỷ"]
+    words = []
+    
+    for idx, val in enumerate(groups):
+        if val > 0:
+            show_zero = (idx < len(groups) - 1)
+            group_word = read_three_digits(val, show_zero)
+            scale_word = scales[idx]
+            if scale_word:
+                words.append(group_word + " " + scale_word)
+            else:
+                words.append(group_word)
+                
+    words.reverse()
+    result_str = ", ".join(words).replace("  ", " ").strip()
+    return result_str[0].upper() + result_str[1:] + " đồng"
+
+
+@router.get("/export-detail")
+async def export_payroll_detail(
+    month_key: str = Query(..., description="YYYY-MM"),
+    ot_style: Optional[str] = Query("old", description="old or new"),
+    night_allowance_rate: Optional[float] = Query(100000.0),
+    db: AsyncSession = Depends(get_db),
+    current_user: AppUser = Depends(require_roles(UserRole.ADMIN, UserRole.ACCOUNTANT)),
+):
+    """Xuất Excel bảng kê tiền lương chi tiết song ngữ Trung - Việt theo mẫu"""
+    from app.routers.attendance import get_attendance
+    from fastapi.responses import StreamingResponse
+    import openpyxl
+    from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
+    from openpyxl.utils import get_column_letter
+    from io import BytesIO
+    from app.models.department import Department
+    
+    # Fetch department mapping for codes
+    dept_q = select(Department)
+    dept_res = await db.execute(dept_q)
+    dept_map = {d.name: d for d in dept_res.scalars().all()}
+    
+    # 1. Fetch data using the shared get_attendance endpoint logic
+    att_res = await get_attendance(
+        month_key=month_key,
+        night_allowance_rate=night_allowance_rate,
+        ot_style=ot_style,
+        db=db,
+        current_user=current_user
+    )
+    
+    # 2. Fetch Base Salaries
+    salary_q = select(MonthlySalary).where(MonthlySalary.month_key == month_key)
+    salary_res = await db.execute(salary_q)
+    salary_map = {s.employee_id: s for s in salary_res.scalars().all()}
+    
+    # 3. Fetch Advances
+    year, month = map(int, month_key.split("-"))
+    adv_q = select(AdvancePayment).where(AdvancePayment.month_key == month_key)
+    adv_res = await db.execute(adv_q)
+    advances = adv_res.scalars().all()
+    adv_map = {}
+    for a in advances:
+        adv_map[a.employee_id] = adv_map.get(a.employee_id, 0.0) + float(a.amount or 0)
+        
+    # 4. Fetch Employees
+    emp_q = select(Employee)
+    emp_res = await db.execute(emp_q)
+    employees_db = {e.id: e for e in emp_res.scalars().all()}
+    
+    # 5. Month Config
+    config_result = await db.execute(select(MonthlyWorkdayConfig).where(MonthlyWorkdayConfig.month_key == month_key))
+    config = config_result.scalar_one_or_none()
+    standard_days = float(config.company_work_days) if config else 26.0
+    
+    # 6. Initialize workbook
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = f"Bang Ke Luong {month}-{year}"
+    ws.views.sheetView[0].showGridLines = True
+    
+    # Border & Font styles
+    thin_border = Border(
+        left=Side(style='thin', color='000000'),
+        right=Side(style='thin', color='000000'),
+        top=Side(style='thin', color='000000'),
+        bottom=Side(style='thin', color='000000')
+    )
+    double_bottom_border = Border(
+        left=Side(style='thin', color='000000'),
+        right=Side(style='thin', color='000000'),
+        top=Side(style='thin', color='000000'),
+        bottom=Side(style='double', color='000000')
+    )
+    
+    font_header = Font(name='Arial', size=9, bold=True)
+    font_data = Font(name='Arial', size=9)
+    font_data_bold = Font(name='Arial', size=9, bold=True)
+    align_center = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    align_left = Alignment(horizontal='left', vertical='center', wrap_text=True)
+    align_right = Alignment(horizontal='right', vertical='center', wrap_text=True)
+    
+    fill_header = PatternFill(start_color="FFE599", end_color="FFE599", fill_type="solid") # soft light orange/yellow
+    fill_gross = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid") # soft yellow
+    fill_advance = PatternFill(start_color="F4CCCC", end_color="F4CCCC", fill_type="solid") # soft pink
+    fill_net = PatternFill(start_color="D9EAD3", end_color="D9EAD3", fill_type="solid") # soft green for actual pay!
+    
+    # Title Block
+    ws['A1'] = "CÔNG TY TNHH HIỆP LỢI - 越南協利有限公司"
+    ws['A1'].font = Font(name='Arial', size=11, bold=True)
+    
+    ws.merge_cells('A2:Z2')
+    title_cell = ws['A2']
+    title_cell.value = f"BẢNG KÊ TIỀN LƯƠNG VÀ CÁC KHOẢN THU NHẬP KHÁC THÁNG {month} NĂM {year}***{year} 年 {month} 月份文房薪資表"
+    title_cell.font = Font(name='Arial', size=13, bold=True)
+    title_cell.alignment = align_center
+    ws.row_dimensions[2].height = 30
+    
+    # Headers definition: (text, start_col, end_col, start_row, end_row)
+    headers = [
+        ("STT\n序號", 1, 1, 3, 4),
+        ("HỌ VÀ TÊN\n姓名", 2, 2, 3, 4),
+        ("NGÀY VÀO\n入廠日期", 3, 3, 3, 4),
+        ("CHỨC VỤ\n職務", 4, 5, 3, 4),
+        ("基本薪資\nLƯƠNG CĂN\nBẢN", 6, 6, 3, 4),
+        ("日數\nNGÀY\nCÔNG", 7, 7, 3, 4),
+        ("金額\nTHÀNH\nTIỀN", 8, 8, 3, 4),
+        
+        ("加 班 平 常 T.CA THƯỜNG", 9, 11, 3, 3),
+        ("總小時\nTỔNG\nGIỜ", 9, 9, 4, 4),
+        ("加班費\nTIỀN\nTĂNG CA", 10, 10, 4, 4),
+        ("金額\nTHÀNH\nTIỀN", 11, 11, 4, 4),
+        
+        ("星期天 T.CA CN", 12, 14, 3, 3),
+        ("總小時\nTỔNG\nGIỜ", 12, 12, 4, 4),
+        ("加班費\nTIỀN\nTĂNG CA", 13, 13, 4, 4),
+        ("金額\nTHÀNH\nTIỀN", 14, 14, 4, 4),
+        
+        ("職務獎\nBỒI\nDƯỠNG &\nTRÁCH\nNHIỆM", 15, 15, 3, 4),
+        ("補助育兒\nBỒI DƯỠNG\n/PHỤ CẤP\nNUÔI\nCON NHỎ\n<6 TUỔI", 16, 16, 3, 4),
+        ("補助、交通、電話、夜班\nXĂNG,\nĐIỆN\nTHOẠI,\nNHÀ Ở,\nCA ĐÊM\n(PC KO\nCHỊU\nTHUẾ)", 17, 17, 3, 4),
+        ("全勤獎\nTIỀN\nCHUYÊN\nCẦN", 18, 18, 3, 4),
+        ("合計\nTỔNG\nCỘNG", 19, 19, 3, 4),
+        ("Trừ BHXH,\nBHYT,\nBHTN,\nBHTNLĐ-\nBNN\n10.5%", 20, 20, 3, 4),
+        ("個人\n所得稅\nThuế\nTNCN", 21, 21, 3, 4),
+        ("工會費\nTIỀN\nCÔNG\nĐOÀN\nPHÍ CĐ", 22, 22, 3, 4),
+        ("績效獎金\nTHƯỞNG\nNĂNG\nSUẤT", 23, 23, 3, 4),
+        ("借支\nTẠM\nỨNG", 24, 24, 3, 4),
+        ("實發金額\nTHỰC\nLÃNH", 25, 25, 3, 4),
+        ("簽收\nKÝ TÊN", 26, 26, 3, 4),
+    ]
+    
+    for h_text, sc, ec, sr, er in headers:
+        for r_idx in range(sr, er + 1):
+            for c_idx in range(sc, ec + 1):
+                cell = ws.cell(row=r_idx, column=c_idx)
+                cell.border = thin_border
+                cell.font = font_header
+                cell.alignment = align_center
+                cell.fill = fill_header
+                if r_idx == sr and c_idx == sc:
+                    cell.value = h_text
+        if sc != ec or sr != er:
+            ws.merge_cells(start_row=sr, start_column=sc, end_row=er, end_column=ec)
+                
+    ws.row_dimensions[3].height = 28
+    ws.row_dimensions[4].height = 42
+    
+    # Row data
+    current_row = 5
+    stt = 1
+    sum_net = 0.0
+
+    for row in att_res.rows:
+        emp_id = row.employee_id
+        emp = employees_db.get(emp_id)
+        sal = salary_map.get(emp_id)
+        
+        base_salary = float(sal.base_salary) if (sal and sal.base_salary is not None) else float(emp.base_salary or 0.0) if emp else 0.0
+        fixed_allowance = float(sal.allowance or 0) if sal else 0.0
+        dependents = emp.dependents if emp else 0
+        summary = row.summary or {}
+        
+        actual_days = float(summary.get("total_present") or 0) + float(summary.get("total_paid_leave") or 0)
+        
+        ot_wd = float(summary.get("total_ot_weekday") or summary.get("total_ot") or 0)
+        ot_sun = float(summary.get("total_ot_sunday") or 0)
+        ot_hol = float(summary.get("total_ot_holiday") or 0)
+        
+        meal_allowance = float(summary.get("total_meal_allowance") or 0)
+        night_allowance = float(summary.get("total_night_allowance") or 0)
+        advance = float(adv_map.get(emp_id, 0.0))
+        
+        daily_rate = base_salary / standard_days if standard_days > 0 else 0.0
+        hourly_rate = daily_rate / 8
+        
+        is_usd = 0.0 < base_salary < 100000
+        coef = float(sal.salary_coefficient or 1.0) if sal else 1.0
+        
+        salary_from_days = round(coef * base_salary) if is_usd else round(actual_days * daily_rate)
+        ot_pay_wd = 0 if is_usd else round(ot_wd * hourly_rate * 1.5)
+        ot_pay_sun = 0 if is_usd else round(ot_sun * hourly_rate * 2.0)
+        ot_pay_hol = 0 if is_usd else round(ot_hol * hourly_rate * 3.0)
+        ot_pay = ot_pay_wd + ot_pay_sun + ot_pay_hol
+        
+        gross = salary_from_days + ot_pay + fixed_allowance + night_allowance
+        bhxh = 0 if is_usd else round((base_salary + fixed_allowance) * 0.105)
+        union_fee = 0 if is_usd else round(base_salary * 0.01)
+        taxable = max(0, gross - bhxh - 11000000 - dependents * 4400000)
+        tncn = calc_tncn(taxable)
+        net = round(gross - bhxh - union_fee - tncn - advance)
+        
+        sum_net += net
+        
+        join_date_str = ""
+        if emp and emp.join_date:
+            join_date_str = emp.join_date.strftime("%d/%m/%Y")
+            
+        # Map department name to department code if possible
+        dept_obj = dept_map.get(emp.department) if emp else None
+        dept_code = dept_obj.code if dept_obj else (emp.department if emp else "")
+        
+        row_data = [
+            stt,
+            emp.full_name if emp else "",
+            join_date_str,
+            dept_code,
+            emp.position if (emp and emp.position) else "",
+            base_salary, # F
+            coef if is_usd else actual_days, # G
+            f"=F{current_row}*G{current_row}" if is_usd else f"=ROUND(F{current_row}*G{current_row}/{standard_days}, 0)", # H
+            0 if is_usd else ot_wd, # I
+            0 if is_usd else f"=ROUND(F{current_row}/{standard_days}/8*1.5, 0)", # J
+            0 if is_usd else f"=ROUND(I{current_row}*F{current_row}/{standard_days}/8*1.5, 0)", # K
+            0 if is_usd else ot_sun, # L
+            0 if is_usd else f"=ROUND(F{current_row}/{standard_days}/8*2, 0)", # M
+            0 if is_usd else f"=ROUND(L{current_row}*F{current_row}/{standard_days}/8*2, 0)", # N
+            fixed_allowance, # O
+            0, # P
+            night_allowance, # Q
+            0, # R
+            f"=H{current_row}+K{current_row}+N{current_row}+O{current_row}+P{current_row}+Q{current_row}+R{current_row}", # S
+            0 if is_usd else f"=ROUND((F{current_row}+O{current_row})*0.105, 0)", # T
+            tncn, # U
+            0 if is_usd else f"=ROUND(F{current_row}*0.01, 0)", # V
+            0, # W
+            advance, # X
+            f"=S{current_row}-T{current_row}-U{current_row}-V{current_row}-W{current_row}-X{current_row}", # Y
+            "" # Z
+        ]
+        
+        for col_idx, val in enumerate(row_data, 1):
+            c = ws.cell(row=current_row, column=col_idx, value=val)
+            c.border = thin_border
+            c.font = font_data
+            
+            # Alignments
+            if col_idx in (1, 3, 4, 7, 9, 12): # STT, Date, Dept, Days, OT Hours
+                c.alignment = align_center
+            elif col_idx in (2, 5): # Name, Position
+                c.alignment = align_left
+            else:
+                c.alignment = align_right
+                
+            # Number formats and color fills
+            if col_idx in (6, 8, 10, 11, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25): # Money
+                c.number_format = '#,##0;-#,##0;"-"'
+                if col_idx == 19: # Gross
+                    c.fill = fill_gross
+                elif col_idx == 24: # Advance
+                    c.fill = fill_advance
+                elif col_idx == 25: # Net
+                    c.fill = fill_net
+            elif col_idx in (7, 9, 12): # Decimals
+                c.number_format = '0.00;-0.00;"-"'
+                    
+        ws.row_dimensions[current_row].height = 20
+        current_row += 1
+        stt += 1
+
+    # Total Row
+    tot_row = current_row
+    for col in range(1, 6):
+        c = ws.cell(row=tot_row, column=col)
+        c.border = double_bottom_border
+        c.font = font_data_bold
+        if col == 1:
+            c.value = "TỔNG CỘNG\n合計"
+            c.alignment = align_center
+    ws.merge_cells(start_row=tot_row, start_column=1, end_row=tot_row, end_column=5)
+            
+    for col in range(6, 27):
+        col_letter = get_column_letter(col)
+        c = ws.cell(row=tot_row, column=col)
+        c.border = double_bottom_border
+        c.font = font_data_bold
+        
+        if col in (10, 13, 26): # OT rates and signature are empty
+            c.value = ""
+        else:
+            c.value = f"=SUM({col_letter}5:{col_letter}{tot_row-1})"
+            if col in (7, 9, 12):
+                c.alignment = align_center
+                c.number_format = '0.00;-0.00;"-"'
+            else:
+                c.alignment = align_right
+                c.number_format = '#,##0;-#,##0;"-"'
+                
+                # Apply column fills to total row
+                if col == 19: # Gross
+                    c.fill = fill_gross
+                elif col == 24: # Advance
+                    c.fill = fill_advance
+                elif col == 25: # Net
+                    c.fill = fill_net
+
+    ws.row_dimensions[tot_row].height = 24
+    
+    # Financial details & Signatures below
+    current_row = tot_row + 2
+    ws.cell(row=current_row, column=2, value="Thành tiền:").font = font_data_bold
+    ws.cell(row=current_row, column=6, value=f"=Y{tot_row}").font = font_data_bold
+    ws.cell(row=current_row, column=6).number_format = '#,##0'
+    ws.cell(row=current_row, column=6).alignment = align_left
+    
+    current_row += 1
+    ws.cell(row=current_row, column=2, value="Bằng chữ:").font = font_data_bold
+    try:
+        words = vietnamese_number_to_words(int(sum_net))
+        ws.cell(row=current_row, column=6, value=words).font = Font(name='Arial', size=9, italic=True)
+        ws.cell(row=current_row, column=6).alignment = align_left
+    except Exception:
+        pass
+        
+    current_row += 2
+    ws.cell(row=current_row, column=2, value="Kế toán").font = font_data_bold
+    ws.cell(row=current_row, column=2).alignment = align_center
+    
+    ws.cell(row=current_row, column=12, value="Chủ quản").font = font_data_bold
+    ws.cell(row=current_row, column=12).alignment = align_center
+    
+    import datetime as dt_mod
+    today = dt_mod.date.today()
+    date_str = f"Ngày {today.day:02d} tháng {today.month:02d} năm {today.year}"
+    ws.cell(row=current_row, column=20, value=f"{date_str}\nTổng giám đốc").font = font_data_bold
+    ws.cell(row=current_row, column=20).alignment = align_center
+    
+    # Set widths
+    column_widths = {
+        1: 6, 2: 24, 3: 12, 4: 12, 5: 14, 6: 14, 7: 9, 8: 14, 9: 8, 10: 12,
+        11: 14, 12: 8, 13: 12, 14: 14, 15: 14, 16: 14, 17: 16, 18: 12, 19: 16,
+        20: 14, 21: 12, 22: 12, 23: 12, 24: 12, 25: 16, 26: 14
+    }
+    for col_idx, width in column_widths.items():
+        col_letter = get_column_letter(col_idx)
+        ws.column_dimensions[col_letter].width = width
+
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    
+    filename = f"Bang_luong_chi_tiet_{month_key}.xlsx"
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )

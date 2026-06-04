@@ -386,7 +386,7 @@ export default function PayrollTable() {
     const rows = (att.rows || []).map((row) => {
       const sal = salMap[row.employee_code] || {};
       const emp = empMap[row.employee_id] || {};
-      const base_salary = sal.base_salary || 0;
+      const base_salary = sal.base_salary || emp.base_salary || 0;
       const fixed_allowance = sal.allowance || 0;
       const dependents = emp.dependents ?? 0;
       const summary = row.summary || {};
@@ -796,6 +796,29 @@ export default function PayrollTable() {
     }
   };
 
+  const handleExportDetailExcel = async () => {
+    try {
+      const response = await api.get('/salaries/export-detail', {
+        params: {
+          month_key: monthKey,
+          ot_style: otStyle,
+          night_allowance_rate: nightRate
+        },
+        responseType: 'blob'
+      });
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `Bang_luong_chi_tiet_${monthKey}.xlsx`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      message.success('Đã tải file Excel bảng lương chi tiết');
+    } catch (err) {
+      message.error('Lỗi tải file bảng lương: ' + (err.response?.data?.detail || err.message));
+    }
+  };
+
   const handleUploadExcel = async ({ file, onSuccess, onError }) => {
     const formData = new FormData();
     formData.append('month_key', monthKey);
@@ -948,6 +971,19 @@ export default function PayrollTable() {
             <div className="emp-stat-chip" style={{ fontWeight: 700, color: '#059669' }}><b>{fmt(totals.net)}</b> đ thực lĩnh</div>
           </div>
         </div>
+        {!isWorker && (
+          <div className="emp-titlebar-right" style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Button
+              type="primary"
+              icon={<DownloadOutlined />}
+              onClick={handleExportDetailExcel}
+              style={{ background: '#276EF1', borderColor: '#276EF1' }}
+              size="middle"
+            >
+              Xuất Excel chi tiết
+            </Button>
+          </div>
+        )}
       </div>
 
       <div className="emp-filterbar">
