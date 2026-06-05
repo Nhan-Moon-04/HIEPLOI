@@ -95,11 +95,11 @@ export default function Employees() {
   };
 
   const statusMap = {
-    active:  { color: 'success',   text: 'Đang làm' },
-    new:     { color: 'processing', text: 'Mới vào' },
-    leaving: { color: 'warning',   text: 'Sắp nghỉ' },
-    left:    { color: 'error',     text: 'Đã nghỉ' },
-    not_yet: { color: 'default',   text: 'Chưa vào' },
+    active: { color: 'success', text: 'Đang làm' },
+    new: { color: 'processing', text: 'Mới vào' },
+    leaving: { color: 'warning', text: 'Sắp nghỉ' },
+    left: { color: 'error', text: 'Đã nghỉ' },
+    not_yet: { color: 'default', text: 'Chưa vào' },
   };
 
   const items = data?.items || [];

@@ -40,6 +40,9 @@ async def run_migration():
         )""",
         "ALTER TABLE departments ADD COLUMN sort_order INTEGER DEFAULT 0",
         "ALTER TABLE employees ADD COLUMN sort_order INTEGER DEFAULT 9999",
+        "ALTER TABLE company_holidays ADD COLUMN scope VARCHAR(32) DEFAULT 'all'",
+        "ALTER TABLE company_holidays ADD COLUMN departments VARCHAR(512)",
+        "ALTER TABLE company_holidays ADD COLUMN duration VARCHAR(16) DEFAULT 'full'",
     ]:
         try:
             async with engine.begin() as conn:

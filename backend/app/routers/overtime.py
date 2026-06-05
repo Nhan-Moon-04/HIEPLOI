@@ -18,7 +18,7 @@ from app.models.holiday import CompanyHoliday
 from app.models.x_overtime import XOvertimeConfig
 from app.models.user import AppUser, UserRole
 from app.middleware.auth import get_current_user
-from app.routers.attendance import evaluate_attendance, parse_time
+from app.routers.attendance import evaluate_attendance, parse_time, check_holiday_applies_to_employee
 from app.services.nu_shift import (
     is_nu_dynamic_shift_code, build_nu_shift_day_results,
     XNU_MODE_1, XNU_MODE_2, XNU_MODE_3, NU_NIGHT_MODE,
@@ -59,6 +59,22 @@ def _ceil_30min(dt: datetime) -> datetime:
     rounded = math.ceil(total / 30) * 30
     return dt.replace(hour=(rounded // 60) % 24, minute=rounded % 60,
                       second=0, microsecond=0)
+
+
+def _round_nearest_30min(dt: datetime) -> datetime:
+    """Làm tròn đến 30 phút gần nhất.
+    0-15p → :00, 16-30p → :30, 31-45p → :30, 46-59p → giờ chẵn kế."""
+    m = dt.minute
+    if m <= 15:
+        rounded_min = 0
+        h = dt.hour
+    elif m <= 45:
+        rounded_min = 30
+        h = dt.hour
+    else:
+        rounded_min = 0
+        h = (dt.hour + 1) % 24
+    return dt.replace(hour=h, minute=rounded_min, second=0, microsecond=0)
 
 
 async def _compute_actual_ot(month_key: str, db: AsyncSession, current_user) -> list:
@@ -120,6 +136,41 @@ async def _compute_actual_ot(month_key: str, db: AsyncSession, current_user) -> 
     )).scalars().all():
         att_map[(a.employee_id, a.work_date)] = a
 
+    # ── Holidays ───────────────────────────────────────────────────────────
+    holiday_q = select(CompanyHoliday).where(
+        and_(CompanyHoliday.holiday_date >= first_day, CompanyHoliday.holiday_date <= last_day, CompanyHoliday.is_active == True)
+    )
+    holiday_result = await db.execute(holiday_q)
+    holidays_in_range = list(holiday_result.scalars().all())
+
+    # Load holiday targets (for employee scope)
+    from app.models.holiday import HolidayTargetEmployee
+    holiday_ids = [h.id for h in holidays_in_range]
+    holiday_targets_map = {}
+    if holiday_ids:
+        target_res = await db.execute(
+            select(HolidayTargetEmployee.holiday_id, HolidayTargetEmployee.employee_id)
+            .where(HolidayTargetEmployee.holiday_id.in_(holiday_ids))
+        )
+        for h_id, emp_id in target_res.all():
+            if h_id not in holiday_targets_map:
+                holiday_targets_map[h_id] = set()
+            holiday_targets_map[h_id].add(emp_id)
+
+    # ── Holiday exceptions ──────────────────────────────────────────────────
+    from app.models.holiday import HolidayException
+    exc_q = select(HolidayException.employee_id, CompanyHoliday.holiday_date).join(
+        CompanyHoliday, HolidayException.holiday_id == CompanyHoliday.id
+    ).where(
+        and_(
+            CompanyHoliday.holiday_date >= first_day,
+            CompanyHoliday.holiday_date <= last_day,
+            CompanyHoliday.is_active == True
+        )
+    )
+    exc_res = await db.execute(exc_q)
+    holiday_exceptions = {(row[0], row[1]) for row in exc_res.all()}
+
     # ── NU raw logs (for mode detection) ───────────────────────────────────
     log_res = await db.execute(
         select(AttendanceLog).where(and_(
@@ -165,6 +216,8 @@ async def _compute_actual_ot(month_key: str, db: AsyncSession, current_user) -> 
 
         for d in range(1, days_in_month + 1):
             dt = date(year, month, d)
+            if (emp.join_date and dt < emp.join_date) or (emp.leave_date and dt > emp.leave_date):
+                continue
             is_sunday = dt.weekday() == 6
             dow = DOW_VN[dt.weekday()]
 
@@ -173,6 +226,15 @@ async def _compute_actual_ot(month_key: str, db: AsyncSession, current_user) -> 
             shift = shifts_by_id.get(ov_id) if ov_id else default_shift
             if shift and shift.is_leave_code:
                 continue
+
+            # Check if there is an active holiday on this date that applies to the employee
+            active_holiday = None
+            for h in holidays_in_range:
+                if h.holiday_date == dt:
+                    is_exception = (emp.id, dt) in holiday_exceptions
+                    if not is_exception and check_holiday_applies_to_employee(h, emp.id, emp.department, holiday_targets_map):
+                        active_holiday = h
+                        break
 
             # Attendance times — prefer NU-corrected times
             nu_res = nu_results.get((emp.id, dt))
@@ -184,7 +246,35 @@ async def _compute_actual_ot(month_key: str, db: AsyncSession, current_user) -> 
                 check_in_dt = att.first_check_in if att else None
                 check_out_dt = att.last_check_out if att else None
 
+            is_holiday = False
+            is_half_day_worked = False
+
+            if active_holiday:
+                if active_holiday.duration == "half":
+                    has_punches = False
+                    if nu_res:
+                        has_punches = bool(nu_res.check_in and nu_res.check_out)
+                    else:
+                        has_punches = bool(check_in_dt and check_out_dt)
+                    
+                    if has_punches:
+                        is_half_day_worked = True
+                        is_holiday = False
+                    else:
+                        is_holiday = True
+                        check_in_dt = None
+                        check_out_dt = None
+                        nu_res = None
+                else:
+                    is_holiday = True
+                    check_in_dt = None
+                    check_out_dt = None
+                    nu_res = None
+
             if not check_in_dt or not check_out_dt:
+                continue
+
+            if is_half_day_worked:
                 continue
 
             ot_hours = 0.0
@@ -218,14 +308,14 @@ async def _compute_actual_ot(month_key: str, db: AsyncSession, current_user) -> 
                     shift_hours_str = "Chủ nhật"
 
                 # Giờ vào hiệu lực:
-                #   TX: vô trước 06:15 → tính 06:00; từ 06:15 trở đi → ceil_30min
+                #   TX: làm tròn 30p gần nhất, cap tối thiểu 06:00
                 #   Non-TX vào sớm hoặc trễ ≤15p: lấy đúng giờ bắt đầu ca
                 #   Non-TX vào trễ >15p: làm tròn lên 30p
                 if is_tx:
-                    if check_in_dt < datetime.combine(dt, time(6, 15)):
-                        effective_in = datetime.combine(dt, time(6, 0))
-                    else:
-                        effective_in = _ceil_30min(check_in_dt)
+                    effective_in = _round_nearest_30min(check_in_dt)
+                    six_am = datetime.combine(dt, time(6, 0))
+                    if effective_in < six_am:
+                        effective_in = six_am
                 elif s_start_dt and check_in_dt <= s_start_dt + timedelta(minutes=15):
                     effective_in = s_start_dt
                 else:
@@ -285,10 +375,20 @@ async def _compute_actual_ot(month_key: str, db: AsyncSession, current_user) -> 
                         raw_min -= 30   # 30p nghỉ ngơi trước OT
                     ot_checkout = _round_ot_minutes(raw_min)
 
-                # TX1/TX2: vào trước 06h15 → +1h OT
+                # TX1/TX2: OT vào sớm — làm tròn 30p gần nhất, cap 6:00
                 ot_early = 0.0
-                if is_tx and check_in_dt < datetime.combine(dt, time(6, 15)):
-                    ot_early = 1.0
+                if is_tx and shift.start_time:
+                    shift_start_t_local = shift.start_time if isinstance(shift.start_time, time) else parse_time(shift.start_time)
+                    shift_start_dt = datetime.combine(dt, shift_start_t_local)
+                    effective_in = _round_nearest_30min(check_in_dt)
+                    six_am = datetime.combine(dt, time(6, 0))
+                    if effective_in < six_am:
+                        effective_in = six_am
+                    if effective_in < shift_start_dt:
+                        early_hours = (shift_start_dt - effective_in).total_seconds() / 3600.0
+                        ot_early = _to_half(early_hours)
+                        if ot_early < 1.0:
+                            ot_early = 0.0
 
                 ot_hours = ot_checkout + ot_early
                 if ot_hours <= 0:
@@ -370,7 +470,36 @@ async def get_overtime(
             and_(CompanyHoliday.holiday_date >= first_day, CompanyHoliday.holiday_date <= last_day, CompanyHoliday.is_active == True)
         )
         holiday_result = await db.execute(holiday_q)
-        holiday_dates = {h.holiday_date for h in holiday_result.scalars().all()}
+        holidays_in_range = list(holiday_result.scalars().all())
+        holiday_dates = {h.holiday_date for h in holidays_in_range}
+
+        # Load holiday targets (for employee scope)
+        from app.models.holiday import HolidayTargetEmployee
+        holiday_ids = [h.id for h in holidays_in_range]
+        holiday_targets_map = {}
+        if holiday_ids:
+            target_res = await db.execute(
+                select(HolidayTargetEmployee.holiday_id, HolidayTargetEmployee.employee_id)
+                .where(HolidayTargetEmployee.holiday_id.in_(holiday_ids))
+            )
+            for h_id, emp_id in target_res.all():
+                if h_id not in holiday_targets_map:
+                    holiday_targets_map[h_id] = set()
+                holiday_targets_map[h_id].add(emp_id)
+
+        # Load holiday exceptions
+        from app.models.holiday import HolidayException
+        exc_q = select(HolidayException.employee_id, CompanyHoliday.holiday_date).join(
+            CompanyHoliday, HolidayException.holiday_id == CompanyHoliday.id
+        ).where(
+            and_(
+                CompanyHoliday.holiday_date >= first_day,
+                CompanyHoliday.holiday_date <= last_day,
+                CompanyHoliday.is_active == True
+            )
+        )
+        exc_res = await db.execute(exc_q)
+        holiday_exceptions = {(row[0], row[1]) for row in exc_res.all()}
 
         # Load active employees
         from sqlalchemy import or_
@@ -469,7 +598,22 @@ async def get_overtime(
             for d in range(1, days_in_month + 1):
                 dt = date(year, month, d)
                 is_sunday = dt.weekday() == 6
-                is_holiday = dt in holiday_dates
+                if (emp.join_date and dt < emp.join_date) or (emp.leave_date and dt > emp.leave_date):
+                    days_data[d] = {
+                        "shift": None,
+                        "ot": 0.0,
+                        "is_sunday": is_sunday,
+                        "is_holiday": False
+                    }
+                    continue
+                # Check if there is an active holiday on this date that applies to the employee
+                active_holiday = None
+                for h in holidays_in_range:
+                    if h.holiday_date == dt:
+                        is_exception = (emp.id, dt) in holiday_exceptions
+                        if not is_exception and check_holiday_applies_to_employee(h, emp.id, emp.department, holiday_targets_map):
+                            active_holiday = h
+                            break
 
                 # Determine shift
                 override_id = override_map.get((emp.id, d))
@@ -486,6 +630,32 @@ async def get_overtime(
                 check_out_dt = att.last_check_out if att else None
                 
                 nu_res = nu_results.get((emp.id, dt))
+
+                is_holiday = False
+                is_half_day_worked = False
+
+                if active_holiday:
+                    if active_holiday.duration == "half":
+                        has_punches = False
+                        if nu_res:
+                            has_punches = bool(nu_res.check_in and nu_res.check_out)
+                        else:
+                            has_punches = bool(check_in_dt and check_out_dt)
+                        
+                        if has_punches:
+                            is_half_day_worked = True
+                            is_holiday = False
+                        else:
+                            is_holiday = True
+                            check_in_dt = None
+                            check_out_dt = None
+                            nu_res = None
+                    else:
+                        is_holiday = True
+                        check_in_dt = None
+                        check_out_dt = None
+                        nu_res = None
+
                 if nu_res:
                     check_in_dt = nu_res.check_in
                     check_out_dt = nu_res.check_out
@@ -497,6 +667,9 @@ async def get_overtime(
                     ev = evaluate_attendance(shift, check_in_dt, check_out_dt, dt, is_sunday, is_holiday)
                     ot_hours = float(ev["ot_hours"])
                     shift_code = shift.code if shift else None
+
+                if is_half_day_worked:
+                    ot_hours = 0.0
 
                 # Apply new ot_style override if needed
                 if ot_style == "new":

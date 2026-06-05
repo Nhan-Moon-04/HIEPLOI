@@ -6,7 +6,7 @@ from app.models.attendance import AttendanceLog, AttendanceDaily, AttendanceDeta
 from app.models.salary import MonthlySalary, MonthlyWorkdayConfig, PayrollPaymentStatus, AdvancePayment, AdvanceLoan
 from app.models.schedule import WorkSchedule
 from app.models.audit import AuditLog
-from app.models.holiday import CompanyHoliday
+from app.models.holiday import CompanyHoliday, HolidayException, HolidayTargetEmployee
 from app.models.x_overtime import XOvertimeConfig
 from app.models.union import UnionTransaction, UnionEvent, UnionEventMember, UnionMember
 from app.models.session import UserSession
@@ -28,6 +28,8 @@ __all__ = [
     "WorkSchedule",
     "AuditLog",
     "CompanyHoliday",
+    "HolidayException",
+    "HolidayTargetEmployee",
     "XOvertimeConfig",
     "UnionTransaction",
     "UnionEvent",

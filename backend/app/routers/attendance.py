@@ -291,20 +291,36 @@ def evaluate_attendance(shift, check_in_dt, check_out_dt, work_date, is_sunday, 
             # Ngay nghi/le: Tat ca gio lam deu tinh vao tang ca
             result["ot_hours"] = actual
         elif shift and (shift.code or "").upper() in DRIVER_AUTO_OT_SHIFT_CODES:
-            # Tinh OT cho tai xe: checkout tre hon gio ra + vao som >= 1h
+            # Tinh OT cho tai xe: checkout trễ + vào sớm (làm tròn 30p gần nhất, cap 6:00)
+            import math
             ot = 0.0
-            shift_end_time = parse_time(shift.end_time)
-            if shift_end_time and check_out_dt:
-                expected_end = datetime.combine(work_date, shift_end_time)
+            shift_end_time_local = parse_time(shift.end_time)
+            if shift_end_time_local and check_out_dt:
+                expected_end = datetime.combine(work_date, shift_end_time_local)
                 if check_out_dt > expected_end:
                     ot = (check_out_dt - expected_end).total_seconds() / 3600.0
             
-            # Bonus 1h OT neu vao som >= 1h
+            # OT vào sớm: làm tròn 30p gần nhất, cap tối thiểu 6:00
             if original_check_in and shift_start_time:
                 expected_start = datetime.combine(work_date, shift_start_time)
-                early_hours = (expected_start - original_check_in).total_seconds() / 3600.0
-                if early_hours >= 1.0:
-                    ot += early_hours
+                # Làm tròn nearest 30min: 0-15→:00, 16-45→:30, 46-59→next:00
+                m = original_check_in.minute
+                if m <= 15:
+                    r_min, r_h = 0, original_check_in.hour
+                elif m <= 45:
+                    r_min, r_h = 30, original_check_in.hour
+                else:
+                    r_min, r_h = 0, (original_check_in.hour + 1) % 24
+                effective_in = original_check_in.replace(hour=r_h, minute=r_min, second=0, microsecond=0)
+                # Cap tối thiểu 6:00
+                six_am = datetime.combine(work_date, time(6, 0))
+                if effective_in < six_am:
+                    effective_in = six_am
+                if effective_in < expected_start:
+                    early_hours = (expected_start - effective_in).total_seconds() / 3600.0
+                    ot_early = math.floor(early_hours * 2 + 0.5) / 2  # round to 0.5h
+                    if ot_early >= 1.0:
+                        ot += ot_early
             
             result["ot_hours"] = round(max(ot, 0), 2)
         else:
@@ -341,6 +357,20 @@ def evaluate_attendance(shift, check_in_dt, check_out_dt, work_date, is_sunday, 
             result["meal_count"] = meal_count
 
     return result
+
+
+def check_holiday_applies_to_employee(holiday, emp_id, emp_dept, target_emp_ids_map):
+    if holiday.scope == "all":
+        return True
+    if holiday.scope == "department":
+        if not holiday.departments or not emp_dept:
+            return False
+        depts = [d.strip() for d in holiday.departments.split(",") if d.strip()]
+        return emp_dept in depts
+    if holiday.scope == "employee":
+        target_ids = target_emp_ids_map.get(holiday.id, set())
+        return emp_id in target_ids
+    return True
 
 
 @router.get("", response_model=AttendanceMonthResponse)
@@ -397,7 +427,36 @@ async def get_attendance(
         and_(CompanyHoliday.holiday_date >= range_start, CompanyHoliday.holiday_date <= range_end, CompanyHoliday.is_active == True)
     )
     holiday_result = await db.execute(holiday_q)
-    holiday_dates = {h.holiday_date for h in holiday_result.scalars().all()}
+    holidays_in_range = list(holiday_result.scalars().all())
+    holiday_dates = {h.holiday_date for h in holidays_in_range}
+
+    # Load holiday targets (for employee scope)
+    from app.models.holiday import HolidayTargetEmployee
+    holiday_ids = [h.id for h in holidays_in_range]
+    holiday_targets_map = {}
+    if holiday_ids:
+        target_res = await db.execute(
+            select(HolidayTargetEmployee.holiday_id, HolidayTargetEmployee.employee_id)
+            .where(HolidayTargetEmployee.holiday_id.in_(holiday_ids))
+        )
+        for h_id, emp_id in target_res.all():
+            if h_id not in holiday_targets_map:
+                holiday_targets_map[h_id] = set()
+            holiday_targets_map[h_id].add(emp_id)
+
+    # Load holiday exceptions
+    from app.models.holiday import HolidayException
+    exc_q = select(HolidayException.employee_id, CompanyHoliday.holiday_date).join(
+        CompanyHoliday, HolidayException.holiday_id == CompanyHoliday.id
+    ).where(
+        and_(
+            CompanyHoliday.holiday_date >= range_start,
+            CompanyHoliday.holiday_date <= range_end,
+            CompanyHoliday.is_active == True
+        )
+    )
+    exc_res = await db.execute(exc_q)
+    holiday_exceptions = {(row[0], row[1]) for row in exc_res.all()}
 
     # Load employees
     from sqlalchemy import or_
@@ -529,7 +588,81 @@ async def get_attendance(
             dow_idx = dt.weekday()
             dow = DOW_VN[dow_idx]
             is_sunday = dow == "CN"
-            is_holiday = dt in holiday_dates
+
+            # Check if employee has joined yet or has already left
+            if (emp.join_date and dt < emp.join_date) or (emp.leave_date and dt > emp.leave_date):
+                cell = AttendanceCell(
+                    work_date=str(dt),
+                    day=d,
+                    dow=dow,
+                    shift_code=None,
+                    shift_name=None,
+                    shift_start=None,
+                    shift_end=None,
+                    standard_hours=None,
+                    check_in=None,
+                    check_out=None,
+                    actual_hours=0.0,
+                    deviation=0.0,
+                    ot_hours=0.0,
+                    status="no_data",
+                    is_holiday=False,
+                    is_sunday=is_sunday,
+                    notes="Chưa vào làm" if (emp.join_date and dt < emp.join_date) else "Đã nghỉ việc",
+                    meal_allowance=0.0,
+                    meal_count=0,
+                    night_allowance=0.0,
+                    ot_eligible=False,
+                    night_eligible=False,
+                    has_manual_xot=False,
+                    manual_meal_count=None,
+                    manual_ot_end_time=None,
+                )
+                days_cells.append(cell)
+                continue
+
+            # Check if there is an active holiday on this date that applies to the employee
+            active_holiday = None
+            for h in holidays_in_range:
+                if h.holiday_date == dt:
+                    is_exception = (emp.id, dt) in holiday_exceptions
+                    if not is_exception and check_holiday_applies_to_employee(h, emp.id, emp.department, holiday_targets_map):
+                        active_holiday = h
+                        break
+
+            # Get attendance record
+            att = att_map.get((emp.id, dt))
+            check_in_dt = att.first_check_in if att else None
+            check_out_dt = att.last_check_out if att else None
+            
+            # Special case for NU results
+            nu_res = nu_results.get((emp.id, dt))
+
+            is_holiday = False
+            is_half_day_worked = False
+
+            if active_holiday:
+                if active_holiday.duration == "half":
+                    # Check if they actually worked (has punches)
+                    has_punches = False
+                    if nu_res:
+                        has_punches = bool(nu_res.check_in and nu_res.check_out)
+                    else:
+                        has_punches = bool(check_in_dt and check_out_dt)
+                    
+                    if has_punches:
+                        is_half_day_worked = True
+                        is_holiday = False
+                    else:
+                        is_holiday = True
+                        check_in_dt = None
+                        check_out_dt = None
+                        nu_res = None
+                else:
+                    is_holiday = True
+                    check_in_dt = None
+                    check_out_dt = None
+                    nu_res = None
 
             # Determine shift
             override_id = override_map.get((emp.id, dt))
@@ -555,14 +688,6 @@ async def get_attendance(
                 else:
                     total_paid_leave += 1.0
 
-            # Get attendance record
-            att = att_map.get((emp.id, dt))
-            check_in_dt = att.first_check_in if att else None
-            check_out_dt = att.last_check_out if att else None
-            
-            # Special case for NU results
-            nu_res = nu_results.get((emp.id, dt))
-            
             if nu_res:
                 check_in_dt = nu_res.check_in
                 check_out_dt = nu_res.check_out
@@ -594,6 +719,14 @@ async def get_attendance(
                 ev = evaluate_attendance(shift, check_in_dt, check_out_dt, dt, is_sunday, is_holiday, night_allowance_rate=night_allowance_rate)
                 cell_shift_code = shift.code if shift else None
                 cell_shift_name = shift.name if shift else None
+
+            if is_half_day_worked:
+                ev["actual_hours"] = 8.0
+                ev["deviation"] = 0.0
+                ev["status"] = "full"
+                ev["notes"] = f"Nghỉ nửa ngày (Đi làm tính 8.0h) | {ev.get('notes') or ''}".strip(" | ")
+                if ot_style != "new":
+                    ev["ot_hours"] = 0.0
 
             # Format times
             ci_str = check_in_dt.strftime("%Y-%m-%d %H:%M") if check_in_dt else None

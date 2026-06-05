@@ -280,29 +280,35 @@ async def import_base_salaries(
         config.company_work_days = standard_days
     # 1. Thu thap thong tin tu file Excel
     file_emps = {} # code -> {name, base_salary, allowance}
-    for r in range(3, ws.max_row + 1):
+    for r in range(4, ws.max_row + 1):
         c_raw = ws.cell(r, 2).value
         n_raw = ws.cell(r, 3).value
         if c_raw and n_raw:
-            code = str(int(c_raw) if isinstance(c_raw, float) else c_raw).strip().lstrip("'")
-            file_emps[code] = {
-                "name": str(n_raw).strip(),
-                "base_salary": float(ws.cell(r, 4).value or 0),
-                "allowance": float(ws.cell(r, 5).value or 0)
-            }
+            try:
+                code = str(int(c_raw) if isinstance(c_raw, float) else c_raw).strip().lstrip("'")
+                file_emps[code] = {
+                    "name": str(n_raw).strip(),
+                    "base_salary": float(ws.cell(r, 4).value or 0),
+                    "allowance": float(ws.cell(r, 5).value or 0)
+                }
+            except (ValueError, TypeError):
+                continue
 
     # Load lai nhan vien dang hoat dong
     emp_result = await db.execute(select(Employee).where(Employee.is_active == True))
     emp_map = {str(e.employee_code).lstrip("'"): e for e in emp_result.scalars().all()}
 
     processed = 0
-    # Đọc dữ liệu từ dòng 3 (sau header)
-    for r in range(3, ws.max_row + 1):
+    # Đọc dữ liệu từ dòng 4 (sau header ở dòng 3)
+    for r in range(4, ws.max_row + 1):
         emp_code = ws.cell(r, 2).value
         if not emp_code:
             continue
         
-        emp_code = str(int(emp_code) if isinstance(emp_code, float) else emp_code).strip().lstrip("'")
+        try:
+            emp_code = str(int(emp_code) if isinstance(emp_code, float) else emp_code).strip().lstrip("'")
+        except (ValueError, TypeError):
+            continue
         if emp_code not in emp_map:
             continue
             

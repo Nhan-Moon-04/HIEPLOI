@@ -15,6 +15,7 @@ from app.models.x_overtime import XOvertimeConfig
 from app.models.user import AppUser, UserRole
 from app.middleware.auth import get_current_user
 from app.services.nu_shift import is_nu_dynamic_shift_code, build_nu_shift_day_results, calculate_nu_shift_details
+from app.routers.attendance import check_holiday_applies_to_employee
 
 router = APIRouter(prefix="/meal-allowance", tags=["Meal Allowance - Tien An"])
 
@@ -110,7 +111,7 @@ async def get_meal_allowance(
     shifts_by_id = {s.id: s for s in shifts}
     shifts_by_code = {s.code: s for s in shifts}
 
-    holiday_q = select(CompanyHoliday.holiday_date).where(
+    holiday_q = select(CompanyHoliday).where(
         and_(
             CompanyHoliday.holiday_date >= start_date,
             CompanyHoliday.holiday_date <= end_date,
@@ -118,7 +119,36 @@ async def get_meal_allowance(
         )
     )
     holiday_result = await db.execute(holiday_q)
-    holiday_dates = set(holiday_result.scalars().all())
+    holidays_in_range = list(holiday_result.scalars().all())
+    holiday_dates = {h.holiday_date for h in holidays_in_range}
+
+    # Load holiday targets (for employee scope)
+    from app.models.holiday import HolidayTargetEmployee
+    holiday_ids = [h.id for h in holidays_in_range]
+    holiday_targets_map = {}
+    if holiday_ids:
+        target_res = await db.execute(
+            select(HolidayTargetEmployee.holiday_id, HolidayTargetEmployee.employee_id)
+            .where(HolidayTargetEmployee.holiday_id.in_(holiday_ids))
+        )
+        for h_id, emp_id in target_res.all():
+            if h_id not in holiday_targets_map:
+                holiday_targets_map[h_id] = set()
+            holiday_targets_map[h_id].add(emp_id)
+
+    # Load holiday exceptions
+    from app.models.holiday import HolidayException
+    exc_q = select(HolidayException.employee_id, CompanyHoliday.holiday_date).join(
+        CompanyHoliday, HolidayException.holiday_id == CompanyHoliday.id
+    ).where(
+        and_(
+            CompanyHoliday.holiday_date >= start_date,
+            CompanyHoliday.holiday_date <= end_date,
+            CompanyHoliday.is_active == True
+        )
+    )
+    exc_res = await db.execute(exc_q)
+    holiday_exceptions = {(row[0], row[1]) for row in exc_res.all()}
 
     sched_q = select(WorkSchedule).where(
         and_(
@@ -148,11 +178,30 @@ async def get_meal_allowance(
     att_result = await db.execute(att_q)
     atts = att_result.scalars().all()
 
+    # Map employees to department for scope check
+    employee_dept_map = {e.id: e.department for e in employees}
+
     att_map = {}
     att_by_emp = defaultdict(list)
     for att in atts:
-        if att.work_date in holiday_dates:
-            continue
+        # Check if there is an active holiday that applies to this employee
+        active_holiday = None
+        for h in holidays_in_range:
+            if h.holiday_date == att.work_date:
+                is_exception = (att.employee_id, att.work_date) in holiday_exceptions
+                if not is_exception and check_holiday_applies_to_employee(h, att.employee_id, employee_dept_map.get(att.employee_id), holiday_targets_map):
+                    active_holiday = h
+                    break
+        
+        if active_holiday:
+            if active_holiday.duration == "half":
+                # Only eligible for meal if they worked (both punches present)
+                has_punches = bool(att.first_check_in and att.last_check_out)
+                if not has_punches:
+                    continue
+            else:
+                continue
+
         att_map[(att.employee_id, att.work_date)] = att
         att_by_emp[att.employee_id].append(att.work_date)
 
@@ -239,7 +288,17 @@ async def get_meal_allowance(
             all_dates_in_period = []
             curr = start_date
             while curr <= end_date:
-                if curr.weekday() != 6 and curr not in holiday_dates:  # Không tính chủ nhật và ngày lễ
+                if (emp.join_date and curr < emp.join_date) or (emp.leave_date and curr > emp.leave_date):
+                    curr += timedelta(days=1)
+                    continue
+                is_holiday_for_emp = False
+                for h in holidays_in_range:
+                    if h.holiday_date == curr:
+                        is_exception = (emp.id, curr) in holiday_exceptions
+                        if not is_exception and check_holiday_applies_to_employee(h, emp.id, emp.department, holiday_targets_map):
+                            is_holiday_for_emp = True
+                            break
+                if curr.weekday() != 6 and not is_holiday_for_emp:  # Không tính chủ nhật và ngày lễ
                     all_dates_in_period.append(curr)
                 curr += timedelta(days=1)
             worked_dates = all_dates_in_period
@@ -251,6 +310,8 @@ async def get_meal_allowance(
         emp_meal_count = 0
 
         for work_date in worked_dates:
+            if (emp.join_date and work_date < emp.join_date) or (emp.leave_date and work_date > emp.leave_date):
+                continue
             shift = None
             shift_id = sched_map.get((emp.id, work_date))
             if shift_id:
@@ -324,7 +385,14 @@ async def get_meal_allowance(
                 if meal > 35000: emp_meal_count += 1
             else:
                 meal_rate_val = to_float(shift.meal_allowance)
-                is_sunday_or_holiday = work_date.weekday() == 6 or work_date in holiday_dates
+                is_holiday_for_emp = False
+                for h in holidays_in_range:
+                    if h.holiday_date == work_date:
+                        is_exception = (emp.id, work_date) in holiday_exceptions
+                        if not is_exception and check_holiday_applies_to_employee(h, emp.id, emp.department, holiday_targets_map):
+                            is_holiday_for_emp = True
+                            break
+                is_sunday_or_holiday = work_date.weekday() == 6 or is_holiday_for_emp
 
                 if shift.code.upper() in ("TX1", "TX2") and is_sunday_or_holiday:
                     # Chủ nhật/lễ: dùng giờ thực tế, không dùng ot>=3 (tránh tính 2 bữa khi về trước 18h)
@@ -371,8 +439,17 @@ async def get_meal_allowance(
         else:
             meal_rate = default_meal
 
-        leave_dates = set(holiday_dates)
-        leave_dates.update(leave_dates_by_emp.get(emp.id, set()))
+        emp_holiday_dates = set()
+        for h in holidays_in_range:
+            is_exception = (emp.id, h.holiday_date) in holiday_exceptions
+            if not is_exception and check_holiday_applies_to_employee(h, emp.id, emp.department, holiday_targets_map):
+                if (not emp.join_date or h.holiday_date >= emp.join_date) and (not emp.leave_date or h.holiday_date <= emp.leave_date):
+                    emp_holiday_dates.add(h.holiday_date)
+
+        leave_dates = set(emp_holiday_dates)
+        for l_dt in leave_dates_by_emp.get(emp.id, set()):
+            if (not emp.join_date or l_dt >= emp.join_date) and (not emp.leave_date or l_dt <= emp.leave_date):
+                leave_dates.add(l_dt)
         leave_days = len(leave_dates)
 
         rows.append(MealAllowanceRow(

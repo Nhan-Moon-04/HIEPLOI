@@ -2,9 +2,11 @@ from typing import List, Optional
 from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, extract, and_
+from sqlalchemy import select, extract, and_, delete
+from pydantic import BaseModel
 from app.database import get_db
-from app.models.holiday import CompanyHoliday
+from app.models.holiday import CompanyHoliday, HolidayException, HolidayTargetEmployee
+from app.models.employee import Employee
 from app.models.user import AppUser, UserRole
 from app.schemas.holiday import HolidayCreate, HolidayUpdate, HolidayResponse, HolidayBulkGenerate
 from app.middleware.auth import get_current_user, require_roles
@@ -67,7 +69,27 @@ async def list_holidays(
         query = query.order_by(CompanyHoliday.holiday_date)
         result = await db.execute(query)
         holidays = result.scalars().all()
-        return [HolidayResponse.model_validate(h) for h in holidays]
+
+        # Batch load target employee IDs
+        holiday_ids = [h.id for h in holidays]
+        target_employees_map = {}
+        if holiday_ids:
+            target_res = await db.execute(
+                select(HolidayTargetEmployee.holiday_id, HolidayTargetEmployee.employee_id)
+                .where(HolidayTargetEmployee.holiday_id.in_(holiday_ids))
+            )
+            for h_id, emp_id in target_res.all():
+                if h_id not in target_employees_map:
+                    target_employees_map[h_id] = []
+                target_employees_map[h_id].append(emp_id)
+
+        response_data = []
+        for h in holidays:
+            resp = HolidayResponse.model_validate(h)
+            resp.target_employee_ids = target_employees_map.get(h.id, [])
+            response_data.append(resp)
+
+        return response_data
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
@@ -87,14 +109,27 @@ async def create_holiday(
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=400, detail=f"Ngay {request.holiday_date} da ton tai")
 
+    create_data = request.model_dump()
+    target_employee_ids = create_data.pop("target_employee_ids", None) or []
+
     holiday = CompanyHoliday(
-        **request.model_dump(),
+        **create_data,
         created_by=current_user.username,
     )
     db.add(holiday)
+    await db.flush()
+
+    if request.scope == "employee" and target_employee_ids:
+        for emp_id in target_employee_ids:
+            target_emp = HolidayTargetEmployee(holiday_id=holiday.id, employee_id=emp_id)
+            db.add(target_emp)
+
     await db.commit()
     await db.refresh(holiday)
-    return HolidayResponse.model_validate(holiday)
+
+    resp = HolidayResponse.model_validate(holiday)
+    resp.target_employee_ids = target_employee_ids
+    return resp
 
 
 @router.put("/{holiday_id}", response_model=HolidayResponse)
@@ -104,7 +139,7 @@ async def update_holiday(
     db: AsyncSession = Depends(get_db),
     current_user: AppUser = Depends(require_roles(UserRole.ADMIN)),
 ):
-    """Cap nhat ngay le - toggle is_active de bat/tat nghi"""
+    """Cap nhat ngay le - ho tro scope, duration, target employees"""
     result = await db.execute(select(CompanyHoliday).where(CompanyHoliday.id == holiday_id))
     holiday = result.scalar_one_or_none()
     if not holiday:
@@ -113,12 +148,36 @@ async def update_holiday(
     await check_date_locked(db, holiday.holiday_date)
 
     update_data = request.model_dump(exclude_unset=True)
+    target_employee_ids = update_data.pop("target_employee_ids", None)
+
     for key, value in update_data.items():
         setattr(holiday, key, value)
 
+    if target_employee_ids is not None:
+        await db.execute(
+            delete(HolidayTargetEmployee).where(HolidayTargetEmployee.holiday_id == holiday_id)
+        )
+        if holiday.scope == "employee" and target_employee_ids:
+            for emp_id in target_employee_ids:
+                target_emp = HolidayTargetEmployee(holiday_id=holiday_id, employee_id=emp_id)
+                db.add(target_emp)
+    elif holiday.scope != "employee":
+        await db.execute(
+            delete(HolidayTargetEmployee).where(HolidayTargetEmployee.holiday_id == holiday_id)
+        )
+
     await db.commit()
     await db.refresh(holiday)
-    return HolidayResponse.model_validate(holiday)
+
+    target_res = await db.execute(
+        select(HolidayTargetEmployee.employee_id)
+        .where(HolidayTargetEmployee.holiday_id == holiday_id)
+    )
+    current_target_ids = target_res.scalars().all()
+
+    resp = HolidayResponse.model_validate(holiday)
+    resp.target_employee_ids = current_target_ids
+    return resp
 
 
 @router.patch("/{holiday_id}/toggle", response_model=HolidayResponse)
@@ -127,7 +186,7 @@ async def toggle_holiday(
     db: AsyncSession = Depends(get_db),
     current_user: AppUser = Depends(require_roles(UserRole.ADMIN)),
 ):
-    """Toggle bat/tat ngay nghi. is_active=True => nghi (ko tinh luong), is_active=False => di lam binh thuong"""
+    """Toggle bat/tat ngay nghi. is_active=True => nghi, is_active=False => di lam binh thuong"""
     result = await db.execute(select(CompanyHoliday).where(CompanyHoliday.id == holiday_id))
     holiday = result.scalar_one_or_none()
     if not holiday:
@@ -138,7 +197,16 @@ async def toggle_holiday(
     holiday.is_active = not holiday.is_active
     await db.commit()
     await db.refresh(holiday)
-    return HolidayResponse.model_validate(holiday)
+
+    target_res = await db.execute(
+        select(HolidayTargetEmployee.employee_id)
+        .where(HolidayTargetEmployee.holiday_id == holiday_id)
+    )
+    current_target_ids = target_res.scalars().all()
+
+    resp = HolidayResponse.model_validate(holiday)
+    resp.target_employee_ids = current_target_ids
+    return resp
 
 
 @router.delete("/{holiday_id}")
@@ -240,3 +308,63 @@ async def generate_vn_holidays(
         "skipped": skipped,
         "month_key": request.month_key,
     }
+
+
+class HolidayExceptionsUpdate(BaseModel):
+    employee_ids: List[int]
+
+
+@router.get("/{holiday_id}/exceptions")
+async def get_holiday_exceptions(
+    holiday_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: AppUser = Depends(require_roles(UserRole.ADMIN)),
+):
+    """Lấy danh sách nhân viên ngoại lệ của ngày lễ"""
+    holiday = await db.get(CompanyHoliday, holiday_id)
+    if not holiday:
+        raise HTTPException(status_code=404, detail="Ngày lễ không tồn tại")
+
+    query = select(Employee).join(
+        HolidayException, Employee.id == HolidayException.employee_id
+    ).where(HolidayException.holiday_id == holiday_id).order_by(Employee.employee_code)
+    
+    result = await db.execute(query)
+    employees = result.scalars().all()
+    return [{
+        "employee_id": e.id,
+        "employee_code": e.employee_code,
+        "full_name": e.full_name,
+        "department": e.department
+    } for e in employees]
+
+
+@router.post("/{holiday_id}/exceptions")
+async def update_holiday_exceptions(
+    holiday_id: int,
+    request: HolidayExceptionsUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: AppUser = Depends(require_roles(UserRole.ADMIN)),
+):
+    """Cập nhật danh sách nhân viên ngoại lệ đi làm ngày lễ"""
+    holiday = await db.get(CompanyHoliday, holiday_id)
+    if not holiday:
+        raise HTTPException(status_code=404, detail="Ngày lễ không tồn tại")
+
+    await check_date_locked(db, holiday.holiday_date)
+
+    # Delete existing exceptions
+    await db.execute(
+        delete(HolidayException).where(HolidayException.holiday_id == holiday_id)
+    )
+
+    # Insert new exceptions
+    for emp_id in request.employee_ids:
+        # Verify employee exists
+        emp = await db.get(Employee, emp_id)
+        if emp:
+            exc = HolidayException(holiday_id=holiday_id, employee_id=emp_id)
+            db.add(exc)
+
+    await db.commit()
+    return {"message": "Cập nhật danh sách ngoại lệ thành công"}
