@@ -3,6 +3,7 @@ import { Form, Input, Button, message, Modal, Alert } from 'antd';
 import {
   UserOutlined, LockOutlined, MailOutlined,
   ExclamationCircleOutlined, SafetyOutlined, ClockCircleOutlined,
+  SendOutlined, CheckCircleOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import useAuthStore from '../stores/authStore';
@@ -11,61 +12,68 @@ import api from '../api/client';
 export default function Login() {
   const navigate = useNavigate();
   const { login, loading } = useAuthStore();
+  const [form] = Form.useForm();
 
-  // Login form
-  const [loginError, setLoginError] = useState(null);
-  const [attemptsLeft, setAttemptsLeft] = useState(null);
-  const [lockoutSecs, setLockoutSecs] = useState(0);
-  const [lockoutTimer, setLockoutTimer] = useState(null);
+  // ── Login state ───────────────────────────────────────────────────────────
+  const [loginError, setLoginError]       = useState(null);
+  const [attemptsLeft, setAttemptsLeft]   = useState(null);
+  const [lockoutSecs, setLockoutSecs]     = useState(0);
 
-  // Forgot password modal
-  const [forgotOpen, setForgotOpen] = useState(false);
-  const [forgotEmail, setForgotEmail] = useState('');
-  const [forgotLoading, setForgotLoading] = useState(false);
-  const [forgotSent, setForgotSent] = useState(false);
-  const [forgotCooldown, setForgotCooldown] = useState(0);
+  // ── Forgot password modal ─────────────────────────────────────────────────
+  const [forgotOpen, setForgotOpen]           = useState(false);
+  const [forgotEmail, setForgotEmail]         = useState('');
+  const [forgotLoading, setForgotLoading]     = useState(false);
+  const [forgotSent, setForgotSent]           = useState(false);
+  const [forgotCooldown, setForgotCooldown]   = useState(0);
+  const [forgotError, setForgotError]         = useState(null);
 
-  // OTP modal
-  const [otpOpen, setOtpOpen] = useState(false);
-  const [otpSessionId, setOtpSessionId] = useState(null);
-  const [emailHint, setEmailHint] = useState('');
-  const [otpCode, setOtpCode] = useState('');
-  const [otpLoading, setOtpLoading] = useState(false);
-  const [otpError, setOtpError] = useState(null);
-  const [otpExpiry, setOtpExpiry] = useState(300); // 5 phút
+  // ── OTP modal ─────────────────────────────────────────────────────────────
+  const [otpOpen, setOtpOpen]                     = useState(false);
+  const [otpSessionId, setOtpSessionId]           = useState(null);
+  const [emailHint, setEmailHint]                 = useState('');
+  const [otpCode, setOtpCode]                     = useState('');
+  const [otpLoading, setOtpLoading]               = useState(false);
+  const [otpError, setOtpError]                   = useState(null);
+  const [otpExpiry, setOtpExpiry]                 = useState(300);
   const [otpResendCooldown, setOtpResendCooldown] = useState(0);
-  const [otpResendLoading, setOtpResendLoading] = useState(false);
+  const [otpResendLoading, setOtpResendLoading]   = useState(false);
 
   const otpRefs = useRef([]);
 
-  // ── Lockout countdown ──────────────────────────────────────────────────────
+  // ── Countdown: lockout ────────────────────────────────────────────────────
   useEffect(() => {
-    if (lockoutSecs <= 0) { setLockoutTimer(null); return; }
-    const t = setTimeout(() => setLockoutSecs(s => s - 1), 1000);
-    setLockoutTimer(t);
+    if (lockoutSecs <= 0) return;
+    const t = setTimeout(() => setLockoutSecs(s => Math.max(0, s - 1)), 1000);
     return () => clearTimeout(t);
   }, [lockoutSecs]);
 
-  // ── OTP countdown ──────────────────────────────────────────────────────────
+  // ── Countdown: OTP expiry ─────────────────────────────────────────────────
   useEffect(() => {
     if (!otpOpen || otpExpiry <= 0) return;
     const t = setInterval(() => setOtpExpiry(s => Math.max(0, s - 1)), 1000);
     return () => clearInterval(t);
   }, [otpOpen, otpExpiry]);
 
-  // ── Forgot cooldown ────────────────────────────────────────────────────────
+  // ── Countdown: forgot cooldown ────────────────────────────────────────────
   useEffect(() => {
     if (forgotCooldown <= 0) return;
     const t = setInterval(() => setForgotCooldown(s => Math.max(0, s - 1)), 1000);
     return () => clearInterval(t);
   }, [forgotCooldown]);
 
-  // ── OTP resend cooldown ────────────────────────────────────────────────────
+  // ── Countdown: OTP resend cooldown ────────────────────────────────────────
   useEffect(() => {
     if (otpResendCooldown <= 0) return;
     const t = setInterval(() => setOtpResendCooldown(s => Math.max(0, s - 1)), 1000);
     return () => clearInterval(t);
   }, [otpResendCooldown]);
+
+  // Auto-focus ô OTP đầu tiên khi mở modal
+  useEffect(() => {
+    if (otpOpen) {
+      setTimeout(() => otpRefs.current[0]?.focus(), 150);
+    }
+  }, [otpOpen]);
 
   const fmtSecs = (s) => {
     const m = Math.floor(s / 60);
@@ -73,7 +81,7 @@ export default function Login() {
     return m > 0 ? `${m}:${String(sec).padStart(2, '0')}` : `${sec}s`;
   };
 
-  // ── Login submit ───────────────────────────────────────────────────────────
+  // ── Login submit ──────────────────────────────────────────────────────────
   const onFinish = async (values) => {
     setLoginError(null);
     setAttemptsLeft(null);
@@ -86,7 +94,7 @@ export default function Login() {
       return;
     }
 
-    // OTP required
+    // OTP required (thiết bị mới)
     if (result.otp_required) {
       setOtpSessionId(result.otp_session_id);
       setEmailHint(result.email_hint || '');
@@ -98,14 +106,23 @@ export default function Login() {
       return;
     }
 
-    // Lockout
+    // Lockout (429)
     if (result.lockout_seconds) {
       setLockoutSecs(result.lockout_seconds);
       setLoginError(result.error);
+      // Xoá cả 2 ô khi bị khoá
+      form.setFieldValue('password', '');
       return;
     }
 
-    // Attempts warning
+    // Sai mật khẩu: chỉ xóa ô password, giữ nguyên username
+    form.setFieldValue('password', '');
+    // Hiển thị lỗi inline dưới ô password
+    form.setFields([{
+      name: 'password',
+      errors: [result.error || 'Mật khẩu không đúng'],
+    }]);
+
     if (result.attempts_remaining !== undefined) {
       setAttemptsLeft(result.attempts_remaining);
     }
@@ -113,9 +130,9 @@ export default function Login() {
     setLoginError(result.error);
   };
 
-  // ── OTP verify ─────────────────────────────────────────────────────────────
+  // ── OTP verify ────────────────────────────────────────────────────────────
   const handleOtpVerify = async () => {
-    if (otpCode.length !== 6) { setOtpError('Nhập đủ 6 số OTP'); return; }
+    if (otpCode.length !== 6) { setOtpError('Vui lòng nhập đủ 6 số OTP'); return; }
     setOtpLoading(true);
     setOtpError(null);
     try {
@@ -129,13 +146,17 @@ export default function Login() {
       message.success('Xác thực thành công!');
       navigate('/dashboard');
     } catch (err) {
-      setOtpError(err.response?.data?.detail || 'Mã OTP không đúng');
+      const errMsg = err.response?.data?.detail || 'Mã OTP không đúng';
+      setOtpError(errMsg);
+      // Xóa OTP khi sai để nhập lại
+      setOtpCode('');
+      setTimeout(() => otpRefs.current[0]?.focus(), 100);
     } finally {
       setOtpLoading(false);
     }
   };
 
-  // ── OTP resend ─────────────────────────────────────────────────────────────
+  // ── OTP resend ────────────────────────────────────────────────────────────
   const handleOtpResend = async () => {
     setOtpResendLoading(true);
     try {
@@ -144,20 +165,25 @@ export default function Login() {
       setOtpExpiry(300);
       setOtpCode('');
       setOtpError(null);
-      message.success('Đã gửi lại mã OTP về email của bạn.');
+      message.success('Đã gửi lại mã OTP về email!');
+      setTimeout(() => otpRefs.current[0]?.focus(), 100);
     } catch (err) {
       const retryAfter = parseInt(err.response?.headers?.['retry-after'] || '120');
       setOtpResendCooldown(retryAfter);
-      message.error(err.response?.data?.detail || 'Không thể gửi lại OTP. Thử lại sau.');
+      message.error(err.response?.data?.detail || 'Không thể gửi lại. Thử lại sau.');
     } finally {
       setOtpResendLoading(false);
     }
   };
 
-  // ── Forgot password ────────────────────────────────────────────────────────
+  // ── Forgot password send ──────────────────────────────────────────────────
   const handleForgotSend = async () => {
-    if (!forgotEmail.trim()) { message.warning('Nhập email hoặc username'); return; }
+    if (!forgotEmail.trim()) {
+      setForgotError('Vui lòng nhập email hoặc tên đăng nhập');
+      return;
+    }
     setForgotLoading(true);
+    setForgotError(null);
     try {
       await api.post('/auth/forgot-password', {
         email: forgotEmail.trim(),
@@ -169,22 +195,63 @@ export default function Login() {
       if (err.response?.status === 429) {
         const retryAfter = parseInt(err.response.headers['retry-after'] || '900');
         setForgotCooldown(retryAfter);
-        message.error(err.response.data?.detail || 'Gửi quá nhiều lần. Thử lại sau.');
+        setForgotError(err.response.data?.detail || 'Gửi quá nhiều lần. Thử lại sau.');
       } else {
-        message.error('Có lỗi xảy ra. Thử lại sau.');
+        setForgotError('Có lỗi xảy ra. Vui lòng thử lại sau.');
       }
     } finally {
       setForgotLoading(false);
     }
   };
 
-  const closeForgot = () => {
+  const closeForgotModal = () => {
     setForgotOpen(false);
-    setTimeout(() => { setForgotSent(false); setForgotEmail(''); }, 300);
+    setTimeout(() => {
+      setForgotSent(false);
+      setForgotEmail('');
+      setForgotError(null);
+    }, 300);
   };
 
+  const handleOtpInput = (i, e) => {
+    const val = e.target.value.replace(/\D/g, '');
+    const arr = otpCode.split('');
+    arr[i] = val;
+    const next = arr.join('').slice(0, 6);
+    setOtpCode(next);
+    if (val && i < 5) otpRefs.current[i + 1]?.focus();
+  };
+
+  const handleOtpKeyDown = (i, e) => {
+    if (e.key === 'Backspace') {
+      if (otpCode[i]) {
+        // Xóa ký tự hiện tại
+        const arr = otpCode.split('');
+        arr[i] = '';
+        setOtpCode(arr.join(''));
+      } else if (i > 0) {
+        otpRefs.current[i - 1]?.focus();
+      }
+    } else if (e.key === 'Enter' && otpCode.length === 6) {
+      handleOtpVerify();
+    }
+  };
+
+  const handleOtpPaste = (e) => {
+    e.preventDefault();
+    const pasted = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6);
+    setOtpCode(pasted);
+    const nextIdx = Math.min(pasted.length, 5);
+    otpRefs.current[nextIdx]?.focus();
+  };
+
+  // ─── Render ───────────────────────────────────────────────────────────────
   return (
     <div className="login-page">
+      {/* Decorative blobs */}
+      <div className="login-blob login-blob-1" />
+      <div className="login-blob login-blob-2" />
+
       <div className="login-box">
         {/* Logo */}
         <div className="title">
@@ -199,13 +266,11 @@ export default function Login() {
             type="error"
             icon={<ClockCircleOutlined />}
             showIcon
-            style={{ marginBottom: 16, borderRadius: 8, fontSize: 13 }}
-            title={
+            className="login-alert"
+            message={
               <span>
                 Tài khoản tạm thời bị khoá — Thử lại sau{' '}
-                <strong style={{ fontVariantNumeric: 'tabular-nums' }}>
-                  {fmtSecs(lockoutSecs)}
-                </strong>
+                <strong className="login-countdown">{fmtSecs(lockoutSecs)}</strong>
               </span>
             }
           />
@@ -217,12 +282,13 @@ export default function Login() {
             type="warning"
             icon={<ExclamationCircleOutlined />}
             showIcon
-            style={{ marginBottom: 16, borderRadius: 8, fontSize: 12 }}
-            title={`Còn ${attemptsLeft} lần thử trước khi tài khoản bị khoá tạm thời`}
+            className="login-alert"
+            message={`Còn ${attemptsLeft} lần thử trước khi tài khoản bị khoá tạm thời`}
           />
         )}
 
         <Form
+          form={form}
           layout="vertical"
           onFinish={onFinish}
           size="large"
@@ -232,33 +298,36 @@ export default function Login() {
           <Form.Item
             name="username"
             rules={[{ required: true, message: 'Nhập tên đăng nhập' }]}
-            style={{ marginBottom: 12 }}
+            style={{ marginBottom: 14 }}
           >
             <Input
               prefix={<UserOutlined style={{ color: '#9ba8bf' }} />}
               placeholder="Tên đăng nhập"
+              className="login-input"
             />
           </Form.Item>
 
           <Form.Item
             name="password"
             rules={[{ required: true, message: 'Nhập mật khẩu' }]}
-            style={{ marginBottom: loginError ? 8 : 16 }}
-            validateStatus={loginError && lockoutSecs === 0 ? 'error' : undefined}
-            help={loginError && lockoutSecs === 0 ? loginError : undefined}
+            style={{ marginBottom: 6 }}
           >
             <Input.Password
               prefix={<LockOutlined style={{ color: '#9ba8bf' }} />}
               placeholder="Mật khẩu"
+              className="login-input"
             />
           </Form.Item>
 
-          {/* Quên mật khẩu link */}
-          <div style={{ textAlign: 'right', marginBottom: 16, marginTop: -4 }}>
+          {/* Quên mật khẩu link — nằm ngay dưới ô password */}
+          <div style={{ textAlign: 'right', marginBottom: 20 }}>
             <button
               type="button"
               className="login-forgot-link"
-              onClick={() => setForgotOpen(true)}
+              onClick={() => {
+                setForgotOpen(true);
+                setForgotError(null);
+              }}
             >
               Quên mật khẩu?
             </button>
@@ -271,7 +340,7 @@ export default function Login() {
               loading={loading}
               block
               disabled={lockoutSecs > 0}
-              style={{ height: 42, fontSize: 14, fontWeight: 600, borderRadius: 8 }}
+              className="login-btn"
             >
               {lockoutSecs > 0 ? `Thử lại sau ${fmtSecs(lockoutSecs)}` : 'Đăng nhập'}
             </Button>
@@ -279,36 +348,50 @@ export default function Login() {
         </Form>
       </div>
 
-      {/* ── Modal Quên mật khẩu ── */}
+      {/* ══════════════════════════════════════════════════════
+          Modal Quên mật khẩu
+      ══════════════════════════════════════════════════════ */}
       <Modal
-        title={
-          <span style={{ fontSize: 15, fontWeight: 700 }}>
-            <MailOutlined style={{ color: '#276EF1', marginRight: 8 }} />
-            Quên mật khẩu
-          </span>
-        }
+        title={null}
         open={forgotOpen}
-        onCancel={closeForgot}
+        onCancel={closeForgotModal}
         footer={null}
-        width={380}
+        width={400}
         centered
+        className="login-modal"
+        destroyOnClose
       >
+        <div className="lm-header">
+          <div className="lm-icon lm-icon--blue">
+            <MailOutlined />
+          </div>
+          <h2 className="lm-title">Quên mật khẩu</h2>
+          <p className="lm-sub">
+            {!forgotSent
+              ? 'Nhập email hoặc tên đăng nhập để nhận link đặt lại mật khẩu'
+              : 'Kiểm tra hộp thư email của bạn'}
+          </p>
+        </div>
+
         {!forgotSent ? (
-          <div style={{ padding: '8px 0' }}>
-            <p style={{ color: '#6b7280', fontSize: 13, marginBottom: 16 }}>
-              Nhập email hoặc tên đăng nhập. Chúng tôi sẽ gửi link đặt lại mật khẩu
-              (có hiệu lực <strong>5 phút</strong>).
-            </p>
-            <Input
-              prefix={<MailOutlined style={{ color: '#9ca3af' }} />}
-              placeholder="Email hoặc tên đăng nhập"
-              size="large"
-              value={forgotEmail}
-              onChange={e => setForgotEmail(e.target.value)}
-              onPressEnter={handleForgotSend}
-              disabled={forgotCooldown > 0}
-              style={{ marginBottom: 16 }}
-            />
+          <div className="lm-body">
+            <div className="lm-field-wrap">
+              <Input
+                prefix={<MailOutlined style={{ color: '#9ca3af' }} />}
+                placeholder="Email hoặc tên đăng nhập"
+                size="large"
+                value={forgotEmail}
+                onChange={e => { setForgotEmail(e.target.value); setForgotError(null); }}
+                onPressEnter={handleForgotSend}
+                disabled={forgotCooldown > 0 || forgotLoading}
+                className="login-input"
+                autoFocus
+              />
+              {forgotError && (
+                <div className="lm-field-error">{forgotError}</div>
+              )}
+            </div>
+
             <Button
               type="primary"
               block
@@ -316,106 +399,122 @@ export default function Login() {
               loading={forgotLoading}
               disabled={forgotCooldown > 0}
               onClick={handleForgotSend}
-              style={{ borderRadius: 8, fontWeight: 600 }}
+              icon={<SendOutlined />}
+              className="login-btn"
             >
               {forgotCooldown > 0
                 ? `Gửi lại sau ${fmtSecs(forgotCooldown)}`
-                : 'Gửi link đặt lại mật khẩu'
-              }
+                : 'Gửi link đặt lại mật khẩu'}
             </Button>
+
+            <button type="button" className="lm-cancel-link" onClick={closeForgotModal}>
+              Huỷ — quay lại đăng nhập
+            </button>
           </div>
         ) : (
-          <div style={{ textAlign: 'center', padding: '16px 0' }}>
-            <div style={{ fontSize: 48, marginBottom: 12 }}>📬</div>
-            <h3 style={{ fontWeight: 700, color: '#1a2233', marginBottom: 8 }}>Email đã được gửi!</h3>
-            <p style={{ color: '#6b7280', fontSize: 13 }}>
-              Kiểm tra hộp thư của bạn và nhấn vào link trong email để đặt lại mật khẩu.
-              Link có hiệu lực <strong>5 phút</strong>.
+          <div className="lm-body lm-body--center">
+            <div className="lm-success-icon">
+              <CheckCircleOutlined />
+            </div>
+            <h3 className="lm-success-title">Email đã được gửi!</h3>
+            <p className="lm-success-desc">
+              Nếu <strong>{forgotEmail}</strong> tồn tại trong hệ thống, bạn sẽ nhận được email
+              chứa link đặt lại mật khẩu. Link có hiệu lực <strong>5 phút</strong>.
             </p>
-            {forgotCooldown > 0 && (
-              <p style={{ color: '#9ca3af', fontSize: 12, marginTop: 12 }}>
-                Gửi lại sau{' '}
-                <strong style={{ fontVariantNumeric: 'tabular-nums' }}>
-                  {fmtSecs(forgotCooldown)}
-                </strong>
+            <p className="lm-success-spam">
+              Không thấy email? Kiểm tra thư mục Spam / Junk.
+            </p>
+
+            {forgotCooldown > 0 ? (
+              <p className="lm-resend-wait">
+                Gửi lại sau <strong className="login-countdown">{fmtSecs(forgotCooldown)}</strong>
               </p>
+            ) : (
+              <button
+                type="button"
+                className="lm-resend-btn"
+                onClick={() => { setForgotSent(false); setForgotError(null); }}
+              >
+                Gửi lại email
+              </button>
             )}
-            <Button
-              style={{ marginTop: 16, borderRadius: 8 }}
-              onClick={closeForgot}
-            >
+
+            <Button block style={{ marginTop: 16, borderRadius: 8 }} onClick={closeForgotModal}>
               Đóng
             </Button>
           </div>
         )}
       </Modal>
 
-      {/* ── Modal OTP ── */}
+      {/* ══════════════════════════════════════════════════════
+          Modal OTP — Thiết bị mới
+      ══════════════════════════════════════════════════════ */}
       <Modal
-        title={
-          <span style={{ fontSize: 15, fontWeight: 700 }}>
-            <SafetyOutlined style={{ color: '#276EF1', marginRight: 8 }} />
-            Xác thực đăng nhập
-          </span>
-        }
+        title={null}
         open={otpOpen}
-        onCancel={() => setOtpOpen(false)}
+        onCancel={() => !otpLoading && setOtpOpen(false)}
         footer={null}
-        width={380}
+        width={400}
         centered
+        className="login-modal"
         closable={!otpLoading}
-        mask={{ closable: false }}
+        maskClosable={false}
+        destroyOnClose
       >
-        <div style={{ padding: '8px 0', textAlign: 'center' }}>
-          <div style={{ fontSize: 40, marginBottom: 8 }}>🔐</div>
-          <p style={{ color: '#374151', fontSize: 13, marginBottom: 4 }}>
-            Phát hiện đăng nhập từ <strong>thiết bị mới</strong>.
+        <div className="lm-header">
+          <div className="lm-icon lm-icon--purple">
+            <SafetyOutlined />
+          </div>
+          <h2 className="lm-title">Xác thực thiết bị mới</h2>
+          <p className="lm-sub">
+            Phát hiện đăng nhập từ <strong>thiết bị chưa được nhận diện</strong>
           </p>
+        </div>
+
+        <div className="lm-body lm-body--center">
           {emailHint && (
-            <p style={{ color: '#6b7280', fontSize: 12, marginBottom: 16 }}>
-              Mã OTP đã gửi về: <strong>{emailHint}</strong>
-            </p>
+            <div className="otp-email-hint">
+              📧 Mã OTP đã gửi tới: <strong>{emailHint}</strong>
+            </div>
           )}
 
-          {/* 6 ô nhập OTP */}
-          <div className="otp-input-row">
-            {[0,1,2,3,4,5].map(i => (
+          {/* 6 ô OTP */}
+          <div className="otp-input-row" onPaste={handleOtpPaste}>
+            {[0, 1, 2, 3, 4, 5].map(i => (
               <input
                 key={i}
-                ref={el => otpRefs.current[i] = el}
-                className="otp-digit"
+                ref={el => (otpRefs.current[i] = el)}
+                className={`otp-digit${otpCode[i] ? ' otp-digit--filled' : ''}${otpError ? ' otp-digit--error' : ''}`}
                 type="text"
                 inputMode="numeric"
                 maxLength={1}
                 value={otpCode[i] || ''}
-                onChange={e => {
-                  const val = e.target.value.replace(/\D/g, '');
-                  const arr = otpCode.split('');
-                  arr[i] = val;
-                  const next = arr.join('').slice(0, 6);
-                  setOtpCode(next);
-                  if (val && i < 5) otpRefs.current[i + 1]?.focus();
-                }}
-                onKeyDown={e => {
-                  if (e.key === 'Backspace' && !otpCode[i] && i > 0)
-                    otpRefs.current[i - 1]?.focus();
-                }}
+                onChange={e => handleOtpInput(i, e)}
+                onKeyDown={e => handleOtpKeyDown(i, e)}
+                disabled={otpLoading || otpExpiry === 0}
+                autoComplete="one-time-code"
               />
             ))}
           </div>
 
+          {/* OTP error */}
           {otpError && (
-            <Alert type="error" title={otpError} style={{ marginTop: 12, borderRadius: 8, fontSize: 12 }} />
+            <div className="otp-error-msg">
+              <ExclamationCircleOutlined style={{ marginRight: 6 }} />
+              {otpError}
+            </div>
           )}
 
           {/* Timer */}
-          <div style={{ margin: '12px 0', fontSize: 12, color: otpExpiry < 60 ? '#ef4444' : '#9ca3af' }}>
-            {otpExpiry > 0
-              ? <>⏱ Mã hết hạn sau <strong style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtSecs(otpExpiry)}</strong></>
-              : <span style={{ color: '#ef4444' }}>⚠️ Mã OTP đã hết hạn. Vui lòng đăng nhập lại.</span>
-            }
+          <div className={`otp-timer${otpExpiry < 60 ? ' otp-timer--urgent' : ''}`}>
+            {otpExpiry > 0 ? (
+              <>⏱ Mã hết hạn sau <strong className="login-countdown">{fmtSecs(otpExpiry)}</strong></>
+            ) : (
+              <span className="otp-expired">⚠️ Mã OTP đã hết hạn — vui lòng đăng nhập lại</span>
+            )}
           </div>
 
+          {/* Confirm button */}
           <Button
             type="primary"
             block
@@ -423,36 +522,40 @@ export default function Login() {
             loading={otpLoading}
             disabled={otpCode.length !== 6 || otpExpiry === 0}
             onClick={handleOtpVerify}
-            style={{ borderRadius: 8, fontWeight: 600 }}
+            className="login-btn"
           >
             Xác nhận
           </Button>
 
-          {/* Gửi lại OTP */}
-          <div style={{ marginTop: 10, fontSize: 12, color: '#9ca3af' }}>
-            Không nhận được email?{' '}
+          {/* Resend */}
+          <div className="otp-resend-row">
+            <span className="otp-resend-label">Không nhận được email?</span>
             {otpResendCooldown > 0 ? (
-              <span>Gửi lại sau <strong style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtSecs(otpResendCooldown)}</strong></span>
+              <span className="otp-resend-wait">
+                Gửi lại sau <strong className="login-countdown">{fmtSecs(otpResendCooldown)}</strong>
+              </span>
             ) : (
               <Button
                 type="link"
                 size="small"
                 loading={otpResendLoading}
                 onClick={handleOtpResend}
-                style={{ padding: 0, fontSize: 12, height: 'auto' }}
+                className="otp-resend-btn"
               >
                 Gửi lại mã OTP
               </Button>
             )}
           </div>
 
-          <Button
-            type="text"
-            style={{ marginTop: 4, fontSize: 12, color: '#9ca3af' }}
+          {/* Cancel */}
+          <button
+            type="button"
+            className="lm-cancel-link"
             onClick={() => setOtpOpen(false)}
+            disabled={otpLoading}
           >
-            Huỷ — Đăng nhập lại
-          </Button>
+            Huỷ — đăng nhập lại
+          </button>
         </div>
       </Modal>
     </div>

@@ -96,8 +96,9 @@ async def _compute_actual_ot(month_key: str, db: AsyncSession, current_user) -> 
 
     # ── Employees ───────────────────────────────────────────────────────────
     emp_q = select(Employee).where(and_(
-        Employee.is_active == True,
         or_(Employee.join_date.is_(None), Employee.join_date <= last_day),
+        or_(Employee.leave_date.is_(None), Employee.leave_date >= first_day),
+        or_(Employee.is_active == True, Employee.leave_date.is_not(None)),
     ))
     if current_user.role == UserRole.WORKER:
         emp_q = emp_q.where(Employee.id == current_user.employee_id)
@@ -505,8 +506,9 @@ async def get_overtime(
         from sqlalchemy import or_
         emp_q = select(Employee).where(
             and_(
-                Employee.is_active == True,
-                or_(Employee.join_date.is_(None), Employee.join_date <= last_day)
+                or_(Employee.join_date.is_(None), Employee.join_date <= last_day),
+                or_(Employee.leave_date.is_(None), Employee.leave_date >= first_day),
+                or_(Employee.is_active == True, Employee.leave_date.is_not(None)),
             )
         )
         if current_user.role == UserRole.WORKER:

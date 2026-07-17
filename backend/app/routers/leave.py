@@ -22,8 +22,16 @@ async def get_leave_summary(
     current_user: AppUser = Depends(get_current_user),
 ):
     """Tong hop phep nam va nghi ko phep - Tinh toan chinh xac theo mac dinh va lich lam"""
-    # 1. Lay tat ca nhan vien dang hoat dong
-    emp_q = select(Employee).where(Employee.is_active == True)
+    first_day_of_year = date(year, 1, 1)
+    last_day_of_year = date(year, 12, 31)
+    from sqlalchemy import or_
+    emp_q = select(Employee).where(
+        and_(
+            or_(Employee.join_date.is_(None), Employee.join_date <= last_day_of_year),
+            or_(Employee.leave_date.is_(None), Employee.leave_date >= first_day_of_year),
+            or_(Employee.is_active == True, Employee.leave_date.is_not(None)),
+        )
+    )
     if current_user.role == UserRole.WORKER:
         emp_q = emp_q.where(Employee.id == current_user.employee_id)
     emp_q = emp_q.order_by(Employee.employee_code)

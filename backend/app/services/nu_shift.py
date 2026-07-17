@@ -60,6 +60,7 @@ class NuShiftDayResult:
     meal_count: int
     night_allowance: float
     shift_name: str
+    is_irregular: bool = False  # True = giờ làm bất thường, cần duyệt
 
 
 def is_nu_dynamic_shift_code(code):
@@ -307,6 +308,10 @@ def _compute_dynamic_nu_overtime_hours(check_in, check_out, mode):
     return normalize_nu_overtime_hours(raw_overtime_hours)
 
 
+# Ngưỡng giờ làm tối thiểu để coi là "hợp lệ" cho mỗi ca XNU
+XNU_MIN_HOURS_THRESHOLD = 6.0  # Dưới 6h = bất thường, cần duyệt
+
+
 def _build_result(mode, week_mode, shift_code, has_midday_check, warning_note, check_in, check_out, night_allowance_rate=0.0):
     code = (shift_code or NU_SHIFT_CODE).upper()
     standard_hours = max(
@@ -317,6 +322,7 @@ def _build_result(mode, week_mode, shift_code, has_midday_check, warning_note, c
         NU_NIGHT_DEFAULT_OT_HOURS if mode == NU_NIGHT_MODE else NU_MORNING_DEFAULT_OT_HOURS
     )
     dynamic_overtime = _compute_dynamic_nu_overtime_hours(check_in, check_out, mode)
+    is_irregular = False
     
     if not check_in and not check_out:
         overtime_hours = 0.0
@@ -330,19 +336,78 @@ def _build_result(mode, week_mode, shift_code, has_midday_check, warning_note, c
         )
         overtime_hours += NU_EXTRA_OT_BY_CODE.get(code, 0.0)
         
-        # Quy tắc thống nhất: check-in < 9h → bữa sáng; check-out >= 17h50 HOẶC check-in >= 18h HOẶC OT >= 3h → bữa tối
-        meal_has_morning = bool(check_in and check_in.hour < 9)
-        meal_has_late = bool(
-            (check_out and (check_out.hour * 60 + check_out.minute) >= 17 * 60 + 50)
-            or (check_in and check_in.hour >= 18)
-            or (overtime_hours >= 3)
-        )
-        meal_count = (1 if meal_has_morning else 0) + (1 if meal_has_late else 0)
-        meal_allowance = 35000.0 * meal_count
+        # --- Tính tiền ăn theo từng ca XNU ---
+        if mode == XNU_MODE_2:
+            # Ca 2 (14:00-22:00): có check-in → 1 bữa chiều
+            # Quy tắc: nếu detect được Ca 2 và có dữ liệu chấm công → tính 1 bữa
+            meal_count = 1 if check_in else 0
+            meal_allowance = 35000.0 * meal_count
+            
+            # Kiểm tra giờ bất thường: check-out quá sớm (trước 20h, tức < 6h làm)
+            if check_in and check_out:
+                worked_hours = _hours_between(check_in, check_out)
+                if worked_hours < XNU_MIN_HOURS_THRESHOLD:
+                    is_irregular = True
+                    # Mặc định KHÔNG tính tiền ăn cho giờ bất thường → chờ duyệt
+                    meal_allowance = 0.0
+                    meal_count = 0
+            elif check_in and not check_out:
+                # Có vào mà không có ra → bất thường
+                is_irregular = True
+                meal_allowance = 0.0
+                meal_count = 0
+                
+        elif mode == XNU_MODE_1:
+            # Ca 1 (06:00-14:00): check-in < 9h → 1 bữa sáng
+            meal_has_morning = bool(check_in and check_in.hour < 9)
+            meal_count = 1 if meal_has_morning else 0
+            meal_allowance = 35000.0 * meal_count
+            
+            # Kiểm tra giờ bất thường: check-out trước 12h (< 6h làm)
+            if check_in and check_out:
+                worked_hours = _hours_between(check_in, check_out)
+                if worked_hours < XNU_MIN_HOURS_THRESHOLD:
+                    is_irregular = True
+                    meal_allowance = 0.0
+                    meal_count = 0
+            elif check_in and not check_out:
+                is_irregular = True
+                meal_allowance = 0.0
+                meal_count = 0
+                
+        elif mode == XNU_MODE_3:
+            # Ca 3 (22:00-06:00): luôn 1 bữa
+            meal_count = 1
+            meal_allowance = 35000.0
+            
+            # Kiểm tra bất thường
+            if check_in and check_out:
+                worked_hours = _hours_between(check_in, check_out)
+                if worked_hours < XNU_MIN_HOURS_THRESHOLD:
+                    is_irregular = True
+                    meal_allowance = 0.0
+                    meal_count = 0
+            elif check_in and not check_out:
+                is_irregular = True
+                meal_allowance = 0.0
+                meal_count = 0
+        else:
+            # Các ca NU/NUT1/NUT2/... khác: giữ quy tắc cũ
+            meal_has_morning = bool(check_in and check_in.hour < 9)
+            meal_has_late = bool(
+                (check_out and (check_out.hour * 60 + check_out.minute) >= 17 * 60 + 50)
+                or (check_in and check_in.hour >= 18)
+                or (overtime_hours >= 3)
+            )
+            meal_count = (1 if meal_has_morning else 0) + (1 if meal_has_late else 0)
+            meal_allowance = 35000.0 * meal_count
 
         # Phụ cấp ca đêm chỉ cho ca tối
         if mode in (NU_NIGHT_MODE, XNU_MODE_3):
             night_allowance = night_allowance_rate if night_allowance_rate > 0 else NU_NIGHT_PCCD
+            # Nếu bất thường thì cũng không tính PC đêm
+            if is_irregular:
+                night_allowance = 0.0
         else:
             night_allowance = 0.0
 
@@ -360,6 +425,7 @@ def _build_result(mode, week_mode, shift_code, has_midday_check, warning_note, c
         meal_count=meal_count,
         night_allowance=night_allowance,
         shift_name=_build_shift_name(mode, code),
+        is_irregular=is_irregular,
     )
 
 

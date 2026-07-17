@@ -7,6 +7,7 @@ import {
   CloseCircleOutlined,
   ThunderboltOutlined,
   CalendarOutlined,
+  SwapOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import api from '../../api/client';
@@ -19,6 +20,8 @@ export default function ForgotScanModal({ visible, onClose, monthKey, onSaveSucc
   const [submitting, setSubmitting] = useState(false);
   const [selectedRowKeys, setSelectedRowKeys] = useState([]);
   const [timeInputs, setTimeInputs] = useState({});
+  // Track which rows have been swapped (check-in ↔ check-out)
+  const [swappedKeys, setSwappedKeys] = useState(new Set());
 
   const fetchScans = async () => {
     if (!visible || !monthKey) return;
@@ -31,6 +34,7 @@ export default function ForgotScanModal({ visible, onClose, monthKey, onSaveSucc
       // Reset selections and inputs
       setSelectedRowKeys([]);
       setTimeInputs({});
+      setSwappedKeys(new Set());
     } catch (error) {
       message.error(error.response?.data?.detail || 'Lỗi khi tải danh sách quên quẹt thẻ');
     } finally {
@@ -42,10 +46,48 @@ export default function ForgotScanModal({ visible, onClose, monthKey, onSaveSucc
     fetchScans();
   }, [visible, monthKey]);
 
+  /**
+   * Get the effective (displayed) state of a row, considering swaps.
+   * Returns { checkIn, checkOut, notes } after swap.
+   */
+  const getEffectiveState = (record, key) => {
+    const isSwapped = swappedKeys.has(key);
+    if (isSwapped) {
+      return {
+        checkIn: record.last_check_out || null,
+        checkOut: record.first_check_in || null,
+        notes: record.notes === 'Quên check in' ? 'Quên check out' : 'Quên check in',
+      };
+    }
+    return {
+      checkIn: record.first_check_in || null,
+      checkOut: record.last_check_out || null,
+      notes: record.notes,
+    };
+  };
+
   const handleTimeInputChange = (key, val) => {
     setTimeInputs(prev => ({ ...prev, [key]: val }));
     // Automatically check the row if user types a value
     if (val && !selectedRowKeys.includes(key)) {
+      setSelectedRowKeys(prev => [...prev, key]);
+    }
+  };
+
+  const handleSwap = (record, key) => {
+    setSwappedKeys(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+    // Clear the time input for this row since the missing side changed
+    setTimeInputs(prev => ({ ...prev, [key]: '' }));
+    // Auto-select the row
+    if (!selectedRowKeys.includes(key)) {
       setSelectedRowKeys(prev => [...prev, key]);
     }
   };
@@ -58,14 +100,15 @@ export default function ForgotScanModal({ visible, onClose, monthKey, onSaveSucc
     }
     const parts = record.shift_start_end.split('-');
     if (parts.length < 2) return;
-    
+
+    const effective = getEffectiveState(record, key);
     let defaultTime = '';
-    if (record.notes === 'Quên check in') {
-      defaultTime = parts[0].trim();
+    if (effective.notes === 'Quên check in') {
+      defaultTime = parts[0].trim();  // Bổ sung giờ vào → lấy giờ bắt đầu ca
     } else {
-      defaultTime = parts[1].trim();
+      defaultTime = parts[1].trim();  // Bổ sung giờ ra → lấy giờ kết thúc ca
     }
-    
+
     handleTimeInputChange(key, defaultTime);
   };
 
@@ -134,15 +177,45 @@ export default function ForgotScanModal({ visible, onClose, monthKey, onSaveSucc
     for (const key of selectedRowKeys) {
       const scan = scans.find(s => `${s.work_date}_${s.employee_id}` === key);
       if (!scan) continue;
-      const val = timeInputs[key]?.trim();
-      if (!val) {
+
+      const val = (timeInputs[key] || '').trim();
+      const effective = getEffectiveState(scan, key);
+
+      // Check if user entered X → company off
+      if (val.toUpperCase() === 'X') {
+        items.push({
+          employee_id: scan.employee_id,
+          work_date: scan.work_date,
+          is_off: true,
+        });
+        continue;
+      }
+
+      // Build check_in / check_out based on effective state + user input
+      let checkIn = effective.checkIn || null;
+      let checkOut = effective.checkOut || null;
+
+      // The user input fills the MISSING side
+      if (val) {
+        if (effective.notes === 'Quên check in') {
+          checkIn = val;      // User is filling in check-in
+        } else {
+          checkOut = val;     // User is filling in check-out
+        }
+      }
+
+      // Must have at least one value to send
+      if (!checkIn && !checkOut && !swappedKeys.has(key)) {
         message.error(`Nhân viên ${scan.full_name} ngày ${dayjs(scan.work_date).format('DD/MM')} chưa nhập thời gian!`);
         return;
       }
+
       items.push({
         employee_id: scan.employee_id,
         work_date: scan.work_date,
-        time_value: val
+        check_in: checkIn || null,
+        check_out: checkOut || null,
+        is_off: false,
       });
     }
 
@@ -152,6 +225,7 @@ export default function ForgotScanModal({ visible, onClose, monthKey, onSaveSucc
       message.success(res.data.message || 'Cập nhật thành công');
       setSelectedRowKeys([]);
       setTimeInputs({});
+      setSwappedKeys(new Set());
       fetchScans();
       if (onSaveSuccess) onSaveSuccess();
     } catch (error) {
@@ -219,49 +293,93 @@ export default function ForgotScanModal({ visible, onClose, monthKey, onSaveSucc
     },
     {
       title: 'Giờ vào',
-      dataIndex: 'first_check_in',
-      key: 'first_check_in',
+      key: 'effective_check_in',
       width: 80,
       align: 'center',
-      render: text => text ? <span style={{ fontWeight: '500', color: '#10b981' }}>{text}</span> : <span style={{ color: '#d1d5db' }}>--:--</span>
+      render: (_, record) => {
+        const key = `${record.work_date}_${record.employee_id}`;
+        const { checkIn } = getEffectiveState(record, key);
+        const isSwapped = swappedKeys.has(key);
+        return checkIn
+          ? <span style={{ fontWeight: '500', color: isSwapped ? '#f59e0b' : '#10b981' }}>{checkIn}</span>
+          : <span style={{ color: '#d1d5db' }}>--:--</span>;
+      }
     },
     {
       title: 'Giờ ra',
-      dataIndex: 'last_check_out',
-      key: 'last_check_out',
+      key: 'effective_check_out',
       width: 80,
       align: 'center',
-      render: text => text ? <span style={{ fontWeight: '500', color: '#10b981' }}>{text}</span> : <span style={{ color: '#d1d5db' }}>--:--</span>
+      render: (_, record) => {
+        const key = `${record.work_date}_${record.employee_id}`;
+        const { checkOut } = getEffectiveState(record, key);
+        const isSwapped = swappedKeys.has(key);
+        return checkOut
+          ? <span style={{ fontWeight: '500', color: isSwapped ? '#f59e0b' : '#10b981' }}>{checkOut}</span>
+          : <span style={{ color: '#d1d5db' }}>--:--</span>;
+      }
+    },
+    {
+      title: '',
+      key: 'swap',
+      width: 40,
+      align: 'center',
+      render: (_, record) => {
+        const key = `${record.work_date}_${record.employee_id}`;
+        const isSwapped = swappedKeys.has(key);
+        return (
+          <Tooltip title={isSwapped ? 'Hoàn tác đổi chiều' : 'Đổi chiều: chuyển Giờ vào ↔ Giờ ra'}>
+            <Button
+              type="text"
+              size="small"
+              icon={<SwapOutlined style={{ color: isSwapped ? '#f59e0b' : '#6b7280', fontSize: '14px' }} />}
+              onClick={() => handleSwap(record, key)}
+              style={{
+                background: isSwapped ? '#fef3c7' : 'transparent',
+                borderRadius: '4px',
+                border: isSwapped ? '1px solid #fcd34d' : '1px solid transparent',
+              }}
+            />
+          </Tooltip>
+        );
+      }
     },
     {
       title: 'Lỗi',
-      dataIndex: 'notes',
-      key: 'notes',
+      key: 'effective_notes',
       width: 120,
       align: 'center',
-      render: text => {
-        const isCheckIn = text === 'Quên check in';
+      render: (_, record) => {
+        const key = `${record.work_date}_${record.employee_id}`;
+        const { notes } = getEffectiveState(record, key);
+        const isCheckIn = notes === 'Quên check in';
+        const isSwapped = swappedKeys.has(key);
         return (
-          <Tag color={isCheckIn ? 'error' : 'warning'} style={{ fontWeight: '500' }}>
-            {text}
+          <Tag
+            color={isCheckIn ? 'error' : 'warning'}
+            style={{ fontWeight: '500', border: isSwapped ? '2px solid #f59e0b' : undefined }}
+          >
+            {notes}
           </Tag>
         );
       }
     },
     {
-      title: 'Thêm thời gian',
+      title: 'Bổ sung thời gian',
       key: 'time_input',
       width: 180,
       render: (_, record) => {
         const key = `${record.work_date}_${record.employee_id}`;
+        const { notes } = getEffectiveState(record, key);
+        const isCheckIn = notes === 'Quên check in';
         return (
           <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
             <Input
               size="small"
-              placeholder="HH:MM hoặc X"
+              placeholder={isCheckIn ? 'Giờ vào (VD: 07:00)' : 'Giờ ra (VD: 16:00)'}
               value={timeInputs[key] || ''}
               onChange={e => handleTimeInputChange(key, e.target.value)}
-              style={{ width: '100px', borderRadius: '4px' }}
+              style={{ width: '120px', borderRadius: '4px' }}
             />
             <Tooltip title="Điền giờ quy định của ca">
               <Button
@@ -287,7 +405,7 @@ export default function ForgotScanModal({ visible, onClose, monthKey, onSaveSucc
           <span>Danh sách lỗi quên quẹt thẻ - Tháng {monthKey ? dayjs(monthKey).format('MM/YYYY') : ''}</span>
         </div>
       }
-      width={1100}
+      width={1200}
       footer={[
         <Button key="close" onClick={onClose} icon={<CloseCircleOutlined />}>
           Đóng
@@ -327,9 +445,9 @@ export default function ForgotScanModal({ visible, onClose, monthKey, onSaveSucc
             <div style={{ fontSize: '13px' }}>
               <strong>Hướng dẫn sửa nhanh:</strong>
               <ul style={{ margin: '4px 0 0 16px', padding: 0 }}>
-                <li>Nhập thời gian cụ thể (ví dụ: <Text code>23:30</Text> hoặc <Text code>11h</Text>) để bổ sung giờ vào/ra bị thiếu.</li>
-                <li>Nhập chữ <Text code>X</Text> nếu ngày đó công ty cho nghỉ (Hệ thống sẽ chuyển lịch sang ca <Text code>OFF</Text> và xóa dữ liệu chấm công ngày này).</li>
-                <li>Hệ thống tự động tính toán số giờ làm việc dựa trên thời gian bắt đầu ca và giờ nghỉ. Ví dụ: ca 7h-16h điền 11h sẽ tính làm 4 tiếng.</li>
+                <li>Nhập thời gian cụ thể (ví dụ: <Text code>07:00</Text> hoặc <Text code>16h</Text>) để bổ sung giờ vào/ra bị thiếu.</li>
+                <li>Nhập chữ <Text code>X</Text> nếu ngày đó công ty cho nghỉ.</li>
+                <li>Bấm nút <SwapOutlined style={{ color: '#f59e0b' }} /> <strong>Đổi chiều</strong> nếu thời gian đang nằm sai cột (ví dụ: 16:00 đang ở Giờ vào nhưng thực ra là Giờ ra).</li>
               </ul>
             </div>
           }
@@ -343,6 +461,11 @@ export default function ForgotScanModal({ visible, onClose, monthKey, onSaveSucc
           <div>
             <Text type="secondary">
               Tìm thấy <strong>{scans.length}</strong> trường hợp quên quẹt thẻ
+              {swappedKeys.size > 0 && (
+                <Tag color="orange" style={{ marginLeft: 8 }}>
+                  {swappedKeys.size} đã đổi chiều
+                </Tag>
+              )}
             </Text>
           </div>
           <Space>

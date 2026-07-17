@@ -8,6 +8,7 @@ from app.models.schedule import WorkSchedule
 from app.models.audit import AuditLog
 from app.models.holiday import CompanyHoliday, HolidayException, HolidayTargetEmployee
 from app.models.x_overtime import XOvertimeConfig
+from app.models.meal_approval import MealApproval
 from app.models.union import UnionTransaction, UnionEvent, UnionEventMember, UnionMember
 from app.models.session import UserSession
 from app.models.auth_tokens import PasswordResetToken, OtpCode
@@ -31,6 +32,7 @@ __all__ = [
     "HolidayException",
     "HolidayTargetEmployee",
     "XOvertimeConfig",
+    "MealApproval",
     "UnionTransaction",
     "UnionEvent",
     "UnionEventMember",

@@ -5,7 +5,7 @@ import re
 from io import BytesIO
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, delete, cast, Integer
+from sqlalchemy import select, and_, or_, delete, cast, Integer
 from app.database import get_db
 from app.models.schedule import WorkSchedule
 from app.models.employee import Employee
@@ -68,7 +68,11 @@ async def get_schedule(
     last_day = date(year, month, dim)
 
     emp_q = select(Employee).where(
-        Employee.is_active == True,
+        and_(
+            or_(Employee.join_date.is_(None), Employee.join_date <= last_day),
+            or_(Employee.leave_date.is_(None), Employee.leave_date >= first_day),
+            or_(Employee.is_active == True, Employee.leave_date.is_not(None)),
+        )
     )
     if current_user.role == UserRole.WORKER:
         emp_q = emp_q.where(Employee.id == current_user.employee_id)

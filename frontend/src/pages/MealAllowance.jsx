@@ -12,6 +12,8 @@ import {
   ThunderboltOutlined,
   DeleteOutlined,
   CheckCircleOutlined,
+  ExclamationCircleOutlined,
+  ClockCircleOutlined,
 } from '@ant-design/icons';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import dayjs from 'dayjs';
@@ -69,6 +71,13 @@ export default function MealAllowance() {
   const [editManualMealCount, setEditManualMealCount] = useState(0);
   const [editManualWithNight, setEditManualWithNight] = useState(false);
   const [editManualSaving, setEditManualSaving] = useState(false);
+
+  // State cho duyệt giờ bất thường
+  const [approvalModal, setApprovalModal] = useState(false);
+  const [approvalTab, setApprovalTab] = useState('pending');
+  const [selectedApprovalKeys, setSelectedApprovalKeys] = useState([]);
+  const [approvalSaving, setApprovalSaving] = useState(false);
+  const [approvalReason, setApprovalReason] = useState('');
 
   useEffect(() => {
     const saved = localStorage.getItem('nightAllowanceRate');
@@ -260,6 +269,17 @@ export default function MealAllowance() {
     return result.sort((a, b) => a.cell.work_date.localeCompare(b.cell.work_date));
   }, [att]);
 
+  const uniqueShiftCodes = useMemo(() => {
+    const codes = new Set();
+    eligibleList.forEach((r) => {
+      if (r.cell.shift_code) codes.add(r.cell.shift_code);
+    });
+    addedOtList.forEach((r) => {
+      if (r.cell.shift_code) codes.add(r.cell.shift_code);
+    });
+    return Array.from(codes).sort().map((c) => ({ text: c, value: c }));
+  }, [eligibleList, addedOtList]);
+
   const handleBulkDeleteOt = async () => {
     if (selectedDeleteKeys.length === 0) return;
     setQuickDeleting(true);
@@ -282,6 +302,93 @@ export default function MealAllowance() {
     }
   };
 
+  // ─── DANH SÁCH GIỜ LÀM BẤT THƯỜNG ────────────────────────────
+  const irregularList = useMemo(() => {
+    const result = [];
+    for (const row of (att?.rows || [])) {
+      for (const cell of (row.days || [])) {
+        if (cell.is_irregular) {
+          result.push({
+            key: `${row.employee_id}_${cell.work_date}`,
+            employee_id: row.employee_id,
+            employee_code: row.employee_code,
+            full_name: row.full_name,
+            department: row.department,
+            cell,
+            approval_id: cell.meal_approval_id,
+            approval_status: cell.meal_approval_status || 'pending',
+          });
+        }
+      }
+    }
+    return result.sort((a, b) => a.cell.work_date.localeCompare(b.cell.work_date));
+  }, [att]);
+
+  const pendingIrregulars = useMemo(() => irregularList.filter(r => r.approval_status === 'pending'), [irregularList]);
+  const approvedIrregulars = useMemo(() => irregularList.filter(r => r.approval_status === 'approved'), [irregularList]);
+
+  const handleApproveIrregular = async () => {
+    if (selectedApprovalKeys.length === 0) return;
+    setApprovalSaving(true);
+    try {
+      const selected = irregularList.filter((r) => selectedApprovalKeys.includes(r.key));
+      const ids = selected.map(r => r.approval_id).filter(Boolean);
+      if (ids.length === 0) {
+        message.warning('Không có bản ghi để duyệt');
+        return;
+      }
+      await api.put('/meal-approvals/approve', {
+        ids,
+        meal_count: 1,
+        reason: approvalReason || 'Sếp duyệt',
+      });
+      message.success(`Đã duyệt ${ids.length} ngày`);
+      setSelectedApprovalKeys([]);
+      setApprovalReason('');
+      queryClient.invalidateQueries({ queryKey: ['attendance'] });
+    } catch {
+      message.error('Lỗi khi duyệt');
+    } finally {
+      setApprovalSaving(false);
+    }
+  };
+
+  const handleRejectIrregular = async () => {
+    if (selectedApprovalKeys.length === 0) return;
+    setApprovalSaving(true);
+    try {
+      const selected = irregularList.filter((r) => selectedApprovalKeys.includes(r.key));
+      const ids = selected.map(r => r.approval_id).filter(Boolean);
+      if (ids.length === 0) return;
+      await api.put('/meal-approvals/reject', {
+        ids,
+        reason: approvalReason || 'Từ chối',
+      });
+      message.success(`Đã từ chối ${ids.length} ngày`);
+      setSelectedApprovalKeys([]);
+      setApprovalReason('');
+      queryClient.invalidateQueries({ queryKey: ['attendance'] });
+    } catch {
+      message.error('Lỗi khi từ chối');
+    } finally {
+      setApprovalSaving(false);
+    }
+  };
+
+  const handleDeleteApproval = async (approvalId) => {
+    if (!approvalId) return;
+    setApprovalSaving(true);
+    try {
+      await api.delete(`/meal-approvals/${approvalId}`);
+      message.success('Đã xóa lượt duyệt');
+      queryClient.invalidateQueries({ queryKey: ['attendance'] });
+    } catch {
+      message.error('Lỗi khi xóa lượt duyệt');
+    } finally {
+      setApprovalSaving(false);
+    }
+  };
+
   const quickOtColumns = [
     {
       title: 'Họ tên',
@@ -298,6 +405,13 @@ export default function MealAllowance() {
       key: 'shift',
       width: 55,
       render: (_, r) => <Tag style={{ fontSize: 10, margin: 0 }}>{r.cell.shift_code || '–'}</Tag>,
+      sorter: (a, b) => {
+        const codeA = a.cell.shift_code || '';
+        const codeB = b.cell.shift_code || '';
+        return codeA.localeCompare(codeB);
+      },
+      filters: uniqueShiftCodes,
+      onFilter: (value, record) => record.cell.shift_code === value,
     },
     {
       title: 'Ngày',
@@ -341,6 +455,54 @@ export default function MealAllowance() {
 
   const renderMealCell = (cell, employeeId) => {
     if (cell.status === 'no_data') return <span className="ma-cell-dot">·</span>;
+
+    // Giờ làm bất thường - cần duyệt
+    if (cell.is_irregular) {
+      const approvalStatus = cell.meal_approval_status || 'pending';
+      const isApproved = approvalStatus === 'approved';
+      const isRejected = approvalStatus === 'rejected';
+      const amount = cell.meal_allowance || 0;
+      const shortAmount = amount >= 1000 ? `${amount / 1000}k` : (amount ? String(amount) : '0');
+
+      let bgColor, textColor, borderColor, statusLabel;
+      if (isApproved) {
+        bgColor = '#dcfce7'; textColor = '#15803d'; borderColor = '#86efac'; statusLabel = '✓ Đã duyệt';
+      } else if (isRejected) {
+        bgColor = '#fef2f2'; textColor = '#991b1b'; borderColor = '#fca5a5'; statusLabel = '✗ Đã từ chối';
+      } else {
+        bgColor = '#fef3c7'; textColor = '#92400e'; borderColor = '#fcd34d'; statusLabel = '⏳ Chờ duyệt';
+      }
+
+      return (
+        <Tooltip title={
+          <div className="ma-tooltip">
+            <div style={{ color: isApproved ? '#22c55e' : (isRejected ? '#ef4444' : '#f59e0b'), fontWeight: 700, marginBottom: 4 }}>
+              {statusLabel}
+            </div>
+            <div style={{ fontSize: 12, color: '#d1d5db', marginBottom: 4 }}>Giờ làm không đủ ca</div>
+            {cell.check_in && <div className="ma-tooltip-row">Vào: <b>{dayjs(cell.check_in).format('HH:mm')}</b></div>}
+            {cell.check_out && <div className="ma-tooltip-row">Ra: <b>{dayjs(cell.check_out).format('HH:mm')}</b></div>}
+            {cell.shift_code && <div className="ma-tooltip-row">Ca: <b>{cell.shift_code}</b> {cell.shift_name}</div>}
+            {isApproved && amount > 0 && <div className="ma-tooltip-amount meal">Tiền ăn: <b>{amount.toLocaleString()} đ</b></div>}
+            {!isWorker && !isApproved && (
+              <div style={{ color: '#fbbf24', fontSize: 11, marginTop: 4, borderTop: '1px dashed #374151', paddingTop: 4 }}>
+                💡 Mở "Duyệt giờ bất thường" để xử lý
+              </div>
+            )}
+          </div>
+        }>
+          <div style={{
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            minWidth: 32, padding: '1px 5px', borderRadius: 5,
+            fontSize: 11, fontWeight: 700,
+            background: bgColor, color: textColor, border: `1px solid ${borderColor}`,
+            animation: (!isApproved && !isRejected) ? 'ma-irregular-pulse 2s ease-in-out infinite' : 'none',
+          }}>
+            {isApproved ? shortAmount : '⚠'}
+          </div>
+        </Tooltip>
+      );
+    }
 
     if (cell.status === 'forgot_scan') {
       const amount = cell.meal_allowance || 0;
@@ -563,6 +725,24 @@ export default function MealAllowance() {
                   style={{ background: '#f0fdf4', color: '#16a34a', border: '1px solid #86efac', borderRadius: 6, fontSize: 12 }}
                 >
                   Đã thêm ({addedOtList.length})
+                </Button>
+              )}
+              {irregularList.length > 0 && (
+                <Button
+                  size="small"
+                  icon={<ExclamationCircleOutlined />}
+                  onClick={() => { setApprovalTab('pending'); setSelectedApprovalKeys(pendingIrregulars.map(r => r.key)); setApprovalModal(true); }}
+                  style={{
+                    background: pendingIrregulars.length > 0 ? '#fef3c7' : '#f0fdf4',
+                    color: pendingIrregulars.length > 0 ? '#92400e' : '#16a34a',
+                    border: `1px solid ${pendingIrregulars.length > 0 ? '#fcd34d' : '#86efac'}`,
+                    borderRadius: 6, fontSize: 12,
+                    animation: pendingIrregulars.length > 0 ? 'ma-irregular-pulse 2s ease-in-out infinite' : 'none',
+                  }}
+                >
+                  {pendingIrregulars.length > 0
+                    ? `Duyệt giờ bất thường (${pendingIrregulars.length})`
+                    : `Giờ BT đã duyệt (${approvedIrregulars.length})`}
                 </Button>
               )}
             </div>
@@ -846,6 +1026,13 @@ export default function MealAllowance() {
                     key: 'shift',
                     width: 55,
                     render: (_, r) => <Tag style={{ fontSize: 10, margin: 0 }}>{r.cell.shift_code || '–'}</Tag>,
+                    sorter: (a, b) => {
+                      const codeA = a.cell.shift_code || '';
+                      const codeB = b.cell.shift_code || '';
+                      return codeA.localeCompare(codeB);
+                    },
+                    filters: uniqueShiftCodes,
+                    onFilter: (value, record) => record.cell.shift_code === value,
                   },
                   {
                     title: 'Ngày',
@@ -1049,6 +1236,234 @@ export default function MealAllowance() {
               </Form.Item>
             </Form>
           </div>
+        )}
+      </Modal>
+
+      {/* Modal Duyệt giờ bất thường */}
+      <Modal
+        title={
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <ExclamationCircleOutlined style={{ color: '#d97706' }} />
+            <span>Duyệt giờ làm bất thường</span>
+          </div>
+        }
+        open={approvalModal}
+        onCancel={() => setApprovalModal(false)}
+        width={750}
+        centered
+        footer={approvalTab === 'pending' ? [
+          <Button key="cancel" onClick={() => setApprovalModal(false)}>Hủy</Button>,
+          <Popconfirm
+            key="reject-confirm"
+            title={`Từ chối ${selectedApprovalKeys.length} ngày?`}
+            description="Nhân viên sẽ không được tính tiền ăn cho các ngày này."
+            onConfirm={handleRejectIrregular}
+            okText="Từ chối"
+            cancelText="Hủy"
+            okButtonProps={{ danger: true }}
+            disabled={selectedApprovalKeys.length === 0}
+          >
+            <Button key="reject" danger loading={approvalSaving}
+              disabled={selectedApprovalKeys.length === 0}
+              icon={<DeleteOutlined />}>
+              Từ chối ({selectedApprovalKeys.length})
+            </Button>
+          </Popconfirm>,
+          <Button key="approve" type="primary" loading={approvalSaving}
+            disabled={selectedApprovalKeys.length === 0}
+            style={{ background: '#16a34a', borderColor: '#16a34a' }}
+            icon={<CheckCircleOutlined />}
+            onClick={handleApproveIrregular}>
+            Duyệt ({selectedApprovalKeys.length})
+          </Button>,
+        ] : [
+          <Button key="cancel" onClick={() => setApprovalModal(false)}>Đóng</Button>,
+        ]}
+      >
+        <Segmented
+          value={approvalTab}
+          onChange={(val) => setApprovalTab(val)}
+          options={[
+            { value: 'pending', label: `Chờ duyệt (${pendingIrregulars.length})`, icon: <ClockCircleOutlined /> },
+            { value: 'approved', label: `Đã duyệt (${approvedIrregulars.length})`, icon: <CheckCircleOutlined /> },
+          ]}
+          block
+          style={{ marginBottom: 12 }}
+        />
+
+        {approvalTab === 'pending' ? (
+          <>
+            <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 8 }}>
+              Các ngày nhân viên chấm công nhưng <b>giờ làm dưới 6 tiếng</b>. Mặc định không tính tiền ăn.
+              <br/>Duyệt nếu sếp cho về sớm (hết hàng, lý do khác).
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <Input
+                placeholder="Lý do duyệt (VD: Hết hàng, sếp cho về sớm...)"
+                value={approvalReason}
+                onChange={(e) => setApprovalReason(e.target.value)}
+                size="small"
+                style={{ borderRadius: 6 }}
+              />
+            </div>
+            {pendingIrregulars.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '40px 0', color: '#9ca3af', fontSize: 13 }}>
+                Không có ngày bất thường nào cần duyệt.
+              </div>
+            ) : (
+              <AntTable
+                dataSource={pendingIrregulars}
+                columns={[
+                  {
+                    title: 'Họ tên',
+                    dataIndex: 'full_name',
+                    render: (v, r) => (
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: 13 }}>{v}</div>
+                        <div style={{ fontSize: 11, color: '#9ca3af' }}>{r.employee_code}</div>
+                      </div>
+                    ),
+                  },
+                  {
+                    title: 'Ca',
+                    key: 'shift',
+                    width: 55,
+                    render: (_, r) => <Tag style={{ fontSize: 10, margin: 0 }}>{r.cell.shift_code || '–'}</Tag>,
+                  },
+                  {
+                    title: 'Ngày',
+                    key: 'date',
+                    width: 75,
+                    render: (_, r) => dayjs(r.cell.work_date).format('DD/MM'),
+                  },
+                  {
+                    title: 'Vào',
+                    key: 'checkin',
+                    width: 60,
+                    render: (_, r) => r.cell.check_in
+                      ? <b style={{ color: '#059669' }}>{dayjs(r.cell.check_in).format('HH:mm')}</b>
+                      : <span style={{ color: '#d1d5db' }}>–</span>,
+                  },
+                  {
+                    title: 'Ra',
+                    key: 'checkout',
+                    width: 60,
+                    render: (_, r) => r.cell.check_out
+                      ? <b style={{ color: '#dc2626' }}>{dayjs(r.cell.check_out).format('HH:mm')}</b>
+                      : <span style={{ color: '#d1d5db' }}>–</span>,
+                  },
+                  {
+                    title: 'Giờ làm',
+                    key: 'hours',
+                    width: 70,
+                    render: (_, r) => {
+                      const hours = r.cell.actual_hours || 0;
+                      return <span style={{ fontWeight: 600, color: hours < 6 ? '#dc2626' : '#059669' }}>{hours.toFixed(1)}h</span>;
+                    },
+                  },
+                  {
+                    title: 'Trạng thái',
+                    key: 'status',
+                    width: 90,
+                    render: () => <Tag color="warning" style={{ fontSize: 10 }}>Chờ duyệt</Tag>,
+                  },
+                ]}
+                rowSelection={{ selectedRowKeys: selectedApprovalKeys, onChange: setSelectedApprovalKeys }}
+                size="small"
+                pagination={false}
+                scroll={{ y: 350 }}
+              />
+            )}
+          </>
+        ) : (
+          <>
+            <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 12 }}>
+              Danh sách các ngày bất thường đã được duyệt tính tiền ăn.
+            </div>
+            {approvedIrregulars.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '40px 0', color: '#9ca3af', fontSize: 13 }}>
+                Chưa có ngày nào được duyệt.
+              </div>
+            ) : (
+              <AntTable
+                dataSource={approvedIrregulars}
+                columns={[
+                  {
+                    title: 'Họ tên',
+                    dataIndex: 'full_name',
+                    render: (v, r) => (
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: 13 }}>{v}</div>
+                        <div style={{ fontSize: 11, color: '#9ca3af' }}>{r.employee_code}</div>
+                      </div>
+                    ),
+                  },
+                  {
+                    title: 'Ca',
+                    key: 'shift',
+                    width: 55,
+                    render: (_, r) => <Tag style={{ fontSize: 10, margin: 0 }}>{r.cell.shift_code || '–'}</Tag>,
+                  },
+                  {
+                    title: 'Ngày',
+                    key: 'date',
+                    width: 75,
+                    render: (_, r) => dayjs(r.cell.work_date).format('DD/MM'),
+                  },
+                  {
+                    title: 'Giờ',
+                    key: 'time',
+                    width: 100,
+                    render: (_, r) => (
+                      <span style={{ fontSize: 11 }}>
+                        {r.cell.check_in ? dayjs(r.cell.check_in).format('HH:mm') : '–'}
+                        {' → '}
+                        {r.cell.check_out ? dayjs(r.cell.check_out).format('HH:mm') : '–'}
+                      </span>
+                    ),
+                  },
+                  {
+                    title: 'Tiền ăn',
+                    key: 'meal',
+                    width: 80,
+                    render: (_, r) => <b style={{ color: '#16a34a' }}>{(r.cell.meal_allowance || 0).toLocaleString()}đ</b>,
+                  },
+                  {
+                    title: 'Trạng thái',
+                    key: 'status',
+                    width: 90,
+                    render: () => <Tag color="success" style={{ fontSize: 10 }}>✓ Đã duyệt</Tag>,
+                  },
+                  {
+                    title: '',
+                    key: 'action',
+                    width: 50,
+                    align: 'center',
+                    render: (_, r) => (
+                      <Popconfirm
+                        title="Xóa lượt duyệt này?"
+                        description="Khôi phục trạng thái chờ duyệt."
+                        onConfirm={() => handleDeleteApproval(r.approval_id)}
+                        okText="Xóa"
+                        cancelText="Hủy"
+                        okButtonProps={{ danger: true }}
+                      >
+                        <Button
+                          type="text"
+                          danger
+                          icon={<DeleteOutlined />}
+                          size="small"
+                        />
+                      </Popconfirm>
+                    ),
+                  },
+                ]}
+                size="small"
+                pagination={false}
+                scroll={{ y: 350 }}
+              />
+            )}
+          </>
         )}
       </Modal>
     </div>

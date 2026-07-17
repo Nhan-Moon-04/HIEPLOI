@@ -59,9 +59,9 @@ async def get_meal_allowance(
 
     emp_q = select(Employee).where(
         and_(
-            Employee.is_active == True,
             or_(Employee.join_date.is_(None), Employee.join_date <= end_date),
             or_(Employee.leave_date.is_(None), Employee.leave_date >= start_date),
+            or_(Employee.is_active == True, Employee.leave_date.is_not(None)),
         )
     )
     if current_user.role == UserRole.WORKER:
@@ -152,7 +152,7 @@ async def get_meal_allowance(
 
     sched_q = select(WorkSchedule).where(
         and_(
-            WorkSchedule.work_date >= start_date,
+            WorkSchedule.work_date >= start_date - timedelta(days=1),
             WorkSchedule.work_date <= end_date,
             WorkSchedule.employee_id.in_(emp_ids),
         )
@@ -209,7 +209,7 @@ async def get_meal_allowance(
     from app.models.attendance import AttendanceLog
     from datetime import datetime, time, timedelta
     log_q = select(AttendanceLog).where(
-        and_(AttendanceLog.event_time >= datetime.combine(start_date, time(0, 0)), 
+        and_(AttendanceLog.event_time >= datetime.combine(start_date - timedelta(days=1), time(0, 0)), 
              AttendanceLog.event_time <= datetime.combine(end_date + timedelta(days=1), time(12, 0)))
     )
     log_result = await db.execute(log_q)
@@ -228,8 +228,8 @@ async def get_meal_allowance(
     nu_shift_code_map = {}
     for emp in employees:
         default_shift = shifts_by_code.get(emp.default_shift_code)
-        # Scan all days in range
-        curr = start_date
+        # Scan all days in range (including 1 day before start_date to properly link cross-boundary night shifts)
+        curr = start_date - timedelta(days=1)
         while curr <= end_date:
             sid = sched_map.get((emp.id, curr))
             if sid:
@@ -259,6 +259,18 @@ async def get_meal_allowance(
     xot_configs = xot_result.scalars().all()
     # Map: (employee_id, work_date) -> XOvertimeConfig
     xot_map = {(c.employee_id, c.work_date): c for c in xot_configs}
+
+    # Load MealApproval data cho giờ làm bất thường
+    from app.models.meal_approval import MealApproval
+    approval_q = select(MealApproval).where(
+        and_(
+            MealApproval.work_date >= start_date,
+            MealApproval.work_date <= end_date,
+            MealApproval.employee_id.in_(emp_ids),
+        )
+    )
+    approval_result = await db.execute(approval_q)
+    approval_map = {(a.employee_id, a.work_date): a for a in approval_result.scalars().all()}
 
     rows = []
     total_meal = 0.0
@@ -345,16 +357,36 @@ async def get_meal_allowance(
             # Check if we have NU result for this day
             nu_res = nu_results.get((emp.id, work_date))
             if nu_res:
-                meal = nu_res.meal_allowance
-                total_emp_meal += meal
-                work_days += 1
-                meal_rates[meal] += 1
-                
-                if nu_res.night_allowance and nu_res.night_allowance > 0:
-                    night_shifts += 1
-                    total_emp_meal += nu_res.night_allowance
-                
-                emp_meal_count += nu_res.meal_count
+                # Kiểm tra giờ bất thường và approval
+                if nu_res.is_irregular:
+                    approval = approval_map.get((emp.id, work_date))
+                    if approval and approval.status == "approved":
+                        # Đã duyệt → tính tiền ăn theo approved_meal_count
+                        approved_count = approval.approved_meal_count or 1
+                        meal = 35000.0 * approved_count
+                        total_emp_meal += meal
+                        work_days += 1
+                        meal_rates[meal] += 1
+                        emp_meal_count += approved_count
+                        # Nếu ca đêm và đã duyệt → tính PC đêm
+                        from app.services.nu_shift import XNU_MODE_3 as _XNU3, NU_NIGHT_MODE as _NUN
+                        if nu_res.mode in (_XNU3, _NUN) and night_allowance > 0:
+                            night_shifts += 1
+                            total_emp_meal += night_allowance
+                    else:
+                        # pending hoặc rejected → không tính tiền ăn, nhưng vẫn đếm ngày đi làm
+                        work_days += 1
+                else:
+                    meal = nu_res.meal_allowance
+                    total_emp_meal += meal
+                    work_days += 1
+                    meal_rates[meal] += 1
+                    
+                    if nu_res.night_allowance and nu_res.night_allowance > 0:
+                        night_shifts += 1
+                        total_emp_meal += nu_res.night_allowance
+                    
+                    emp_meal_count += nu_res.meal_count
 
                 # XNU: cộng thêm tiền ăn OT thủ công nếu có config
                 if nu_res.shift_code == "XNU":

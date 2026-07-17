@@ -97,6 +97,9 @@ class AttendanceCell(BaseModel):
     has_manual_xot: bool = False
     manual_meal_count: Optional[int] = None
     manual_ot_end_time: Optional[str] = None
+    is_irregular: bool = False  # Giờ làm bất thường, cần duyệt
+    meal_approval_id: Optional[int] = None
+    meal_approval_status: Optional[str] = None  # pending | approved | rejected
 
 
 class AttendanceRow(BaseModel):
@@ -460,9 +463,12 @@ async def get_attendance(
 
     # Load employees
     from sqlalchemy import or_
-    emp_filters = [or_(Employee.join_date.is_(None), Employee.join_date <= range_end)]
+    emp_filters = [
+        or_(Employee.join_date.is_(None), Employee.join_date <= range_end),
+        or_(Employee.leave_date.is_(None), Employee.leave_date >= range_start),
+    ]
     if not employee_id:
-        emp_filters.append(Employee.is_active == True)
+        emp_filters.append(or_(Employee.is_active == True, Employee.leave_date.is_not(None)))
     emp_q = select(Employee).where(and_(*emp_filters))
     if employee_id:
         emp_q = emp_q.where(Employee.id == employee_id)
@@ -489,10 +495,10 @@ async def get_attendance(
 
     employees.sort(key=get_emp_sort_key)
 
-    # Load schedule overrides for date range
+    # Load schedule overrides for date range (include 1 day before range_start to properly link cross-boundary night shifts)
     emp_id_list = [e.id for e in employees]
     schedule_q = select(WorkSchedule).where(
-        and_(WorkSchedule.work_date >= range_start, WorkSchedule.work_date <= range_end)
+        and_(WorkSchedule.work_date >= range_start - timedelta(days=1), WorkSchedule.work_date <= range_end)
     )
     if emp_id_list:
         schedule_q = schedule_q.where(WorkSchedule.employee_id.in_(emp_id_list))
@@ -515,9 +521,9 @@ async def get_attendance(
     for a in att_result.scalars().all():
         att_map[(a.employee_id, a.work_date)] = a
 
-    # Load raw logs for NU mode detection
+    # Load raw logs for NU mode detection (include 1 day before range_start)
     log_q = select(AttendanceLog).where(
-        and_(AttendanceLog.event_time >= datetime.combine(range_start, time(0, 0)), 
+        and_(AttendanceLog.event_time >= datetime.combine(range_start - timedelta(days=1), time(0, 0)), 
              AttendanceLog.event_time <= datetime.combine(range_end + timedelta(days=1), time(12, 0)))
     )
     log_result = await db.execute(log_q)
@@ -538,6 +544,17 @@ async def get_attendance(
     # Priority: override > default_shift (if NU)
     for emp in employees:
         default_shift = shifts_by_code.get(emp.default_shift_code)
+        
+        # Include range_start - 1 day to link cross-boundary night shifts
+        prev_dt = range_start - timedelta(days=1)
+        override_id = override_map.get((emp.id, prev_dt))
+        if override_id:
+            s = shifts_by_id.get(override_id)
+            if s and is_nu_dynamic_shift_code(s.code):
+                nu_shift_code_map[(emp.id, prev_dt)] = s.code
+        elif default_shift and is_nu_dynamic_shift_code(default_shift.code):
+            nu_shift_code_map[(emp.id, prev_dt)] = default_shift.code
+
         for dt in range_dates:
             override_id = override_map.get((emp.id, dt))
             if override_id:
@@ -564,6 +581,18 @@ async def get_attendance(
     )
     xot_result = await db.execute(xot_q)
     xot_map = {(c.employee_id, c.work_date): c for c in xot_result.scalars().all()}
+
+    # Load MealApproval data cho giờ làm bất thường
+    from app.models.meal_approval import MealApproval
+    approval_q = select(MealApproval).where(
+        and_(
+            MealApproval.work_date >= range_start,
+            MealApproval.work_date <= range_end,
+            MealApproval.employee_id.in_(emp_id_list),
+        )
+    )
+    approval_result = await db.execute(approval_q)
+    approval_map = {(a.employee_id, a.work_date): a for a in approval_result.scalars().all()}
 
     # Build rows
     rows = []
@@ -809,6 +838,56 @@ async def get_attendance(
                 xot = xot_map.get((emp.id, dt))
                 ev["ot_hours"] = float(xot.ot_hours) if (xot and xot.ot_hours is not None) else 0.0
 
+            # --- Xử lý giờ làm bất thường (irregular hours) ---
+            is_irregular_val = False
+            meal_approval_id_val = None
+            meal_approval_status_val = None
+
+            if nu_res and nu_res.is_irregular:
+                is_irregular_val = True
+                # Kiểm tra MealApproval record
+                approval = approval_map.get((emp.id, dt))
+                if approval:
+                    meal_approval_id_val = approval.id
+                    meal_approval_status_val = approval.status
+                    if approval.status == "approved":
+                        # Đã duyệt → tính tiền ăn theo approved_meal_count
+                        approved_count = approval.approved_meal_count or 1
+                        ev["meal_allowance"] = 35000.0 * approved_count
+                        ev["meal_count"] = approved_count
+                        # Nếu ca đêm (Ca 3) và đã duyệt → tính lại PC đêm
+                        if nu_res.mode in (XNU_MODE_3,):
+                            ev["night_allowance"] = night_allowance_rate
+                        is_irregular_val = True  # Vẫn đánh dấu để UI biết
+                    elif approval.status == "rejected":
+                        # Từ chối → giữ = 0
+                        ev["meal_allowance"] = 0.0
+                        ev["meal_count"] = 0
+                        ev["night_allowance"] = 0.0
+                    # pending → giữ = 0 (default từ nu_shift.py)
+                else:
+                    # Tự động tạo pending approval record
+                    new_approval = MealApproval(
+                        employee_id=emp.id,
+                        work_date=dt,
+                        shift_code=nu_res.shift_code,
+                        detected_mode=nu_res.mode,
+                        check_in=check_in_dt,
+                        check_out=check_out_dt,
+                        status="pending",
+                        approved_meal_count=1,
+                    )
+                    db.add(new_approval)
+                    # Flush to get ID
+                    try:
+                        await db.flush()
+                        meal_approval_id_val = new_approval.id
+                        meal_approval_status_val = "pending"
+                        # Cập nhật map để không tạo trùng
+                        approval_map[(emp.id, dt)] = new_approval
+                    except Exception:
+                        pass
+
             cell = AttendanceCell(
                 work_date=str(dt),
                 day=d,
@@ -835,6 +914,9 @@ async def get_attendance(
                 has_manual_xot=has_manual_xot_val,
                 manual_meal_count=manual_meal_count_val,
                 manual_ot_end_time=manual_ot_end_time_val,
+                is_irregular=is_irregular_val,
+                meal_approval_id=meal_approval_id_val,
+                meal_approval_status=meal_approval_status_val,
             )
             days_cells.append(cell)
 
@@ -881,6 +963,12 @@ async def get_attendance(
                 "total_paid_leave": total_paid_leave
             },
         ))
+
+    # Commit auto-created MealApproval records
+    try:
+        await db.commit()
+    except Exception:
+        pass
 
     config_result = await db.execute(select(MonthlyWorkdayConfig).where(MonthlyWorkdayConfig.month_key == month_key))
     config = config_result.scalar_one_or_none()
@@ -1147,7 +1235,9 @@ async def manual_attendance_action(
 class ForgottenScanFixItem(BaseModel):
     employee_id: int
     work_date: date
-    time_value: str
+    check_in: Optional[str] = None     # HH:MM or None
+    check_out: Optional[str] = None    # HH:MM or None
+    is_off: bool = False               # True = công ty cho nghỉ
 
 
 class ForgottenScanFixRequest(BaseModel):
@@ -1296,25 +1386,24 @@ async def quick_fix_forgot_scans(
     db: AsyncSession = Depends(get_db),
     current_user: AppUser = Depends(require_roles(UserRole.ADMIN, UserRole.ACCOUNTANT)),
 ):
-    """Cập nhật nhanh các lỗi quên quẹt thẻ từ giao diện"""
+    """Cập nhật nhanh các lỗi quên quẹt thẻ từ giao diện.
+    Nhận riêng check_in / check_out cho phép swap (đổi chiều) giờ vào ↔ ra.
+    """
     # Load shift OFF
     off_shift = (await db.execute(select(ShiftTemplate).where(ShiftTemplate.code == "OFF"))).scalar_one_or_none()
     if not off_shift:
         raise HTTPException(400, "Mã ca OFF không tồn tại trong hệ thống")
 
     shift_result = await db.execute(select(ShiftTemplate))
-    shifts_by_code = {s.code: s for s in shift_result.scalars().all()}
-    shifts_by_id = {s.id: s for s in shift_result.scalars().all()}
+    all_shifts = list(shift_result.scalars().all())
+    shifts_by_code = {s.code: s for s in all_shifts}
+    shifts_by_id = {s.id: s for s in all_shifts}
 
     updated_count = 0
 
     for item in request.items:
         work_date = item.work_date
         employee_id = item.employee_id
-        time_val = item.time_value.strip()
-
-        if not time_val:
-            continue
 
         # Check date lock
         await check_date_locked(db, work_date)
@@ -1323,8 +1412,8 @@ async def quick_fix_forgot_scans(
         if not emp:
             continue
 
-        if time_val.upper() == "X":
-            # 1. Đổi ca làm việc sang OFF
+        # ── Case 1: Công ty cho nghỉ ─────────────────────────────────────
+        if item.is_off:
             ws_res = await db.execute(select(WorkSchedule).where(and_(
                 WorkSchedule.employee_id == employee_id,
                 WorkSchedule.work_date == work_date
@@ -1351,7 +1440,6 @@ async def quick_fix_forgot_scans(
                 notes="Company off override via quick-fix"
             )
 
-            # 2. Xóa AttendanceDaily
             await db.execute(delete(AttendanceDaily).where(and_(
                 AttendanceDaily.employee_id == employee_id,
                 AttendanceDaily.work_date == work_date
@@ -1363,78 +1451,94 @@ async def quick_fix_forgot_scans(
                 notes="Deleted attendance record due to Company Off override"
             )
             updated_count += 1
+            continue
 
-        else:
-            parsed_time = parse_input_time(time_val)
-            if not parsed_time:
-                raise HTTPException(400, f"Định dạng thời gian không hợp lệ: {time_val}")
+        # ── Case 2: Sửa giờ vào / giờ ra ────────────────────────────────
+        ci_str = (item.check_in or "").strip()
+        co_str = (item.check_out or "").strip()
 
-            # Find existing AttendanceDaily record
-            att_res = await db.execute(select(AttendanceDaily).where(and_(
-                AttendanceDaily.employee_id == employee_id,
-                AttendanceDaily.work_date == work_date
-            )))
-            att = att_res.scalar_one_or_none()
-            att_before = {c.name: getattr(att, c.name) for c in att.__table__.columns} if att else None
+        if not ci_str and not co_str:
+            continue
 
-            # Resolve active shift template
-            ws_res = await db.execute(select(WorkSchedule).where(and_(
-                WorkSchedule.employee_id == employee_id,
-                WorkSchedule.work_date == work_date
-            )))
-            ws = ws_res.scalar_one_or_none()
+        parsed_ci = parse_input_time(ci_str) if ci_str else None
+        parsed_co = parse_input_time(co_str) if co_str else None
 
-            shift = None
-            if ws:
-                shift = shifts_by_id.get(ws.shift_id)
-            if not shift and emp.default_shift_code:
-                shift = shifts_by_code.get(emp.default_shift_code)
-            if not shift:
-                shift = shifts_by_code.get("D")
+        if ci_str and not parsed_ci:
+            raise HTTPException(400, f"Định dạng giờ vào không hợp lệ: {ci_str}")
+        if co_str and not parsed_co:
+            raise HTTPException(400, f"Định dạng giờ ra không hợp lệ: {co_str}")
 
-            break_mins = int(shift.break_minutes or 60) if shift else 60
-            is_night_shift = bool(shift.is_night_shift) if shift else False
+        # Find existing AttendanceDaily record
+        att_res = await db.execute(select(AttendanceDaily).where(and_(
+            AttendanceDaily.employee_id == employee_id,
+            AttendanceDaily.work_date == work_date
+        )))
+        att = att_res.scalar_one_or_none()
+        att_before = {c.name: getattr(att, c.name) for c in att.__table__.columns} if att else None
 
-            if att:
-                # Update based on which punch is missing
-                if att.first_check_in is None:
-                    att.first_check_in = datetime.combine(work_date, parsed_time)
-                elif att.last_check_out is None:
-                    # Night shift checkout wrapping
-                    if is_night_shift and att.first_check_in and parsed_time < att.first_check_in.time():
-                        att.last_check_out = datetime.combine(work_date + timedelta(days=1), parsed_time)
-                    else:
-                        att.last_check_out = datetime.combine(work_date, parsed_time)
-                else:
-                    # Fallback (both present, shouldn't be here)
-                    att.last_check_out = datetime.combine(work_date, parsed_time)
+        # Resolve active shift template
+        ws_res = await db.execute(select(WorkSchedule).where(and_(
+            WorkSchedule.employee_id == employee_id,
+            WorkSchedule.work_date == work_date
+        )))
+        ws = ws_res.scalar_one_or_none()
 
-                if att.first_check_in and att.last_check_out:
-                    att.total_hours = round((att.last_check_out - att.first_check_in).total_seconds() / 3600.0, 2)
-                else:
-                    att.total_hours = 0.0
+        shift = None
+        if ws:
+            shift = shifts_by_id.get(ws.shift_id)
+        if not shift and emp.default_shift_code:
+            shift = shifts_by_code.get(emp.default_shift_code)
+        if not shift:
+            shift = shifts_by_code.get("D")
 
-                att.import_batch = "manual_fix"
+        is_night_shift = bool(shift.is_night_shift) if shift else False
+
+        if att:
+            # Gán giờ vào: nếu client gửi check_in → ghi đè; nếu không gửi → xóa (None)
+            if parsed_ci:
+                att.first_check_in = datetime.combine(work_date, parsed_ci)
             else:
-                # Fallback create
-                new_in = datetime.combine(work_date, parsed_time)
-                att = AttendanceDaily(
-                    employee_id=employee_id,
-                    work_date=work_date,
-                    first_check_in=new_in,
-                    last_check_out=None,
-                    total_hours=0.0,
-                    import_batch="manual_fix"
-                )
-                db.add(att)
+                att.first_check_in = None
 
-            await log_audit(
-                db, "attendance_daily", f"{employee_id}:{work_date}",
-                "UPDATE" if att_before else "CREATE", current_user.username,
-                att_before, {c.name: getattr(att, c.name) for c in att.__table__.columns},
-                notes="Quick fix forgotten scan"
+            # Gán giờ ra: nếu client gửi check_out → ghi đè; nếu không gửi → xóa (None)
+            if parsed_co:
+                if is_night_shift and att.first_check_in and parsed_co < att.first_check_in.time():
+                    att.last_check_out = datetime.combine(work_date + timedelta(days=1), parsed_co)
+                else:
+                    att.last_check_out = datetime.combine(work_date, parsed_co)
+            else:
+                att.last_check_out = None
+
+            # Tính lại tổng giờ
+            if att.first_check_in and att.last_check_out:
+                att.total_hours = round((att.last_check_out - att.first_check_in).total_seconds() / 3600.0, 2)
+            else:
+                att.total_hours = 0.0
+
+            att.import_batch = "manual_fix"
+        else:
+            # Tạo mới
+            new_ci = datetime.combine(work_date, parsed_ci) if parsed_ci else None
+            new_co = datetime.combine(work_date, parsed_co) if parsed_co else None
+            if is_night_shift and new_ci and new_co and new_co < new_ci:
+                new_co = datetime.combine(work_date + timedelta(days=1), parsed_co)
+            att = AttendanceDaily(
+                employee_id=employee_id,
+                work_date=work_date,
+                first_check_in=new_ci,
+                last_check_out=new_co,
+                total_hours=round((new_co - new_ci).total_seconds() / 3600.0, 2) if new_ci and new_co else 0.0,
+                import_batch="manual_fix"
             )
-            updated_count += 1
+            db.add(att)
+
+        await log_audit(
+            db, "attendance_daily", f"{employee_id}:{work_date}",
+            "UPDATE" if att_before else "CREATE", current_user.username,
+            att_before, {c.name: getattr(att, c.name) for c in att.__table__.columns},
+            notes="Quick fix forgotten scan"
+        )
+        updated_count += 1
 
     await db.commit()
     return {"message": f"Đã cập nhật thành công {updated_count} dòng"}
@@ -1450,112 +1554,142 @@ async def export_forgot_scans(
     import openpyxl
     from openpyxl.styles import Font, Alignment, PatternFill, Side, Border
 
-    # 1. Fetch forgotten scans
     scans = await get_forgot_scans(month_key=month_key, db=db, current_user=current_user)
 
-    # 2. Create workbook
     wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "Quen quet the"
+    ews = wb.active  # excel worksheet — dùng tên khác để tránh nhầm WorkSchedule
+    ews.title = "Quen quet the"
 
-    # Styling helpers
-    thin_border = Border(
-        left=Side(style='thin', color='000000'),
-        right=Side(style='thin', color='000000'),
-        top=Side(style='thin', color='000000'),
-        bottom=Side(style='thin', color='000000')
+    # ── Styles ────────────────────────────────────────────────────────────────
+    thin = Border(
+        left=Side(style='thin', color='000000'), right=Side(style='thin', color='000000'),
+        top=Side(style='thin', color='000000'),  bottom=Side(style='thin', color='000000'),
     )
-    header_font = Font(name="Times New Roman", bold=True, size=11)
-    title_font = Font(name="Times New Roman", bold=True, size=14)
+    hdr_font    = Font(name="Times New Roman", bold=True, size=11)
+    title_font  = Font(name="Times New Roman", bold=True, size=14)
     normal_font = Font(name="Times New Roman", size=11)
-    
-    center_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
-    left_align = Alignment(horizontal="left", vertical="center")
+    hint_font   = Font(name="Times New Roman", italic=True, size=10, color="595959")
 
-    header_fill = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
+    center = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    left   = Alignment(horizontal="left",   vertical="center", wrap_text=True)
 
-    # Title lines
-    ws.merge_cells("A1:L1")
-    ws["A1"] = "CÔNG TY TNHH HIỆP LỢI"
-    ws["A1"].font = Font(name="Times New Roman", bold=True, size=12)
-    ws["A1"].alignment = left_align
-
-    ws.merge_cells("A2:L2")
-    ws["A2"] = "MST: 3701609885"
-    ws["A2"].font = Font(name="Times New Roman", size=11)
-    ws["A2"].alignment = left_align
-
-    ws.merge_cells("A3:L3")
-    ws["A3"] = f"DANH SÁCH QUÊN QUẸT THẺ - THÁNG {month_key}"
-    ws["A3"].font = title_font
-    ws["A3"].alignment = center_align
-
-    # Header Row
-    headers = [
-        "STT", "Mã nhân viên", "Họ tên", "Ngày", "Mã ca", 
-        "Thứ", "Thời gian quy định", "Thời gian vào", "Thời gian ra", 
-        "Giờ thực", "Ghi chú", "Thêm thời gian"
-    ]
-    
-    for col_idx, h in enumerate(headers, 1):
-        cell = ws.cell(row=5, column=col_idx)
-        cell.value = h
-        cell.font = header_font
-        cell.alignment = center_align
-        cell.border = thin_border
-        cell.fill = header_fill
-
-    # Color fills for Note column
-    red_fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
-    red_font = Font(name="Times New Roman", size=11, color="9C0006")
+    grey_fill   = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
+    edit_fill   = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")  # vàng = sửa được
+    off_fill    = PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid")  # cam = cột OFF
+    hint_fill   = PatternFill(start_color="EBF3FB", end_color="EBF3FB", fill_type="solid")  # xanh = ghi chú
+    red_fill    = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
+    red_fn      = Font(name="Times New Roman", size=11, color="9C0006")
     yellow_fill = PatternFill(start_color="FFEB9C", end_color="FFEB9C", fill_type="solid")
-    yellow_font = Font(name="Times New Roman", size=11, color="9C6500")
+    yellow_fn   = Font(name="Times New Roman", size=11, color="9C6500")
 
-    # Populate data
-    current_row = 6
+    NUM_COLS = 11  # A..K
+
+    # ── Row 1-2: Tiêu đề công ty ──────────────────────────────────────────────
+    ews.merge_cells("A1:K1")
+    ews["A1"] = "CÔNG TY TNHH HIỆP LỢI"
+    ews["A1"].font = Font(name="Times New Roman", bold=True, size=12)
+    ews["A1"].alignment = left
+
+    ews.merge_cells("A2:K2")
+    ews["A2"] = "MST: 3701609885"
+    ews["A2"].font = normal_font
+    ews["A2"].alignment = left
+
+    # ── Row 3: Tên bảng ───────────────────────────────────────────────────────
+    ews.merge_cells("A3:K3")
+    ews["A3"] = f"DANH SÁCH QUÊN QUẸT THẺ - THÁNG {month_key}"
+    ews["A3"].font = title_font
+    ews["A3"].alignment = center
+
+    # ── Row 4: Hướng dẫn ─────────────────────────────────────────────────────
+    ews.merge_cells("A4:K4")
+    ews["A4"] = (
+        "HƯỚNG DẪN: "
+        "① Cột 'Giờ vào' & 'Giờ ra' (nền vàng) — sửa hoặc điền thêm giờ theo định dạng HH:MM. "
+        "Có thể sửa cả hai nếu cần chuyển giờ (ví dụ: chấm công chỉ có 22:00 thì điền vào 'Giờ ra', điền giờ vào thực tế vào 'Giờ vào'). "
+        "② Cột 'Giờ thực' (nền cam) — gõ chữ X nếu hôm đó công ty cho nghỉ "
+        "(hệ thống sẽ tự chuyển sang ca OFF và xóa dữ liệu chấm công). "
+        "Để trống ô nào nếu không thay đổi ô đó."
+    )
+    ews["A4"].font = hint_font
+    ews["A4"].fill = hint_fill
+    ews["A4"].alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+    ews.row_dimensions[4].height = 52
+
+    # ── Row 5: Header ─────────────────────────────────────────────────────────
+    headers = [
+        "STT", "Mã nhân viên", "Họ tên", "Ngày", "Mã ca",
+        "Thứ", "Thời gian\nquy định",
+        "Giờ vào\n(✎ sửa trực tiếp)",   # col 8  — editable
+        "Giờ ra\n(✎ sửa trực tiếp)",    # col 9  — editable
+        "Giờ thực\n(gõ X = OFF)",        # col 10 — editable for X
+        "Ghi chú",                        # col 11
+    ]
+    for ci, h in enumerate(headers, 1):
+        cell = ews.cell(row=5, column=ci, value=h)
+        cell.font      = hdr_font
+        cell.alignment = center
+        cell.border    = thin
+        if ci in (8, 9):
+            cell.fill = edit_fill
+        elif ci == 10:
+            cell.fill = off_fill
+        else:
+            cell.fill = grey_fill
+    ews.row_dimensions[5].height = 34
+
+    # ── Row 6+: Dữ liệu ──────────────────────────────────────────────────────
+    cur = 6
     for idx, scan in enumerate(scans, 1):
-        ws.cell(row=current_row, column=1, value=idx).alignment = center_align
-        ws.cell(row=current_row, column=2, value=scan["employee_code"]).alignment = center_align
-        ws.cell(row=current_row, column=3, value=scan["full_name"]).alignment = left_align
-        ws.cell(row=current_row, column=4, value=scan["work_date"]).alignment = center_align
-        ws.cell(row=current_row, column=5, value=scan["shift_code"]).alignment = center_align
-        ws.cell(row=current_row, column=6, value=scan["dow"]).alignment = center_align
-        ws.cell(row=current_row, column=7, value=scan["shift_start_end"]).alignment = center_align
-        ws.cell(row=current_row, column=8, value=scan["first_check_in"] or "").alignment = center_align
-        ws.cell(row=current_row, column=9, value=scan["last_check_out"] or "").alignment = center_align
-        ws.cell(row=current_row, column=10, value=scan["actual_hours"]).alignment = center_align
-        
-        # Note styling
-        note_cell = ws.cell(row=current_row, column=11, value=scan["notes"])
-        note_cell.alignment = center_align
+        ews.cell(cur, 1, idx).alignment = center
+        ews.cell(cur, 2, scan["employee_code"]).alignment = center
+        ews.cell(cur, 3, scan["full_name"]).alignment = left
+        ews.cell(cur, 4, scan["work_date"]).alignment = center
+        ews.cell(cur, 5, scan["shift_code"] or "").alignment = center
+        ews.cell(cur, 6, scan["dow"]).alignment = center
+        ews.cell(cur, 7, scan["shift_start_end"]).alignment = center
+
+        # Col H (8): Giờ vào — pre-filled, nền vàng, sửa được
+        ci_cell = ews.cell(cur, 8, scan["first_check_in"] or "")
+        ci_cell.alignment = center
+        ci_cell.fill = edit_fill
+
+        # Col I (9): Giờ ra — pre-filled, nền vàng, sửa được
+        co_cell = ews.cell(cur, 9, scan["last_check_out"] or "")
+        co_cell.alignment = center
+        co_cell.fill = edit_fill
+
+        # Col J (10): Giờ thực — nền cam, gõ X nếu OFF
+        gthuc = ews.cell(cur, 10, scan["actual_hours"] if scan["actual_hours"] else 0)
+        gthuc.alignment = center
+        gthuc.fill = off_fill
+
+        # Col K (11): Ghi chú (read-only)
+        note_cell = ews.cell(cur, 11, scan["notes"])
+        note_cell.alignment = center
         if scan["notes"] == "Quên check in":
             note_cell.fill = red_fill
-            note_cell.font = red_font
+            note_cell.font = red_fn
         else:
             note_cell.fill = yellow_fill
-            note_cell.font = yellow_font
+            note_cell.font = yellow_fn
 
-        # Blank input column
-        ws.cell(row=current_row, column=12, value="").alignment = center_align
-
-        # Apply borders & font to all columns in the row
-        for c in range(1, 13):
-            cell = ws.cell(row=current_row, column=c)
-            cell.border = thin_border
-            if c != 11:  # Note has custom font
+        # Viền + font mặc định cho tất cả ô trong hàng
+        for c in range(1, NUM_COLS + 1):
+            cell = ews.cell(cur, c)
+            cell.border = thin
+            # Chỉ đặt font nếu ô chưa có font màu riêng (note cell)
+            if c not in (11,):
                 cell.font = normal_font
 
-        current_row += 1
+        cur += 1
 
-    # Widths
-    col_widths = {
-        "A": 6, "B": 15, "C": 25, "D": 15, "E": 10, "F": 8,
-        "G": 22, "H": 18, "I": 18, "J": 12, "K": 18, "L": 20
-    }
-    for col, w in col_widths.items():
-        ws.column_dimensions[col].width = w
+    # ── Độ rộng cột ───────────────────────────────────────────────────────────
+    for col, w in zip("ABCDEFGHIJK", [6, 15, 26, 15, 10, 7, 20, 16, 16, 13, 18]):
+        ews.column_dimensions[col].width = w
 
-    # Save to stream
+    ews.freeze_panes = "A6"
+
     stream = BytesIO()
     wb.save(stream)
     stream.seek(0)
@@ -1575,53 +1709,58 @@ async def import_forgot_scans(
     db: AsyncSession = Depends(get_db),
     current_user: AppUser = Depends(require_roles(UserRole.ADMIN, UserRole.ACCOUNTANT)),
 ):
-    """Nhập Excel đã sửa đổi thời gian lỗi quên quẹt thẻ"""
-    # Check lock
+    """Nhập Excel đã sửa: đọc Giờ vào (H), Giờ ra (I), Giờ thực (J=X → OFF)."""
     await check_month_locked(db, month_key)
 
-    # Load shift OFF
     off_shift = (await db.execute(select(ShiftTemplate).where(ShiftTemplate.code == "OFF"))).scalar_one_or_none()
     if not off_shift:
         raise HTTPException(400, "Mã ca OFF không tồn tại trong hệ thống")
 
     shift_result = await db.execute(select(ShiftTemplate))
     shifts_by_code = {s.code: s for s in shift_result.scalars().all()}
-    shifts_by_id = {s.id: s for s in shift_result.scalars().all()}
+    shifts_by_id   = {s.id:   s for s in shift_result.scalars().all()}
 
     content = await file.read()
     import openpyxl
-    wb = openpyxl.load_workbook(BytesIO(content), data_only=True)
-    ws = wb.active
+    ewb = openpyxl.load_workbook(BytesIO(content), data_only=True)
+    ews = ewb.active  # dùng tên 'ews' để không xung đột với WorkSchedule
 
-    # Parse headers starting at row 5
-    # Row 6 is data start
     processed_count = 0
     errors = []
 
-    for r in range(6, ws.max_row + 1):
-        emp_code_raw = ws.cell(r, 2).value
-        work_date_raw = ws.cell(r, 4).value
-        time_val_raw = ws.cell(r, 12).value  # Col 12 is "Thêm thời gian"
+    # Dữ liệu bắt đầu từ row 6 (row 5 là header, row 4 là hướng dẫn)
+    for r in range(6, ews.max_row + 1):
+        emp_code_raw  = ews.cell(r, 2).value   # B: Mã nhân viên
+        work_date_raw = ews.cell(r, 4).value   # D: Ngày
+        ci_raw        = ews.cell(r, 8).value   # H: Giờ vào (editable)
+        co_raw        = ews.cell(r, 9).value   # I: Giờ ra  (editable)
+        gthuc_raw     = ews.cell(r, 10).value  # J: Giờ thực (X = OFF)
 
         if emp_code_raw is None or work_date_raw is None:
             continue
 
-        if time_val_raw is None:
-            continue
+        # Kiểm tra có gì để làm không
+        ci_str    = str(ci_raw).strip()    if ci_raw    is not None else ""
+        co_str    = str(co_raw).strip()    if co_raw    is not None else ""
+        gthuc_str = str(gthuc_raw).strip() if gthuc_raw is not None else ""
+        is_off    = gthuc_str.upper() == "X"
 
-        time_val = str(time_val_raw).strip()
-        if not time_val:
-            continue
+        if not is_off and not ci_str and not co_str:
+            continue  # Dòng không có thay đổi gì
 
-        # Format employee code
-        emp_code = str(int(emp_code_raw) if isinstance(emp_code_raw, (float, int)) else str(emp_code_raw).split('.')[0] if '.' in str(emp_code_raw) else emp_code_raw).strip().lstrip("'")
+        # Chuẩn hoá mã nhân viên
+        emp_code = (
+            str(int(emp_code_raw))
+            if isinstance(emp_code_raw, (float, int))
+            else str(emp_code_raw).split('.')[0] if '.' in str(emp_code_raw)
+            else str(emp_code_raw)
+        ).strip().lstrip("'")
 
-        # Parse work_date
+        # Parse ngày
         work_date = None
         if isinstance(work_date_raw, (date, datetime)):
             work_date = work_date_raw if isinstance(work_date_raw, date) else work_date_raw.date()
         elif isinstance(work_date_raw, str):
-            # Try parsing
             for fmt in ["%Y-%m-%d", "%d/%m/%Y"]:
                 try:
                     work_date = datetime.strptime(work_date_raw.strip(), fmt).date()
@@ -1630,144 +1769,510 @@ async def import_forgot_scans(
                     continue
 
         if not work_date:
-            errors.append(f"Dòng {r}: Định dạng ngày không hợp lệ '{work_date_raw}'")
+            errors.append(f"Dòng {r}: Ngày không hợp lệ '{work_date_raw}'")
             continue
-
-        # Validate that date belongs to month_key
         if work_date.strftime("%Y-%m") != month_key:
             errors.append(f"Dòng {r}: Ngày {work_date} không thuộc tháng {month_key}")
             continue
 
-        # Look up employee
+        # Tìm nhân viên
         emp_res = await db.execute(select(Employee).where(Employee.employee_code == emp_code))
         emp = emp_res.scalar_one_or_none()
         if not emp:
-            errors.append(f"Dòng {r}: Không tìm thấy nhân viên với mã '{emp_code}'")
+            errors.append(f"Dòng {r}: Không tìm thấy nhân viên mã '{emp_code}'")
             continue
 
-        # Apply override/quick-fix logic
-        if time_val.upper() == "X":
-            # Company off
-            # 1. Update WorkSchedule
-            ws_res = await db.execute(select(WorkSchedule).where(and_(
+        # ── Case 1: X → Công ty cho nghỉ ────────────────────────────────────
+        if is_off:
+            sched_res = await db.execute(select(WorkSchedule).where(and_(
                 WorkSchedule.employee_id == emp.id,
-                WorkSchedule.work_date == work_date
+                WorkSchedule.work_date == work_date,
             )))
-            ws = ws_res.scalar_one_or_none()
-            ws_before = {c.name: getattr(ws, c.name) for c in ws.__table__.columns} if ws else None
-            if ws:
-                ws.shift_id = off_shift.id
-                ws.notes = "Công ty cho nghỉ (Nhập từ file Excel)"
+            sched = sched_res.scalar_one_or_none()
+            sched_before = {c.name: getattr(sched, c.name) for c in sched.__table__.columns} if sched else None
+            if sched:
+                sched.shift_id = off_shift.id
+                sched.notes = "Công ty cho nghỉ (Nhập từ file Excel)"
             else:
-                ws = WorkSchedule(
-                    employee_id=emp.id,
-                    work_date=work_date,
-                    month_key=month_key,
-                    shift_id=off_shift.id,
-                    notes="Công ty cho nghỉ (Nhập từ file Excel)"
+                sched = WorkSchedule(
+                    employee_id=emp.id, work_date=work_date, month_key=month_key,
+                    shift_id=off_shift.id, notes="Công ty cho nghỉ (Nhập từ file Excel)"
                 )
-                db.add(ws)
-
+                db.add(sched)
             await log_audit(
                 db, "work_schedules", f"{emp.id}:{work_date}",
-                "UPDATE" if ws_before else "CREATE", current_user.username,
-                ws_before, {c.name: getattr(ws, c.name) for c in ws.__table__.columns},
-                notes="Company off override via Excel import"
+                "UPDATE" if sched_before else "CREATE", current_user.username,
+                sched_before, {c.name: getattr(sched, c.name) for c in sched.__table__.columns},
+                notes="Company off via Excel import"
             )
-
-            # 2. Delete AttendanceDaily
             await db.execute(delete(AttendanceDaily).where(and_(
                 AttendanceDaily.employee_id == emp.id,
-                AttendanceDaily.work_date == work_date
+                AttendanceDaily.work_date == work_date,
             )))
-            await log_audit(
-                db, "attendance_daily", f"{emp.id}:{work_date}",
-                "DELETE", current_user.username,
-                None, None,
-                notes="Deleted attendance record due to Company Off (Excel)"
-            )
+            await log_audit(db, "attendance_daily", f"{emp.id}:{work_date}", "DELETE",
+                            current_user.username, None, None, notes="Deleted — Company Off (Excel)")
             processed_count += 1
+            continue
 
-        else:
-            parsed_time = parse_input_time(time_val)
-            if not parsed_time:
-                errors.append(f"Dòng {r}: Giờ '{time_val}' không đúng định dạng (HH:MM hoặc X)")
-                continue
+        # ── Case 2: Sửa giờ vào / giờ ra ────────────────────────────────────
+        parsed_ci = parse_input_time(ci_str) if ci_str else None
+        parsed_co = parse_input_time(co_str) if co_str else None
 
-            # Check date lock
-            await check_date_locked(db, work_date)
+        if ci_str and not parsed_ci:
+            errors.append(f"Dòng {r}: Giờ vào '{ci_str}' không đúng định dạng HH:MM")
+            continue
+        if co_str and not parsed_co:
+            errors.append(f"Dòng {r}: Giờ ra '{co_str}' không đúng định dạng HH:MM")
+            continue
 
-            # Find existing AttendanceDaily record
-            att_res = await db.execute(select(AttendanceDaily).where(and_(
-                AttendanceDaily.employee_id == emp.id,
-                AttendanceDaily.work_date == work_date
-            )))
-            att = att_res.scalar_one_or_none()
-            att_before = {c.name: getattr(att, c.name) for c in att.__table__.columns} if att else None
+        await check_date_locked(db, work_date)
 
-            # Resolve active shift template
-            ws_res = await db.execute(select(WorkSchedule).where(and_(
-                WorkSchedule.employee_id == emp.id,
-                WorkSchedule.work_date == work_date
-            )))
-            ws = ws_res.scalar_one_or_none()
+        # Tìm ca để biết ca đêm không
+        sched_res = await db.execute(select(WorkSchedule).where(and_(
+            WorkSchedule.employee_id == emp.id,
+            WorkSchedule.work_date == work_date,
+        )))
+        sched = sched_res.scalar_one_or_none()
+        shift = None
+        if sched:
+            shift = shifts_by_id.get(sched.shift_id)
+        if not shift and emp.default_shift_code:
+            shift = shifts_by_code.get(emp.default_shift_code)
+        is_night = bool(shift.is_night_shift) if shift else False
 
-            shift = None
-            if ws:
-                shift = shifts_by_id.get(ws.shift_id)
-            if not shift and emp.default_shift_code:
-                shift = shifts_by_code.get(emp.default_shift_code)
-            if not shift:
-                shift = shifts_by_code.get("D")
+        # Tìm / tạo bản ghi chấm công
+        att_res = await db.execute(select(AttendanceDaily).where(and_(
+            AttendanceDaily.employee_id == emp.id,
+            AttendanceDaily.work_date == work_date,
+        )))
+        att = att_res.scalar_one_or_none()
+        att_before = {c.name: getattr(att, c.name) for c in att.__table__.columns} if att else None
 
-            break_mins = int(shift.break_minutes or 60) if shift else 60
-            is_night_shift = bool(shift.is_night_shift) if shift else False
+        if att:
+            # Cập nhật giờ vào: nếu Excel có giá trị → ghi đè, nếu trống nhưng DB có → xóa
+            if parsed_ci:
+                att.first_check_in = datetime.combine(work_date, parsed_ci)
+            elif not ci_str and att.first_check_in is not None:
+                att.first_check_in = None  # User xóa ô Giờ vào trong Excel → clear
 
-            if att:
-                # Update based on which punch is missing
-                if att.first_check_in is None:
-                    att.first_check_in = datetime.combine(work_date, parsed_time)
-                elif att.last_check_out is None:
-                    if is_night_shift and att.first_check_in and parsed_time < att.first_check_in.time():
-                        att.last_check_out = datetime.combine(work_date + timedelta(days=1), parsed_time)
-                    else:
-                        att.last_check_out = datetime.combine(work_date, parsed_time)
+            # Cập nhật giờ ra: tương tự
+            if parsed_co:
+                # Ca đêm: giờ ra sáng hôm sau
+                ci_for_night = att.first_check_in
+                if is_night and ci_for_night and parsed_co < ci_for_night.time():
+                    att.last_check_out = datetime.combine(work_date + timedelta(days=1), parsed_co)
                 else:
-                    att.last_check_out = datetime.combine(work_date, parsed_time)
+                    att.last_check_out = datetime.combine(work_date, parsed_co)
+            elif not co_str and att.last_check_out is not None:
+                att.last_check_out = None  # User xóa ô Giờ ra trong Excel → clear
 
-                if att.first_check_in and att.last_check_out:
-                    att.total_hours = round((att.last_check_out - att.first_check_in).total_seconds() / 3600.0, 2)
-                else:
-                    att.total_hours = 0.0
-
-                att.import_batch = "manual_fix_excel"
-            else:
-                # Fallback create
-                new_in = datetime.combine(work_date, parsed_time)
-                att = AttendanceDaily(
-                    employee_id=emp.id,
-                    work_date=work_date,
-                    first_check_in=new_in,
-                    last_check_out=None,
-                    total_hours=0.0,
-                    import_batch="manual_fix_excel"
+            # Tính lại tổng giờ
+            if att.first_check_in and att.last_check_out:
+                att.total_hours = round(
+                    (att.last_check_out - att.first_check_in).total_seconds() / 3600.0, 2
                 )
-                db.add(att)
-
-            await log_audit(
-                db, "attendance_daily", f"{emp.id}:{work_date}",
-                "UPDATE" if att_before else "CREATE", current_user.username,
-                att_before, {c.name: getattr(att, c.name) for c in att.__table__.columns},
-                notes="Excel import fix forgotten scan"
+            else:
+                att.total_hours = 0.0
+            att.import_batch = "manual_fix_excel"
+        else:
+            # Tạo mới nếu chưa có bản ghi
+            new_ci = datetime.combine(work_date, parsed_ci) if parsed_ci else None
+            new_co = datetime.combine(work_date, parsed_co) if parsed_co else None
+            if is_night and new_ci and new_co and new_co < new_ci:
+                new_co = datetime.combine(work_date + timedelta(days=1), parsed_co)
+            att = AttendanceDaily(
+                employee_id=emp.id, work_date=work_date,
+                first_check_in=new_ci, last_check_out=new_co,
+                total_hours=round((new_co - new_ci).total_seconds() / 3600.0, 2) if new_ci and new_co else 0.0,
+                import_batch="manual_fix_excel"
             )
-            processed_count += 1
+            db.add(att)
+
+        await log_audit(
+            db, "attendance_daily", f"{emp.id}:{work_date}",
+            "UPDATE" if att_before else "CREATE", current_user.username,
+            att_before, {c.name: getattr(att, c.name) for c in att.__table__.columns},
+            notes="Excel import — fix forgotten scan"
+        )
+        processed_count += 1
 
     await db.commit()
 
     if errors:
         return {
-            "message": f"Nhập hoàn tất với {processed_count} bản ghi được cập nhật và {len(errors)} lỗi.",
+            "message": f"Hoàn tất: {processed_count} bản ghi cập nhật, {len(errors)} lỗi.",
             "errors": errors
         }
     return {"message": f"Đã cập nhật thành công {processed_count} bản ghi từ file Excel"}
+
+
+@router.get("/forgot-scans/fixed")
+async def get_fixed_scans(
+    month_key: str = Query(..., description="YYYY-MM"),
+    db: AsyncSession = Depends(get_db),
+    current_user: AppUser = Depends(require_roles(UserRole.ADMIN, UserRole.ACCOUNTANT)),
+):
+    """Lấy danh sách các bản ghi đã được sửa thủ công (manual_fix / manual_fix_excel)."""
+    try:
+        year, month = map(int, month_key.split("-"))
+    except ValueError:
+        raise HTTPException(400, "month_key phải là YYYY-MM")
+
+    month_days = calendar.monthrange(year, month)[1]
+    month_start = date(year, month, 1)
+    month_end = date(year, month, month_days)
+
+    # Query records with manual fix markers
+    att_q = select(AttendanceDaily).where(
+        and_(
+            AttendanceDaily.work_date >= month_start,
+            AttendanceDaily.work_date <= month_end,
+            AttendanceDaily.import_batch.in_(["manual_fix", "manual_fix_excel", "manual"]),
+        )
+    )
+    att_result = await db.execute(att_q)
+    fixed_records = list(att_result.scalars().all())
+
+    if not fixed_records:
+        return []
+
+    # Load employees
+    emp_ids = list(set(a.employee_id for a in fixed_records))
+    emp_result = await db.execute(select(Employee).where(Employee.id.in_(emp_ids)))
+    emp_map = {e.id: e for e in emp_result.scalars().all()}
+
+    # Load shifts
+    shift_result = await db.execute(select(ShiftTemplate))
+    all_shifts = list(shift_result.scalars().all())
+    shifts_by_id = {s.id: s for s in all_shifts}
+    shifts_by_code = {s.code: s for s in all_shifts}
+
+    # Load schedules
+    schedule_q = select(WorkSchedule).where(
+        and_(
+            WorkSchedule.work_date >= month_start,
+            WorkSchedule.work_date <= month_end,
+            WorkSchedule.employee_id.in_(emp_ids),
+        )
+    )
+    schedule_result = await db.execute(schedule_q)
+    override_map = {(ws.employee_id, ws.work_date): ws.shift_id for ws in schedule_result.scalars().all()}
+
+    # Department sort order
+    from app.models.department import Department
+    dept_order_q = await db.execute(select(Department.name, Department.sort_order))
+    dept_order_map = {row[0]: row[1] for row in dept_order_q.all() if row[0]}
+
+    results = []
+    for a in fixed_records:
+        emp = emp_map.get(a.employee_id)
+        if not emp:
+            continue
+
+        # Shift resolution
+        override_id = override_map.get((a.employee_id, a.work_date))
+        if override_id:
+            shift = shifts_by_id.get(override_id)
+        else:
+            shift = shifts_by_code.get(emp.default_shift_code)
+
+        dow = DOW_VN[a.work_date.weekday()]
+        shift_start_end = (
+            f"{str(shift.start_time)[:5]} - {str(shift.end_time)[:5]}"
+            if shift and shift.start_time and shift.end_time
+            else "Chưa xếp ca"
+        )
+
+        ci_str = a.first_check_in.strftime("%H:%M") if a.first_check_in else None
+        co_str = a.last_check_out.strftime("%H:%M") if a.last_check_out else None
+
+        source_label = {
+            "manual_fix": "Sửa nhanh",
+            "manual_fix_excel": "Nhập Excel",
+            "manual": "Thủ công",
+        }.get(a.import_batch, a.import_batch)
+
+        results.append({
+            "id": a.id,
+            "employee_id": a.employee_id,
+            "employee_code": emp.employee_code,
+            "full_name": emp.full_name,
+            "department": emp.department,
+            "work_date": str(a.work_date),
+            "dow": dow,
+            "shift_code": shift.code if shift else None,
+            "shift_start_end": shift_start_end,
+            "first_check_in": ci_str,
+            "last_check_out": co_str,
+            "total_hours": float(a.total_hours) if a.total_hours is not None else 0.0,
+            "source": source_label,
+            "updated_at": a.updated_at.isoformat() if a.updated_at else None,
+        })
+
+    # Sort by department order → employee code → date
+    def sort_key(item):
+        d_order = dept_order_map.get(item["department"], 9999) if item["department"] else 9999
+        code_num = 999999
+        try:
+            code_num = int(item["employee_code"])
+        except ValueError:
+            pass
+        return (d_order, item["department"] or "", code_num, item["work_date"])
+
+    results.sort(key=sort_key)
+    return results
+
+
+class DeleteFixedScanRequest(BaseModel):
+    attendance_id: int
+
+
+@router.post("/forgot-scans/fixed/delete")
+async def delete_fixed_scan(
+    request: DeleteFixedScanRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: AppUser = Depends(require_roles(UserRole.ADMIN, UserRole.ACCOUNTANT)),
+):
+    """Xóa 1 bản ghi chấm công đã sửa thủ công, hoàn tác về trạng thái gốc từ máy chấm công."""
+    att = await db.get(AttendanceDaily, request.attendance_id)
+    if not att:
+        raise HTTPException(404, "Không tìm thấy bản ghi chấm công")
+
+    if att.import_batch not in ("manual_fix", "manual_fix_excel", "manual"):
+        raise HTTPException(400, "Chỉ có thể xóa bản ghi đã sửa thủ công")
+
+    await check_date_locked(db, att.work_date)
+
+    att_before = {c.name: getattr(att, c.name) for c in att.__table__.columns}
+
+    emp = await db.get(Employee, att.employee_id)
+    if not emp:
+        # Nếu nhân viên không tồn tại, xóa hẳn bản ghi
+        await db.execute(
+            delete(AttendanceDaily).where(AttendanceDaily.id == request.attendance_id)
+        )
+        await db.commit()
+        return {"message": "Đã xóa bản ghi"}
+
+    emp_code = str(emp.employee_code).lstrip("'")
+
+    # Kiểm tra xem ca làm việc của nhân viên là ca động NU/XNU hay ca thường
+    is_nu = is_nu_dynamic_shift_code(emp.default_shift_code)
+    if not is_nu:
+        ws_res = await db.execute(select(WorkSchedule).where(and_(
+            WorkSchedule.employee_id == emp.id,
+            WorkSchedule.work_date == att.work_date
+        )))
+        ws = ws_res.scalar_one_or_none()
+        if ws:
+            shift = await db.get(ShiftTemplate, ws.shift_id)
+            if shift and is_nu_dynamic_shift_code(shift.code):
+                is_nu = True
+
+    restored = False
+    if is_nu:
+        # Khôi phục cho ca động NU/XNU
+        nu_shift_code_map = {}
+        for d in (att.work_date - timedelta(days=1), att.work_date, att.work_date + timedelta(days=1)):
+            ws_d = (await db.execute(select(WorkSchedule).where(and_(
+                WorkSchedule.employee_id == emp.id,
+                WorkSchedule.work_date == d
+            )))).scalar_one_or_none()
+            s_code = emp.default_shift_code
+            if ws_d:
+                shift_d = await db.get(ShiftTemplate, ws_d.shift_id)
+                if shift_d:
+                    s_code = shift_d.code
+            if is_nu_dynamic_shift_code(s_code):
+                nu_shift_code_map[(emp.id, d)] = s_code
+
+        log_res_nu = await db.execute(
+            select(AttendanceLog).where(
+                and_(
+                    AttendanceLog.employee_code.like(f"%{emp_code}"),
+                    AttendanceLog.event_time >= datetime.combine(att.work_date - timedelta(days=1), time(0, 0)),
+                    AttendanceLog.event_time <= datetime.combine(att.work_date + timedelta(days=2), time(12, 0))
+                )
+            )
+        )
+        nu_logs = []
+        for l in log_res_nu.scalars().all():
+            l.employee_id = emp.id
+            nu_logs.append(l)
+
+        nu_res = build_nu_shift_day_results(nu_shift_code_map, [emp.id], nu_logs)
+        res_day = nu_res.get((emp.id, att.work_date))
+        if res_day and (res_day.check_in or res_day.check_out):
+            att.first_check_in = res_day.check_in
+            att.last_check_out = res_day.check_out
+            if res_day.check_in and res_day.check_out:
+                att.total_hours = round((res_day.check_out - res_day.check_in).total_seconds() / 3600.0, 2)
+            else:
+                att.total_hours = 0.0
+            att.import_batch = "reverted_fix"
+            restored = True
+    else:
+        # Khôi phục cho ca thường
+        ws_res = await db.execute(select(WorkSchedule).where(and_(
+            WorkSchedule.employee_id == emp.id,
+            WorkSchedule.work_date == att.work_date
+        )))
+        ws = ws_res.scalar_one_or_none()
+        shift = None
+        if ws:
+            shift = await db.get(ShiftTemplate, ws.shift_id)
+        if not shift and emp.default_shift_code:
+            shift = (await db.execute(select(ShiftTemplate).where(ShiftTemplate.code == emp.default_shift_code))).scalar_one_or_none()
+
+        is_night = shift.is_night_shift if shift else False
+
+        log_res = await db.execute(
+            select(AttendanceLog).where(
+                and_(
+                    AttendanceLog.employee_code.like(f"%{emp_code}"),
+                    AttendanceLog.event_time >= datetime.combine(att.work_date, time(0, 0)),
+                    AttendanceLog.event_time <= datetime.combine(att.work_date + timedelta(days=1), time(12, 0))
+                )
+            )
+        )
+        all_logs = sorted(log_res.scalars().all(), key=lambda l: l.event_time)
+
+        daily_scans = []
+        for l in all_logs:
+            scan_dt = l.event_time
+            work_date_of_scan = scan_dt.date()
+            if scan_dt.time() < time(6, 0): # NIGHT_SHIFT_CUTOFF
+                if is_night:
+                    if work_date_of_scan == att.work_date + timedelta(days=1):
+                        daily_scans.append(scan_dt)
+            else:
+                if work_date_of_scan == att.work_date:
+                    daily_scans.append(scan_dt)
+
+        if daily_scans:
+            daily_scans.sort()
+            first_in = daily_scans[0]
+            last_out = daily_scans[-1] if len(daily_scans) > 1 else None
+
+            att.first_check_in = first_in
+            att.last_check_out = last_out
+            if first_in and last_out:
+                att.total_hours = round((last_out - first_in).total_seconds() / 3600.0, 2)
+            else:
+                att.total_hours = 0.0
+            att.import_batch = "reverted_fix"
+            restored = True
+
+    if restored:
+        await log_audit(
+            db, "attendance_daily", f"{att.employee_id}:{att.work_date}",
+            "UPDATE", current_user.username,
+            att_before, {c.name: getattr(att, c.name) for c in att.__table__.columns},
+            notes="Reverted manual fix and restored raw machine scans"
+        )
+        await db.commit()
+        return {"message": "Đã hoàn tác bản ghi về trạng thái gốc từ máy chấm công"}
+    else:
+        # Nếu không tìm thấy lịch sử quét thẻ nào, tiến hành xóa hẳn bản ghi chấm công ngày đó
+        await db.execute(
+            delete(AttendanceDaily).where(AttendanceDaily.id == request.attendance_id)
+        )
+        await log_audit(
+            db, "attendance_daily", f"{att.employee_id}:{att.work_date}",
+            "DELETE", current_user.username,
+            att_before, None,
+            notes="Deleted manual fix, no raw scans found to restore"
+        )
+        await db.commit()
+        return {"message": "Đã xóa bản ghi chấm công"}
+
+
+class UpdateFixedScanRequest(BaseModel):
+    attendance_id: int
+    check_in: Optional[str] = None
+    check_out: Optional[str] = None
+
+
+@router.post("/forgot-scans/fixed/update")
+async def update_fixed_scan(
+    request: UpdateFixedScanRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: AppUser = Depends(require_roles(UserRole.ADMIN, UserRole.ACCOUNTANT)),
+):
+    """Sửa lại giờ vào/ra của bản ghi đã sửa thủ công."""
+    att = await db.get(AttendanceDaily, request.attendance_id)
+    if not att:
+        raise HTTPException(404, "Không tìm thấy bản ghi chấm công")
+
+    if att.import_batch not in ("manual_fix", "manual_fix_excel", "manual"):
+        raise HTTPException(400, "Chỉ có thể sửa bản ghi đã sửa thủ công")
+
+    await check_date_locked(db, att.work_date)
+
+    att_before = {c.name: getattr(att, c.name) for c in att.__table__.columns}
+
+    # Parse times
+    ci_str = (request.check_in or "").strip()
+    co_str = (request.check_out or "").strip()
+    parsed_ci = parse_input_time(ci_str) if ci_str else None
+    parsed_co = parse_input_time(co_str) if co_str else None
+
+    if ci_str and not parsed_ci:
+        raise HTTPException(400, f"Giờ vào không đúng định dạng: {ci_str}")
+    if co_str and not parsed_co:
+        raise HTTPException(400, f"Giờ ra không đúng định dạng: {co_str}")
+
+    # Resolve shift for night-shift handling
+    shift_result = await db.execute(select(ShiftTemplate))
+    all_shifts = list(shift_result.scalars().all())
+    shifts_by_id = {s.id: s for s in all_shifts}
+    shifts_by_code = {s.code: s for s in all_shifts}
+
+    emp = await db.get(Employee, att.employee_id)
+    ws_res = await db.execute(select(WorkSchedule).where(and_(
+        WorkSchedule.employee_id == att.employee_id,
+        WorkSchedule.work_date == att.work_date,
+    )))
+    ws = ws_res.scalar_one_or_none()
+    shift = None
+    if ws:
+        shift = shifts_by_id.get(ws.shift_id)
+    if not shift and emp and emp.default_shift_code:
+        shift = shifts_by_code.get(emp.default_shift_code)
+    is_night = bool(shift.is_night_shift) if shift else False
+
+    work_date = att.work_date
+
+    # Update check-in
+    if parsed_ci:
+        att.first_check_in = datetime.combine(work_date, parsed_ci)
+    else:
+        att.first_check_in = None
+
+    # Update check-out
+    if parsed_co:
+        if is_night and att.first_check_in and parsed_co < att.first_check_in.time():
+            att.last_check_out = datetime.combine(work_date + timedelta(days=1), parsed_co)
+        else:
+            att.last_check_out = datetime.combine(work_date, parsed_co)
+    else:
+        att.last_check_out = None
+
+    # Recalculate hours
+    if att.first_check_in and att.last_check_out:
+        att.total_hours = round(
+            (att.last_check_out - att.first_check_in).total_seconds() / 3600.0, 2
+        )
+    else:
+        att.total_hours = 0.0
+
+    await log_audit(
+        db, "attendance_daily", f"{att.employee_id}:{work_date}",
+        "UPDATE", current_user.username,
+        att_before, {c.name: getattr(att, c.name) for c in att.__table__.columns},
+        notes="Updated manual fix via UI"
+    )
+
+    await db.commit()
+    return {"message": "Đã cập nhật bản ghi thành công"}
 

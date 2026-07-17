@@ -174,7 +174,7 @@ async def import_attendance(
             min_file_date = min(file_dates_in_month)
             max_file_date = max(file_dates_in_month)
             log_start = datetime.combine(min_file_date, time(0, 0))
-            log_end = datetime.combine(max_file_date + timedelta(days=1), time(12, 0))
+            log_end = datetime.combine(max_file_date, time(23, 59, 59))
             await db.execute(delete(AttendanceLog).where(and_(
                 AttendanceLog.event_time >= log_start,
                 AttendanceLog.event_time <= log_end
@@ -825,8 +825,11 @@ async def export_meal_allowance(
             code_num = 999999
         return (d_order, d_name or "", e_order_val, code_num)
 
-    sorted_rows = sorted(row_map.values(), key=get_export_sort_key)
-    
+    sorted_rows = [
+        r for r in sorted(row_map.values(), key=get_export_sort_key)
+        if (r.get("meal_count") or 0) > 0 or (r.get("night_shifts") or 0) > 0
+    ]
+
     for idx, item in enumerate(sorted_rows, 1):
         # STT, MSNV, Name
         ws.cell(current_row, 1, idx).font = normal_font
