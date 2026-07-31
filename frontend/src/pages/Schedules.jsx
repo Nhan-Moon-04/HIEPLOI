@@ -48,7 +48,7 @@ export default function Schedules() {
     return map;
   }, [xOtConfigs]);
 
-  const shiftList = useMemo(() => shiftTemplates.filter((s) => s.is_active), [shiftTemplates]);
+  const shiftList = useMemo(() => shiftTemplates.filter((s) => s.is_active !== false), [shiftTemplates]);
 
   // Batch override states
   const [batchModal, setBatchModal] = useState(false);
@@ -323,15 +323,19 @@ export default function Schedules() {
     if (isEditing) {
       return (
         <Select
-          size="small" autoFocus open style={{ width: 64 }}
-          value={val || undefined}
+          size="small"
+          autoFocus
+          open
+          style={{ width: 70 }}
+          popupMatchSelectWidth={false}
+          dropdownStyle={{ minWidth: 140 }}
+          value={val || ''}
           placeholder={row.default_shift_code}
-          allowClear
           onChange={(v) => updateCell.mutate({ employee_id: row.employee_id, day, shift_code: v || null })}
           onBlur={() => setEditingCell(null)}
           options={[
-            { value: null, label: 'Mặc định' },
-            ...shiftList.map((sh) => ({ value: sh.code, label: sh.code })),
+            { value: '', label: `Mặc định (${row.default_shift_code || 'X'})` },
+            ...shiftList.map((sh) => ({ value: sh.code, label: `${sh.code} ${sh.name ? `(${sh.name})` : ''}` })),
           ]}
         />
       );
