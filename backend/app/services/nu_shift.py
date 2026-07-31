@@ -487,13 +487,16 @@ def build_nu_shift_day_results(
             week_key = week_start
             week_to_days[week_key].append(work_date)
 
-        # XNU Ca3 checkouts (before 7h) on day N+1 must not be mistaken for Ca1 check-ins.
-        xnu3_dates = {d for d, data in day_mode_candidates.items() if data["detected_mode"] == XNU_MODE_3}
+        # Night shift checkouts (before 8h) on day N+1 must not be mistaken for day N+1 check-ins.
+        night_shift_dates = {
+            d for d, data in day_mode_candidates.items()
+            if (data["detected_mode"] in (NU_NIGHT_MODE, XNU_MODE_3) or data["fallback_mode"] in (NU_NIGHT_MODE, XNU_MODE_3))
+        }
         for work_date in sorted_dates:
-            if work_date - timedelta(days=1) not in xnu3_dates:
+            if work_date - timedelta(days=1) not in night_shift_dates:
                 continue
             data = day_mode_candidates[work_date]
-            filtered = [e for e in data["today_events"] if e.hour >= 7]
+            filtered = [e for e in data["today_events"] if e.hour >= 8]
             if len(filtered) == len(data["today_events"]):
                 continue
             is_sun = (work_date.weekday() == 6)

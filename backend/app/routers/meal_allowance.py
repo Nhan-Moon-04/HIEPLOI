@@ -377,16 +377,17 @@ async def get_meal_allowance(
                         # pending hoặc rejected → không tính tiền ăn, nhưng vẫn đếm ngày đi làm
                         work_days += 1
                 else:
-                    meal = nu_res.meal_allowance
-                    total_emp_meal += meal
-                    work_days += 1
-                    meal_rates[meal] += 1
-                    
-                    if nu_res.night_allowance and nu_res.night_allowance > 0:
-                        night_shifts += 1
-                        total_emp_meal += nu_res.night_allowance
-                    
-                    emp_meal_count += nu_res.meal_count
+                    if nu_res.check_in or nu_res.check_out or nu_res.meal_count > 0:
+                        meal = nu_res.meal_allowance
+                        total_emp_meal += meal
+                        work_days += 1
+                        meal_rates[meal] += 1
+                        
+                        if nu_res.night_allowance and nu_res.night_allowance > 0:
+                            night_shifts += 1
+                            total_emp_meal += nu_res.night_allowance
+                        
+                        emp_meal_count += nu_res.meal_count
 
                 # XNU: cộng thêm tiền ăn OT thủ công nếu có config
                 if nu_res.shift_code == "XNU":
