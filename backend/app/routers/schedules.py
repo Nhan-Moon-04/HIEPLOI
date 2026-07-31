@@ -1,11 +1,11 @@
 from typing import List, Optional
-from datetime import date
+from datetime import date, timedelta
 import calendar
 import re
 from io import BytesIO
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, or_, delete, cast, Integer
+from sqlalchemy import select, and_, or_, delete, cast, Integer, update
 from app.database import get_db
 from app.models.schedule import WorkSchedule
 from app.models.employee import Employee
@@ -612,4 +612,142 @@ async def import_actual_overtime(
         "updated": updated,
         "deleted": deleted
     }
+
+
+# --- BATCH OVERRIDES ---
+
+class BatchOverrideCreateRequest(BaseModel):
+    month_key: str
+    start_date: date
+    end_date: date
+    employee_ids: List[int]
+    shift_code: str
+
+
+class BatchOverrideUpdateRequest(BaseModel):
+    ids: List[int]
+    shift_code: str
+    month_key: str
+
+
+class BatchOverrideDeleteRequest(BaseModel):
+    ids: List[int]
+    month_key: str
+
+
+@router.post("/batch-override")
+async def create_batch_overrides(
+    request: BatchOverrideCreateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: AppUser = Depends(require_roles(UserRole.ADMIN, UserRole.ACCOUNTANT)),
+):
+    await check_month_locked(db, request.month_key)
+    
+    # 1. Look up shift by code
+    shift_r = await db.execute(select(ShiftTemplate).where(ShiftTemplate.code == request.shift_code))
+    shift = shift_r.scalar_one_or_none()
+    if not shift:
+        raise HTTPException(400, f"Shift '{request.shift_code}' not found")
+        
+    # 2. Iterate dates and employees
+    curr_date = request.start_date
+    dates = []
+    while curr_date <= request.end_date:
+        dates.append(curr_date)
+        curr_date += timedelta(days=1)
+        
+    for emp_id in request.employee_ids:
+        for d in dates:
+            # Check existing override
+            existing = await db.execute(
+                select(WorkSchedule).where(
+                    and_(WorkSchedule.employee_id == emp_id, WorkSchedule.work_date == d)
+                )
+            )
+            ws = existing.scalar_one_or_none()
+            if ws:
+                ws.shift_id = shift.id
+            else:
+                ws = WorkSchedule(
+                    employee_id=emp_id,
+                    work_date=d,
+                    month_key=request.month_key,
+                    shift_id=shift.id,
+                )
+                db.add(ws)
+                
+    await db.commit()
+    return {"message": f"Successfully set shift {request.shift_code} for {len(request.employee_ids)} employees over {len(dates)} days."}
+
+
+@router.get("/batch-override")
+async def get_batch_overrides(
+    month_key: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: AppUser = Depends(require_roles(UserRole.ADMIN, UserRole.ACCOUNTANT)),
+):
+    # Returns all work schedules overrides in the month, with employee info and shift code
+    q = (
+        select(WorkSchedule, Employee, ShiftTemplate)
+        .join(Employee, WorkSchedule.employee_id == Employee.id)
+        .join(ShiftTemplate, WorkSchedule.shift_id == ShiftTemplate.id)
+        .where(WorkSchedule.month_key == month_key)
+        .order_by(WorkSchedule.work_date, Employee.employee_code)
+    )
+    res = await db.execute(q)
+    rows = res.all()
+    
+    items = []
+    for ws, emp, s in rows:
+        items.append({
+            "id": ws.id,
+            "employee_id": ws.employee_id,
+            "employee_code": emp.employee_code,
+            "full_name": emp.full_name,
+            "department": emp.department,
+            "work_date": ws.work_date.strftime("%Y-%m-%d"),
+            "shift_code": s.code,
+        })
+    return items
+
+
+@router.put("/batch-override")
+async def update_batch_overrides(
+    request: BatchOverrideUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: AppUser = Depends(require_roles(UserRole.ADMIN, UserRole.ACCOUNTANT)),
+):
+    await check_month_locked(db, request.month_key)
+    
+    # Look up shift
+    shift_r = await db.execute(select(ShiftTemplate).where(ShiftTemplate.code == request.shift_code))
+    shift = shift_r.scalar_one_or_none()
+    if not shift:
+        raise HTTPException(400, f"Shift '{request.shift_code}' not found")
+        
+    if request.ids:
+        await db.execute(
+            update(WorkSchedule)
+            .where(WorkSchedule.id.in_(request.ids))
+            .values(shift_id=shift.id)
+        )
+        await db.commit()
+    return {"message": f"Successfully updated {len(request.ids)} overrides to {request.shift_code}."}
+
+
+@router.delete("/batch-override")
+async def delete_batch_overrides(
+    request: BatchOverrideDeleteRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: AppUser = Depends(require_roles(UserRole.ADMIN, UserRole.ACCOUNTANT)),
+):
+    await check_month_locked(db, request.month_key)
+    
+    if request.ids:
+        await db.execute(
+            delete(WorkSchedule)
+            .where(WorkSchedule.id.in_(request.ids))
+        )
+        await db.commit()
+    return {"message": f"Successfully deleted {len(request.ids)} overrides."}
 
