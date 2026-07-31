@@ -12,6 +12,31 @@ import api from '../api/client';
 
 const { RangePicker } = DatePicker;
 
+const TABLE_LABELS = {
+  departments: 'Bộ phận',
+  shift_templates: 'Ca làm việc',
+  company_holidays: 'Ngày nghỉ lễ',
+  employees: 'Hồ sơ nhân viên',
+  app_users: 'Tài khoản người dùng',
+  holiday_exceptions: 'Ngoại lệ ngày lễ',
+  holiday_target_employees: 'Đối tượng ngày lễ',
+  work_schedules: 'Lịch làm tùy chỉnh',
+  attendance_logs: 'Nhật ký quẹt thẻ',
+  attendance_daily: 'Dữ liệu chấm công',
+  meal_approvals: 'Duyệt tiền ăn',
+  x_overtime_configs: 'Cấu hình tăng ca X',
+  monthly_workday_configs: 'Công chuẩn tháng',
+  monthly_salaries: 'Bảng tính lương tháng',
+  payroll_payment_statuses: 'Trạng thái chi trả lương',
+  advance_loans: 'Khoản tạm ứng / Vay',
+  advance_payments: 'Lịch sử trả tạm ứng',
+  union_members: 'Đoàn viên công đoàn',
+  union_transactions: 'Thu/Chi công đoàn',
+  union_events: 'Sự kiện công đoàn',
+  union_event_members: 'Tham gia sự kiện',
+  audit_logs: 'Nhật ký hệ thống',
+};
+
 export default function ImportExport() {
   const [importResult, setImportResult] = useState(null);
   const [restoreResult, setRestoreResult] = useState(null);
@@ -255,13 +280,31 @@ export default function ImportExport() {
             {restoreResult && (
               <div className="ie-result ie-result--purple">
                 <div className="ie-result-title">
-                  <CheckCircleOutlined /> Kết quả restore
+                  <CheckCircleOutlined /> Kết quả Khôi phục dữ liệu (Restore)
                 </div>
                 <div className="ie-result-rows">
-                  <div>Backup từ: <b>{restoreResult.backup_date}</b></div>
-                  {restoreResult.restored && Object.entries(restoreResult.restored).map(([k, v]) => (
-                    <div key={k}>{k}: <Tag color="purple">{v} mới</Tag></div>
-                  ))}
+                  <div style={{ marginBottom: 6 }}>
+                    Thời gian Backup: <b>{restoreResult.backup_date ? dayjs(restoreResult.backup_date).format('DD/MM/YYYY HH:mm:ss') : 'N/A'}</b>
+                    {restoreResult.total_records !== undefined && (
+                      <span style={{ marginLeft: 12 }}>
+                        Tổng bản ghi khôi phục: <Tag color="purple" style={{ fontWeight: 700 }}>{restoreResult.total_records}</Tag>
+                      </span>
+                    )}
+                  </div>
+                  {restoreResult.restored && Object.keys(restoreResult.restored).length > 0 ? (
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 12px', marginTop: 8, fontSize: 12 }}>
+                      {Object.entries(restoreResult.restored).map(([k, v]) => (
+                        <div key={k} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span>• {TABLE_LABELS[k] || k}:</span>
+                          <Tag color="purple" style={{ margin: 0, fontWeight: 600 }}>+{v}</Tag>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div style={{ color: '#6b7280', fontSize: 12, marginTop: 4 }}>
+                      Dữ liệu trong file đã tồn tại đầy đủ trong hệ thống (0 bản ghi mới).
+                    </div>
+                  )}
                 </div>
               </div>
             )}

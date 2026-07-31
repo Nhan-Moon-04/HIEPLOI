@@ -622,6 +622,7 @@ class BatchOverrideCreateRequest(BaseModel):
     end_date: date
     employee_ids: List[int]
     shift_code: str
+    batch_name: Optional[str] = None
 
 
 class BatchOverrideUpdateRequest(BaseModel):
@@ -642,6 +643,7 @@ async def create_batch_overrides(
     current_user: AppUser = Depends(require_roles(UserRole.ADMIN, UserRole.ACCOUNTANT)),
 ):
     await check_month_locked(db, request.month_key)
+    from datetime import datetime as dt_datetime
     
     # 1. Look up shift by code
     shift_r = await db.execute(select(ShiftTemplate).where(ShiftTemplate.code == request.shift_code))
@@ -656,6 +658,15 @@ async def create_batch_overrides(
         dates.append(curr_date)
         curr_date += timedelta(days=1)
         
+    now_str = dt_datetime.now().strftime("%d/%m %H:%M")
+    if request.batch_name and request.batch_name.strip():
+        batch_code = f"{request.batch_name.strip()} ({now_str})"
+    else:
+        s_date_str = request.start_date.strftime("%d/%m")
+        e_date_str = request.end_date.strftime("%d/%m")
+        date_range_str = s_date_str if s_date_str == e_date_str else f"{s_date_str}-{e_date_str}"
+        batch_code = f"Đợt {now_str} — Ca {request.shift_code} ({len(request.employee_ids)} NV, {date_range_str})"
+
     for emp_id in request.employee_ids:
         for d in dates:
             # Check existing override
@@ -667,17 +678,22 @@ async def create_batch_overrides(
             ws = existing.scalar_one_or_none()
             if ws:
                 ws.shift_id = shift.id
+                ws.batch_code = batch_code
             else:
                 ws = WorkSchedule(
                     employee_id=emp_id,
                     work_date=d,
                     month_key=request.month_key,
                     shift_id=shift.id,
+                    batch_code=batch_code,
                 )
                 db.add(ws)
                 
     await db.commit()
-    return {"message": f"Successfully set shift {request.shift_code} for {len(request.employee_ids)} employees over {len(dates)} days."}
+    return {
+        "message": f"Áp dụng thành công ca {request.shift_code} cho {len(request.employee_ids)} nhân viên ({len(dates)} ngày).",
+        "batch_code": batch_code,
+    }
 
 
 @router.get("/batch-override")
@@ -707,8 +723,80 @@ async def get_batch_overrides(
             "department": emp.department,
             "work_date": ws.work_date.strftime("%Y-%m-%d"),
             "shift_code": s.code,
+            "batch_code": ws.batch_code,
         })
     return items
+
+
+@router.get("/batch-override/groups")
+async def get_batch_override_groups(
+    month_key: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: AppUser = Depends(require_roles(UserRole.ADMIN, UserRole.ACCOUNTANT)),
+):
+    """Lấy danh sách lịch sử tùy chỉnh gộp theo từng đợt thêm (batch)"""
+    q = (
+        select(WorkSchedule, Employee, ShiftTemplate)
+        .join(Employee, WorkSchedule.employee_id == Employee.id)
+        .join(ShiftTemplate, WorkSchedule.shift_id == ShiftTemplate.id)
+        .where(WorkSchedule.month_key == month_key)
+        .order_by(WorkSchedule.created_at.desc(), WorkSchedule.id.desc())
+    )
+    res = await db.execute(q)
+    rows = res.all()
+
+    from collections import defaultdict
+    groups_map = defaultdict(list)
+
+    for ws, emp, s in rows:
+        if ws.batch_code:
+            key = ws.batch_code
+        else:
+            time_key = ws.created_at.strftime("%Y-%m-%d %H:%M") if ws.created_at else "Khác"
+            key = f"Đợt cũ {time_key} — Ca {s.code}"
+        groups_map[key].append((ws, emp, s))
+
+    result_groups = []
+    for key, item_list in groups_map.items():
+        first_ws, first_emp, first_shift = item_list[0]
+        shift_code = first_shift.code
+        
+        dates = {ws.work_date for ws, emp, s in item_list}
+        emps_map = {emp.id: emp for ws, emp, s in item_list}
+        min_date = min(dates)
+        max_date = max(dates)
+        created_at_val = max((ws.created_at for ws, emp, s in item_list if ws.created_at), default=None)
+
+        emp_list = [
+            {
+                "employee_id": e.id,
+                "employee_code": e.employee_code,
+                "full_name": e.full_name,
+                "department": e.department,
+            }
+            for e in sorted(emps_map.values(), key=lambda x: x.employee_code)
+        ]
+
+        result_groups.append({
+            "key": key,
+            "batch_code": key,
+            "batch_name": key,
+            "shift_code": shift_code,
+            "created_at": created_at_val.strftime("%d/%m/%Y %H:%M") if created_at_val else "",
+            "start_date": min_date.strftime("%Y-%m-%d"),
+            "end_date": max_date.strftime("%Y-%m-%d"),
+            "start_date_fmt": min_date.strftime("%d/%m/%Y"),
+            "end_date_fmt": max_date.strftime("%d/%m/%Y"),
+            "days_count": len(dates),
+            "employee_count": len(emps_map),
+            "record_count": len(item_list),
+            "ids": [ws.id for ws, emp, s in item_list],
+            "employee_ids": list(emps_map.keys()),
+            "employees": emp_list,
+        })
+
+    result_groups.sort(key=lambda g: g["batch_code"], reverse=True)
+    return result_groups
 
 
 @router.put("/batch-override")
@@ -732,7 +820,7 @@ async def update_batch_overrides(
             .values(shift_id=shift.id)
         )
         await db.commit()
-    return {"message": f"Successfully updated {len(request.ids)} overrides to {request.shift_code}."}
+    return {"message": f"Đã cập nhật ca thành {request.shift_code} cho {len(request.ids)} bản ghi."}
 
 
 @router.delete("/batch-override")
@@ -749,5 +837,6 @@ async def delete_batch_overrides(
             .where(WorkSchedule.id.in_(request.ids))
         )
         await db.commit()
-    return {"message": f"Successfully deleted {len(request.ids)} overrides."}
+    return {"message": f"Đã xóa {len(request.ids)} ca tùy chỉnh."}
+
 

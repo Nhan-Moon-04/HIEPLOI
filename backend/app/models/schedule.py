@@ -14,6 +14,7 @@ class WorkSchedule(Base):
     shift_id = Column(Integer, ForeignKey("shift_templates.id"), nullable=False)
     absence_hours = Column(Numeric(5, 2))
     notes = Column(String(255))
+    batch_code = Column(String(100), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

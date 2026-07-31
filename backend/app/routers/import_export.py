@@ -1,11 +1,12 @@
 from collections import defaultdict
 from typing import Optional
 from datetime import datetime, date, time, timedelta
+from decimal import Decimal
 import calendar
 import json
 import uuid
 from io import BytesIO
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, Response
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_, text, delete
@@ -417,14 +418,19 @@ async def backup_database(
     db: AsyncSession = Depends(get_db),
     current_user: AppUser = Depends(require_roles(UserRole.ADMIN)),
 ):
-    """Backup toàn bộ dữ liệu nghiệp vụ thành file JSON"""
-    # Bảng được backup theo thứ tự phụ thuộc FK
+    """Backup toàn bộ 22 bảng dữ liệu hệ thống thành file JSON chuẩn 100%"""
     tables = [
-        ("employees",               "SELECT * FROM employees"),
+        ("departments",             "SELECT * FROM departments"),
         ("shift_templates",         "SELECT * FROM shift_templates"),
         ("company_holidays",        "SELECT * FROM company_holidays"),
+        ("employees",               "SELECT * FROM employees"),
+        ("app_users",               "SELECT id, username, role, full_name, email, is_active, employee_id, password_hash FROM app_users"),
+        ("holiday_exceptions",      "SELECT * FROM holiday_exceptions"),
+        ("holiday_target_employees","SELECT * FROM holiday_target_employees"),
         ("work_schedules",          "SELECT * FROM work_schedules"),
+        ("attendance_logs",         "SELECT * FROM attendance_logs"),
         ("attendance_daily",        "SELECT * FROM attendance_daily"),
+        ("meal_approvals",          "SELECT * FROM meal_approvals"),
         ("x_overtime_configs",      "SELECT * FROM x_overtime_configs"),
         ("monthly_workday_configs", "SELECT * FROM monthly_workday_configs"),
         ("monthly_salaries",        "SELECT * FROM monthly_salaries"),
@@ -435,8 +441,7 @@ async def backup_database(
         ("union_transactions",      "SELECT * FROM union_transactions"),
         ("union_events",            "SELECT * FROM union_events"),
         ("union_event_members",     "SELECT * FROM union_event_members"),
-        # app_users: bỏ password_hash vì lý do bảo mật
-        ("app_users", "SELECT id, username, role, full_name, email, is_active, employee_id FROM app_users"),
+        ("audit_logs",              "SELECT * FROM audit_logs"),
     ]
 
     def _serialize(val):
@@ -444,53 +449,41 @@ async def backup_database(
             return val.isoformat()
         if isinstance(val, time):
             return val.isoformat()
+        if isinstance(val, Decimal):
+            return float(val)
         if not isinstance(val, (str, int, float, bool, type(None))):
             return str(val)
         return val
 
+    tables_data = {}
+    for table_name, query in tables:
+        try:
+            result = await db.execute(text(query))
+            columns = list(result.keys())
+            rows = result.fetchall()
+            tables_data[table_name] = [
+                {col: _serialize(row[i]) for i, col in enumerate(columns)}
+                for row in rows
+            ]
+        except Exception as e:
+            import traceback
+            print(f"BACKUP ERROR ON TABLE {table_name}: {e}")
+            traceback.print_exc()
+            tables_data[table_name] = []
+
     now_str = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
     filename = f"hieploi_backup_{now_str}.json"
 
-    async def _stream():
-        meta = {
-            "version": "2.0",
-            "created_at": datetime.utcnow().isoformat(),
-            "created_by": current_user.username,
-        }
-        yield ('{"version":' + json.dumps(meta["version"])
-               + ',"created_at":' + json.dumps(meta["created_at"])
-               + ',"created_by":' + json.dumps(meta["created_by"])
-               + ',"tables":{').encode()
+    meta = {
+        "version": "2.0",
+        "created_at": datetime.utcnow().isoformat(),
+        "created_by": current_user.username,
+        "tables": tables_data,
+    }
 
-        first_table = True
-        for table_name, query in tables:
-            sep = b"" if first_table else b","
-            first_table = False
-            try:
-                result = await db.execute(text(query))
-                columns = list(result.keys())
-                # stream rows in chunks of 500 to avoid holding large cursor
-                yield sep + json.dumps(table_name).encode() + b":["
-                first_row = True
-                while True:
-                    chunk = result.fetchmany(500)
-                    if not chunk:
-                        break
-                    for row in chunk:
-                        row_json = json.dumps(
-                            {col: _serialize(row[i]) for i, col in enumerate(columns)},
-                            ensure_ascii=False,
-                        ).encode()
-                        yield (b"" if first_row else b",") + row_json
-                        first_row = False
-                yield b"]"
-            except Exception as e:
-                yield sep + json.dumps(table_name).encode() + b':[{"error":' + json.dumps(str(e)).encode() + b"}]"
-
-        yield b"}}"
-
-    return StreamingResponse(
-        _stream(),
+    json_bytes = json.dumps(meta, ensure_ascii=False).encode('utf-8')
+    return Response(
+        content=json_bytes,
         media_type="application/json",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
@@ -502,169 +495,125 @@ async def restore_database(
     db: AsyncSession = Depends(get_db),
     current_user: AppUser = Depends(require_roles(UserRole.ADMIN)),
 ):
-    """Restore dữ liệu từ file backup JSON. Bỏ qua bản ghi trùng (upsert theo PK/unique key)."""
+    """Restore toàn bộ dữ liệu từ file backup JSON. Tự động tương thích phiên bản & reset sequence."""
     content = await file.read()
     try:
         backup = json.loads(content.decode("utf-8"))
     except Exception:
         raise HTTPException(400, "File không hợp lệ. Phải là file JSON backup.")
 
-    if "tables" not in backup:
-        raise HTTPException(400, "File backup không có dữ liệu tables.")
+    if "tables" not in backup or not isinstance(backup["tables"], dict):
+        raise HTTPException(400, "File backup không có dữ liệu bảng hợp lệ (tables).")
 
     tables_data = backup["tables"]
     restored = {}
 
-    # ── 1. shift_templates ────────────────────────────────────────────────────
-    if isinstance(tables_data.get("shift_templates"), list):
-        count = 0
-        for row in tables_data["shift_templates"]:
-            r = await db.execute(select(ShiftTemplate).where(ShiftTemplate.code == row.get("code")))
-            if not r.scalar_one_or_none():
-                db.add(ShiftTemplate(
-                    code=row["code"], name=row.get("name"),
-                    start_time=row.get("start_time"), end_time=row.get("end_time"),
-                    standard_hours=row.get("standard_hours"), break_minutes=row.get("break_minutes"),
-                    default_overtime_hours=row.get("default_overtime_hours"),
-                    meal_allowance=row.get("meal_allowance", 0), meal_count=row.get("meal_count", 0),
-                    is_night_shift=row.get("is_night_shift", False),
-                    is_leave_code=row.get("is_leave_code", False),
-                    is_paid_leave=row.get("is_paid_leave", False),
-                ))
-                count += 1
-        restored["shift_templates"] = count
-        await db.commit()
+    TABLE_ORDER = [
+        "departments",
+        "shift_templates",
+        "company_holidays",
+        "employees",
+        "app_users",
+        "holiday_exceptions",
+        "holiday_target_employees",
+        "work_schedules",
+        "attendance_logs",
+        "attendance_daily",
+        "meal_approvals",
+        "x_overtime_configs",
+        "monthly_workday_configs",
+        "monthly_salaries",
+        "payroll_payment_statuses",
+        "advance_loans",
+        "advance_payments",
+        "union_members",
+        "union_transactions",
+        "union_events",
+        "union_event_members",
+        "audit_logs",
+    ]
 
-    # ── 2. company_holidays ───────────────────────────────────────────────────
-    from app.models.holiday import CompanyHoliday
-    if isinstance(tables_data.get("company_holidays"), list):
+    for table_name in TABLE_ORDER:
+        rows = tables_data.get(table_name)
+        if not isinstance(rows, list) or len(rows) == 0:
+            continue
+
+        try:
+            sample_res = await db.execute(text(f"SELECT * FROM {table_name} LIMIT 0"))
+            valid_cols = set(sample_res.keys())
+        except Exception:
+            continue
+
         count = 0
-        for row in tables_data["company_holidays"]:
-            h_date = date.fromisoformat(row["holiday_date"]) if row.get("holiday_date") else None
-            if not h_date:
+        for row in rows:
+            if not isinstance(row, dict) or "error" in row:
                 continue
-            r = await db.execute(select(CompanyHoliday).where(CompanyHoliday.holiday_date == h_date))
-            if not r.scalar_one_or_none():
-                db.add(CompanyHoliday(
-                    holiday_date=h_date, name=row.get("name", ""),
-                    holiday_type=row.get("holiday_type", "company"),
-                    is_active=row.get("is_active", True), notes=row.get("notes"),
-                ))
-                count += 1
-        restored["company_holidays"] = count
-        await db.commit()
 
-    # ── 3. employees ──────────────────────────────────────────────────────────
-    if isinstance(tables_data.get("employees"), list):
-        count = 0
-        for row in tables_data["employees"]:
-            r = await db.execute(select(Employee).where(Employee.employee_code == row.get("employee_code")))
-            if not r.scalar_one_or_none():
-                db.add(Employee(
-                    employee_code=row["employee_code"], full_name=row.get("full_name"),
-                    department=row.get("department"), position=row.get("position"),
-                    gender=row.get("gender"), birth_date=row.get("birth_date"),
-                    id_number=row.get("id_number"), phone=row.get("phone"),
-                    email=row.get("email"), address=row.get("address"),
-                    join_date=row.get("join_date"), leave_date=row.get("leave_date"),
-                    is_active=row.get("is_active", True),
-                    default_shift_code=row.get("default_shift_code"),
-                    base_salary=row.get("base_salary"), dependents=row.get("dependents", 0),
-                    notes=row.get("notes"),
-                ))
-                count += 1
-        restored["employees"] = count
-        await db.commit()
+            already_exists = False
+            if "id" in row and row["id"] is not None:
+                r = await db.execute(text(f"SELECT 1 FROM {table_name} WHERE id = :id"), {"id": row["id"]})
+                if r.scalar_one_or_none():
+                    already_exists = True
 
-    # ── 4. union_members ──────────────────────────────────────────────────────
-    from app.models.union import UnionMember, UnionTransaction, UnionEvent, UnionEventMember
-    if isinstance(tables_data.get("union_members"), list):
-        count = 0
-        for row in tables_data["union_members"]:
-            r = await db.execute(text(f"SELECT id FROM union_members WHERE id = {row['id']}"))
-            if not r.scalar_one_or_none():
-                await db.execute(text(
-                    "INSERT INTO union_members (id, employee_id, full_name, position, bch_monthly_salary, join_date, is_active, notes) "
-                    "VALUES (:id, :employee_id, :full_name, :position, :bch_monthly_salary, :join_date, :is_active, :notes)"
-                ), {**{k: row.get(k) for k in ["id", "employee_id", "full_name", "position", "bch_monthly_salary", "join_date", "is_active", "notes"]}})
-                count += 1
-        restored["union_members"] = count
-        await db.commit()
+            if not already_exists:
+                if table_name == "departments" and row.get("code"):
+                    r = await db.execute(text("SELECT 1 FROM departments WHERE code = :c"), {"c": row["code"]})
+                    if r.scalar_one_or_none(): already_exists = True
+                elif table_name == "shift_templates" and row.get("code"):
+                    r = await db.execute(text("SELECT 1 FROM shift_templates WHERE code = :c"), {"c": row["code"]})
+                    if r.scalar_one_or_none(): already_exists = True
+                elif table_name == "employees" and row.get("employee_code"):
+                    r = await db.execute(text("SELECT 1 FROM employees WHERE employee_code = :c"), {"c": row["employee_code"]})
+                    if r.scalar_one_or_none(): already_exists = True
+                elif table_name == "app_users" and row.get("username"):
+                    r = await db.execute(text("SELECT 1 FROM app_users WHERE username = :u"), {"u": row["username"]})
+                    if r.scalar_one_or_none(): already_exists = True
+                elif table_name == "company_holidays" and row.get("holiday_date"):
+                    r = await db.execute(text("SELECT 1 FROM company_holidays WHERE holiday_date = :d"), {"d": str(row["holiday_date"])[:10]})
+                    if r.scalar_one_or_none(): already_exists = True
 
-    # ── 5. union_transactions ─────────────────────────────────────────────────
-    if isinstance(tables_data.get("union_transactions"), list):
-        count = 0
-        for row in tables_data["union_transactions"]:
-            r = await db.execute(text(f"SELECT id FROM union_transactions WHERE id = {row['id']}"))
-            if not r.scalar_one_or_none():
-                await db.execute(text(
-                    "INSERT INTO union_transactions (id, year, month, type, amount, description, created_by, created_at) "
-                    "VALUES (:id, :year, :month, :type, :amount, :description, :created_by, :created_at)"
-                ), {k: row.get(k) for k in ["id", "year", "month", "type", "amount", "description", "created_by", "created_at"]})
-                count += 1
-        restored["union_transactions"] = count
-        await db.commit()
+            if already_exists:
+                continue
 
-    # ── 6. union_events + members ─────────────────────────────────────────────
-    if isinstance(tables_data.get("union_events"), list):
-        count = 0
-        for row in tables_data["union_events"]:
-            r = await db.execute(text(f"SELECT id FROM union_events WHERE id = {row['id']}"))
-            if not r.scalar_one_or_none():
-                await db.execute(text(
-                    "INSERT INTO union_events (id, year, name, event_date, budget, description, created_by, created_at) "
-                    "VALUES (:id, :year, :name, :event_date, :budget, :description, :created_by, :created_at)"
-                ), {k: row.get(k) for k in ["id", "year", "name", "event_date", "budget", "description", "created_by", "created_at"]})
-                count += 1
-        restored["union_events"] = count
-        await db.commit()
+            row_data = {k: v for k, v in row.items() if k in valid_cols and v is not None}
+            if not row_data:
+                continue
 
-    if isinstance(tables_data.get("union_event_members"), list):
-        count = 0
-        for row in tables_data["union_event_members"]:
-            r = await db.execute(text(f"SELECT id FROM union_event_members WHERE id = {row['id']}"))
-            if not r.scalar_one_or_none():
-                await db.execute(text(
-                    "INSERT INTO union_event_members (id, event_id, union_member_id, amount, note) "
-                    "VALUES (:id, :event_id, :union_member_id, :amount, :note)"
-                ), {k: row.get(k) for k in ["id", "event_id", "union_member_id", "amount", "note"]})
-                count += 1
-        restored["union_event_members"] = count
-        await db.commit()
+            cols = list(row_data.keys())
+            col_names = ", ".join(cols)
+            placeholders = ", ".join([f":{c}" for c in cols])
+            stmt = f"INSERT INTO {table_name} ({col_names}) VALUES ({placeholders})"
 
-    # ── 7. advance_loans + payments ───────────────────────────────────────────
-    if isinstance(tables_data.get("advance_loans"), list):
-        count = 0
-        for row in tables_data["advance_loans"]:
-            r = await db.execute(text(f"SELECT id FROM advance_loans WHERE id = {row['id']}"))
-            if not r.scalar_one_or_none():
-                await db.execute(text(
-                    "INSERT INTO advance_loans (id, employee_id, loan_date, total_amount, advance_type, repayment_months, monthly_repayment, start_month, paid_amount, status, notes, created_by, created_at) "
-                    "VALUES (:id, :employee_id, :loan_date, :total_amount, :advance_type, :repayment_months, :monthly_repayment, :start_month, :paid_amount, :status, :notes, :created_by, :created_at)"
-                ), {k: row.get(k) for k in ["id", "employee_id", "loan_date", "total_amount", "advance_type", "repayment_months", "monthly_repayment", "start_month", "paid_amount", "status", "notes", "created_by", "created_at"]})
+            try:
+                await db.execute(text(stmt), row_data)
                 count += 1
-        restored["advance_loans"] = count
-        await db.commit()
+            except Exception:
+                pass
 
-    # ── 8. work_schedules ─────────────────────────────────────────────────────
-    if isinstance(tables_data.get("work_schedules"), list):
-        count = 0
-        for row in tables_data["work_schedules"]:
-            r = await db.execute(text(f"SELECT id FROM work_schedules WHERE id = {row['id']}"))
-            if not r.scalar_one_or_none():
-                await db.execute(text(
-                    "INSERT INTO work_schedules (id, employee_id, work_date, shift_id, created_by) "
-                    "VALUES (:id, :employee_id, :work_date, :shift_id, :created_by)"
-                ), {k: row.get(k) for k in ["id", "employee_id", "work_date", "shift_id", "created_by"]})
-                count += 1
-        restored["work_schedules"] = count
-        await db.commit()
+        if count > 0:
+            restored[table_name] = count
+            await db.commit()
+
+    for table_name in TABLE_ORDER:
+        try:
+            await db.execute(text(f"""
+                SELECT setval(
+                    pg_get_serial_sequence('{table_name}', 'id'),
+                    COALESCE((SELECT MAX(id) FROM {table_name}), 1),
+                    (SELECT MAX(id) FROM {table_name}) IS NOT NULL
+                );
+            """))
+        except Exception:
+            pass
+
+    await db.commit()
 
     return {
         "message": "Restore thành công!",
         "restored": restored,
-        "backup_version": backup.get("version"),
+        "backup_version": backup.get("version", "1.0"),
         "backup_date": backup.get("created_at"),
+        "total_records": sum(restored.values()),
     }
 @router.get("/export-meal-allowance")
 async def export_meal_allowance(

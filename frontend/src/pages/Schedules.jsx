@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
-import { DatePicker, Button, Tag, Select, message, Upload, Spin, Popover, Tooltip, Input, Form, TimePicker, InputNumber, Alert, Table as AntTable, Segmented, Popconfirm, Modal } from 'antd';
-import { CalendarOutlined, UploadOutlined, SearchOutlined, DeleteOutlined, CheckOutlined, ThunderboltOutlined, LockOutlined, CheckCircleOutlined } from '@ant-design/icons';
+import { DatePicker, Button, Tag, Select, message, Upload, Spin, Popover, Tooltip, Input, Form, TimePicker, InputNumber, Alert, Table as AntTable, Segmented, Popconfirm, Modal, Space } from 'antd';
+import { CalendarOutlined, UploadOutlined, SearchOutlined, DeleteOutlined, CheckOutlined, ThunderboltOutlined, LockOutlined, CheckCircleOutlined, EditOutlined, TeamOutlined, AppstoreOutlined, UnorderedListOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import dayjs from 'dayjs';
 import api from '../api/client';
@@ -30,30 +30,39 @@ export default function Schedules() {
     queryFn: () => api.get('/schedules', { params: { month_key: monthKey } }).then((r) => r.data),
   });
 
-  const { data: shiftList = [] } = useQuery({
+  const { data: shiftTemplates = [] } = useQuery({
     queryKey: ['shifts'],
     queryFn: () => api.get('/shifts').then((r) => r.data),
   });
 
-  const { data: xOtList = [] } = useQuery({
+  const { data: xOtConfigs = [] } = useQuery({
     queryKey: ['x-overtime', monthKey],
     queryFn: () => api.get('/schedules/x-overtime', { params: { month_key: monthKey } }).then((r) => r.data),
   });
 
-  const xOtMap = {};
-  for (const c of xOtList) {
-    xOtMap[`${c.employee_id}_${c.work_date}`] = c;
-  }
+  const xOtMap = useMemo(() => {
+    const map = {};
+    xOtConfigs.forEach((c) => {
+      map[`${c.employee_id}_${c.work_date}`] = c;
+    });
+    return map;
+  }, [xOtConfigs]);
 
-  // Batch Override states
+  const shiftList = useMemo(() => shiftTemplates.filter((s) => s.is_active), [shiftTemplates]);
+
+  // Batch override states
   const [batchModal, setBatchModal] = useState(false);
   const [batchTab, setBatchTab] = useState('add'); // 'add' or 'history'
+  const [historyViewMode, setHistoryViewMode] = useState('groups'); // 'groups' or 'detail'
+  const [batchName, setBatchName] = useState('');
   const [batchShiftCode, setBatchShiftCode] = useState(null);
   const [batchDateRange, setBatchDateRange] = useState([]); // [dayjs, dayjs]
   const [batchDept, setBatchDept] = useState(null);
   const [batchSearchTerm, setBatchSearchTerm] = useState('');
   const [batchSelectedEmps, setBatchSelectedEmps] = useState([]); // list of employee ids
   const [batchHistorySelectedKeys, setBatchHistorySelectedKeys] = useState([]); // selected override IDs in History
+  const [selectedGroupKeys, setSelectedGroupKeys] = useState([]); // selected batch group keys
+  const [batchEditTargetGroups, setBatchEditTargetGroups] = useState([]); // groups to edit in modal
   const [batchEditShiftModal, setBatchEditShiftModal] = useState(false);
   const [batchEditShiftCode, setBatchEditShiftCode] = useState(null);
   const [batchSaving, setBatchSaving] = useState(false);
@@ -67,6 +76,12 @@ export default function Schedules() {
   const { data: batchOverrides = [], refetch: refetchBatchOverrides } = useQuery({
     queryKey: ['batch-overrides', monthKey],
     queryFn: () => api.get('/schedules/batch-override', { params: { month_key: monthKey } }).then((r) => r.data),
+    enabled: !isWorker && batchModal,
+  });
+
+  const { data: batchGroups = [], refetch: refetchBatchGroups } = useQuery({
+    queryKey: ['batch-override-groups', monthKey],
+    queryFn: () => api.get('/schedules/batch-override/groups', { params: { month_key: monthKey } }).then((r) => r.data),
     enabled: !isWorker && batchModal,
   });
 
@@ -189,16 +204,20 @@ export default function Schedules() {
         end_date: batchDateRange[1].format('YYYY-MM-DD'),
         employee_ids: batchSelectedEmps,
         shift_code: batchShiftCode,
+        batch_name: batchName || undefined,
       });
       message.success('Đã áp dụng ca làm hàng loạt');
       setBatchModal(false);
       qc.invalidateQueries({ queryKey: ['schedule'] });
       // Reset form states
+      setBatchName('');
       setBatchShiftCode(null);
       setBatchDateRange([]);
       setBatchSelectedEmps([]);
       setBatchDept(null);
       setBatchSearchTerm('');
+      refetchBatchOverrides();
+      refetchBatchGroups();
     } catch {
       message.error('Lỗi khi áp dụng ca làm');
     } finally {
@@ -216,6 +235,7 @@ export default function Schedules() {
       message.success('Đã xóa ca tùy chỉnh');
       setBatchHistorySelectedKeys((prev) => prev.filter((k) => !idsToDelete.includes(k)));
       refetchBatchOverrides();
+      refetchBatchGroups();
       qc.invalidateQueries({ queryKey: ['schedule'] });
     } catch {
       message.error('Lỗi khi xóa');
@@ -225,28 +245,63 @@ export default function Schedules() {
   };
 
   const handleBatchUpdate = async () => {
-    if (!batchEditShiftCode || batchHistorySelectedKeys.length === 0) {
+    const targetIds = batchEditTargetGroups.length > 0
+      ? batchEditTargetGroups.flatMap((g) => g.ids)
+      : batchHistorySelectedKeys;
+
+    if (!batchEditShiftCode || targetIds.length === 0) {
       message.warning('Vui lòng chọn mã ca');
       return;
     }
     setBatchSaving(true);
     try {
       await api.put('/schedules/batch-override', {
-        ids: batchHistorySelectedKeys,
+        ids: targetIds,
         shift_code: batchEditShiftCode,
         month_key: monthKey,
       });
       message.success('Đã cập nhật mã ca làm');
       setBatchEditShiftModal(false);
       setBatchEditShiftCode(null);
+      setBatchEditTargetGroups([]);
       setBatchHistorySelectedKeys([]);
+      setSelectedGroupKeys([]);
       refetchBatchOverrides();
+      refetchBatchGroups();
       qc.invalidateQueries({ queryKey: ['schedule'] });
     } catch {
       message.error('Lỗi khi cập nhật');
     } finally {
       setBatchSaving(false);
     }
+  };
+
+  const handleDeleteBatchGroups = async (groupsToDelete) => {
+    if (!groupsToDelete || groupsToDelete.length === 0) return;
+    const allIdsToDelete = groupsToDelete.flatMap((g) => g.ids);
+    setBatchSaving(true);
+    try {
+      await api.delete('/schedules/batch-override', {
+        data: { ids: allIdsToDelete, month_key: monthKey },
+      });
+      message.success(`Đã xóa ${groupsToDelete.length} đợt ca tùy chỉnh (${allIdsToDelete.length} ca)`);
+      setSelectedGroupKeys((prev) => prev.filter((k) => !groupsToDelete.map((g) => g.key).includes(k)));
+      refetchBatchOverrides();
+      refetchBatchGroups();
+      qc.invalidateQueries({ queryKey: ['schedule'] });
+    } catch {
+      message.error('Lỗi khi xóa đợt tùy chỉnh');
+    } finally {
+      setBatchSaving(false);
+    }
+  };
+
+  const handleLoadBatchToForm = (group) => {
+    setBatchShiftCode(group.shift_code);
+    setBatchDateRange([dayjs(group.start_date), dayjs(group.end_date)]);
+    setBatchSelectedEmps(group.employee_ids);
+    setBatchTab('add');
+    message.info(`Đã tải cấu hình "${group.batch_name}" vào form thêm nhanh`);
   };
 
   const renderCell = (row, day) => {
@@ -531,42 +586,78 @@ export default function Schedules() {
           >
             Áp dụng cho {batchSelectedEmps.length} nhân viên
           </Button>,
-        ] : [
-          <Button key="cancel" onClick={() => setBatchModal(false)}>Đóng</Button>,
-          <Button
-            key="edit-batch"
-            type="primary"
-            disabled={batchHistorySelectedKeys.length === 0}
-            onClick={() => {
-              setBatchEditShiftCode(null);
-              setBatchEditShiftModal(true);
-            }}
-            style={{ background: '#f59e0b', borderColor: '#f59e0b' }}
-          >
-            Sửa mã ca ({batchHistorySelectedKeys.length})
-          </Button>,
-          <Popconfirm
-            key="delete-batch-confirm"
-            title={`Xóa ${batchHistorySelectedKeys.length} ca tùy chỉnh đã chọn?`}
-            description="Lịch làm sẽ quay về mặc định."
-            onConfirm={() => handleBatchDelete(batchHistorySelectedKeys)}
-            okText="Xóa"
-            cancelText="Hủy"
-            okButtonProps={{ danger: true }}
-            disabled={batchHistorySelectedKeys.length === 0}
-          >
-            <Button key="delete-batch" danger loading={batchSaving} disabled={batchHistorySelectedKeys.length === 0}>
-              Xóa đã chọn ({batchHistorySelectedKeys.length})
-            </Button>
-          </Popconfirm>,
-        ]}
+        ] : (
+          historyViewMode === 'groups' ? [
+            <Button key="cancel" onClick={() => setBatchModal(false)}>Đóng</Button>,
+            <Button
+              key="edit-group-batch"
+              type="primary"
+              disabled={selectedGroupKeys.length === 0}
+              onClick={() => {
+                const selected = batchGroups.filter((g) => selectedGroupKeys.includes(g.key));
+                setBatchEditTargetGroups(selected);
+                setBatchEditShiftCode(null);
+                setBatchEditShiftModal(true);
+              }}
+              style={{ background: '#f59e0b', borderColor: '#f59e0b' }}
+            >
+              Sửa mã ca đợt đã chọn ({selectedGroupKeys.length})
+            </Button>,
+            <Popconfirm
+              key="delete-group-batch-confirm"
+              title={`Xóa ${selectedGroupKeys.length} đợt tùy chỉnh đã chọn?`}
+              description="Tất cả ca thuộc các đợt này sẽ bị xóa và quay về mặc định."
+              onConfirm={() => {
+                const selected = batchGroups.filter((g) => selectedGroupKeys.includes(g.key));
+                handleDeleteBatchGroups(selected);
+              }}
+              okText="Xóa đợt đã chọn"
+              cancelText="Hủy"
+              okButtonProps={{ danger: true }}
+              disabled={selectedGroupKeys.length === 0}
+            >
+              <Button key="delete-group-batch" danger loading={batchSaving} disabled={selectedGroupKeys.length === 0}>
+                Xóa đợt đã chọn ({selectedGroupKeys.length})
+              </Button>
+            </Popconfirm>,
+          ] : [
+            <Button key="cancel" onClick={() => setBatchModal(false)}>Đóng</Button>,
+            <Button
+              key="edit-batch"
+              type="primary"
+              disabled={batchHistorySelectedKeys.length === 0}
+              onClick={() => {
+                setBatchEditTargetGroups([]);
+                setBatchEditShiftCode(null);
+                setBatchEditShiftModal(true);
+              }}
+              style={{ background: '#f59e0b', borderColor: '#f59e0b' }}
+            >
+              Sửa mã ca ({batchHistorySelectedKeys.length})
+            </Button>,
+            <Popconfirm
+              key="delete-batch-confirm"
+              title={`Xóa ${batchHistorySelectedKeys.length} ca tùy chỉnh đã chọn?`}
+              description="Lịch làm sẽ quay về mặc định."
+              onConfirm={() => handleBatchDelete(batchHistorySelectedKeys)}
+              okText="Xóa"
+              cancelText="Hủy"
+              okButtonProps={{ danger: true }}
+              disabled={batchHistorySelectedKeys.length === 0}
+            >
+              <Button key="delete-batch" danger loading={batchSaving} disabled={batchHistorySelectedKeys.length === 0}>
+                Xóa đã chọn ({batchHistorySelectedKeys.length})
+              </Button>
+            </Popconfirm>,
+          ]
+        )}
       >
         <Segmented
           value={batchTab}
           onChange={(val) => setBatchTab(val)}
           options={[
             { value: 'add', label: `Thêm nhanh`, icon: <ThunderboltOutlined /> },
-            { value: 'history', label: `Lịch sử tùy chỉnh (${batchOverrides.length})`, icon: <CalendarOutlined /> },
+            { value: 'history', label: `Lịch sử tùy chỉnh (${batchGroups.length} đợt / ${batchOverrides.length} ca)`, icon: <CalendarOutlined /> },
           ]}
           block
           style={{ marginBottom: 16 }}
@@ -574,6 +665,19 @@ export default function Schedules() {
 
         {batchTab === 'add' ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {/* Batch Name input */}
+            <div>
+              <div style={{ fontWeight: 500, marginBottom: 6, fontSize: 13 }}>
+                Tên đợt / Ghi chú lần thêm <span style={{ color: '#9ca3af', fontWeight: 400 }}>(Tùy chọn, ví dụ: Lần đổi ca ngày 26)</span>:
+              </div>
+              <Input
+                placeholder="Ví dụ: Đổi ca ngày 26, Ca trực lễ 2/9, Tăng ca đợt 1..."
+                value={batchName}
+                onChange={(e) => setBatchName(e.target.value)}
+                allowClear
+              />
+            </div>
+
             {/* Top selectors */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
               <div>
@@ -664,67 +768,188 @@ export default function Schedules() {
           </div>
         ) : (
           <div>
-            <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 12 }}>
-              Danh sách các ca tùy chỉnh đã áp dụng trong tháng. Chọn các dòng để Sửa mã ca hoặc Xóa.
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <div style={{ fontSize: 12, color: '#6b7280' }}>
+                Quản lý theo <b>Đợt áp dụng (Lần thêm)</b> giúp sửa/xóa 1 đợt nhiều nhân viên với 1-click.
+              </div>
+              <Segmented
+                size="small"
+                value={historyViewMode}
+                onChange={(val) => setHistoryViewMode(val)}
+                options={[
+                  { value: 'groups', label: `Theo đợt (${batchGroups.length})`, icon: <AppstoreOutlined /> },
+                  { value: 'detail', label: `Dòng lẻ (${batchOverrides.length})`, icon: <UnorderedListOutlined /> },
+                ]}
+              />
             </div>
-            <AntTable
-              dataSource={batchOverrides}
-              rowKey="id"
-              columns={[
-                {
-                  title: 'Họ tên',
-                  dataIndex: 'full_name',
-                  render: (v, r) => (
-                    <div>
-                      <div style={{ fontWeight: 600, fontSize: 13 }}>{v}</div>
-                      <div style={{ fontSize: 11, color: '#9ca3af' }}>{r.employee_code}</div>
-                    </div>
-                  ),
-                },
-                {
-                  title: 'Bộ phận',
-                  dataIndex: 'department',
-                },
-                {
-                  title: 'Ngày',
-                  dataIndex: 'work_date',
-                  render: (d) => dayjs(d).format('DD/MM/YYYY'),
-                  sorter: (a, b) => a.work_date.localeCompare(b.work_date),
-                },
-                {
-                  title: 'Ca tùy chỉnh',
-                  dataIndex: 'shift_code',
-                  render: (c) => <Tag color="green" style={{ fontWeight: 600 }}>{c}</Tag>,
-                  filters: Array.from(new Set(batchOverrides.map(o => o.shift_code))).map(c => ({ text: c, value: c })),
-                  onFilter: (value, record) => record.shift_code === value,
-                },
-                {
-                  title: 'Hành động',
-                  key: 'action',
-                  width: 80,
-                  align: 'center',
-                  render: (_, r) => (
-                    <Popconfirm
-                      title="Xóa ca tùy chỉnh này?"
-                      description="Lịch làm sẽ quay về mặc định."
-                      onConfirm={() => handleBatchDelete([r.id])}
-                      okText="Xóa"
-                      cancelText="Hủy"
-                      okButtonProps={{ danger: true }}
-                    >
-                      <Button type="text" danger icon={<DeleteOutlined />} size="small" />
-                    </Popconfirm>
-                  ),
-                },
-              ]}
-              rowSelection={{
-                selectedRowKeys: batchHistorySelectedKeys,
-                onChange: setBatchHistorySelectedKeys,
-              }}
-              size="small"
-              pagination={{ pageSize: 8 }}
-              scroll={{ y: 320 }}
-            />
+
+            {historyViewMode === 'groups' ? (
+              <AntTable
+                dataSource={batchGroups}
+                rowKey="key"
+                columns={[
+                  {
+                    title: 'Đợt áp dụng / Thời gian',
+                    dataIndex: 'batch_name',
+                    key: 'batch_name',
+                    render: (v, r) => (
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: 13, color: '#111827' }}>{v}</div>
+                        <div style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}>
+                          <CalendarOutlined style={{ marginRight: 4 }} />
+                          Áp dụng: <b>{r.start_date_fmt}</b> – <b>{r.end_date_fmt}</b> ({r.days_count} ngày)
+                        </div>
+                      </div>
+                    ),
+                  },
+                  {
+                    title: 'Mã ca',
+                    dataIndex: 'shift_code',
+                    width: 90,
+                    render: (c) => <Tag color="green" style={{ fontWeight: 700, fontSize: 12 }}>{c}</Tag>,
+                  },
+                  {
+                    title: 'Nhân viên áp dụng',
+                    key: 'employees',
+                    width: 140,
+                    render: (_, r) => (
+                      <Tooltip
+                        title={
+                          <div style={{ maxHeight: 200, overflowY: 'auto', padding: 4 }}>
+                            <div style={{ fontWeight: 600, marginBottom: 4, borderBottom: '1px solid #374151', paddingBottom: 2 }}>
+                              Danh sách ({r.employee_count} NV):
+                            </div>
+                            {r.employees.map((emp) => (
+                              <div key={emp.employee_id} style={{ fontSize: 11 }}>
+                                • {emp.employee_code} - {emp.full_name} ({emp.department || 'Chưa xếp'})
+                              </div>
+                            ))}
+                          </div>
+                        }
+                      >
+                        <div style={{ cursor: 'pointer', color: '#2563eb', fontWeight: 600, fontSize: 13 }}>
+                          <TeamOutlined style={{ marginRight: 4 }} />
+                          {r.employee_count} NV
+                        </div>
+                      </Tooltip>
+                    ),
+                  },
+                  {
+                    title: 'Tổng số ca',
+                    dataIndex: 'record_count',
+                    width: 90,
+                    align: 'center',
+                    render: (v) => <span style={{ fontWeight: 600, color: '#059669' }}>{v} ca</span>,
+                  },
+                  {
+                    title: 'Thao tác',
+                    key: 'action',
+                    width: 110,
+                    align: 'center',
+                    render: (_, r) => (
+                      <Space size={4}>
+                        <Tooltip title="Tải đợt này vào Form thêm nhanh">
+                          <Button
+                            type="text"
+                            icon={<ThunderboltOutlined style={{ color: '#d97706' }} />}
+                            size="small"
+                            onClick={() => handleLoadBatchToForm(r)}
+                          />
+                        </Tooltip>
+                        <Tooltip title="Sửa mã ca cho cả đợt này">
+                          <Button
+                            type="text"
+                            icon={<EditOutlined style={{ color: '#2563eb' }} />}
+                            size="small"
+                            onClick={() => {
+                              setBatchEditTargetGroups([r]);
+                              setBatchEditShiftCode(r.shift_code);
+                              setBatchEditShiftModal(true);
+                            }}
+                          />
+                        </Tooltip>
+                        <Popconfirm
+                          title="Xóa cả đợt tùy chỉnh này?"
+                          description={`Xóa toàn bộ ${r.record_count} ca thuộc đợt này. Lịch làm sẽ quay về mặc định.`}
+                          onConfirm={() => handleDeleteBatchGroups([r])}
+                          okText="Xóa cả đợt"
+                          cancelText="Hủy"
+                          okButtonProps={{ danger: true }}
+                        >
+                          <Button type="text" danger icon={<DeleteOutlined />} size="small" />
+                        </Popconfirm>
+                      </Space>
+                    ),
+                  },
+                ]}
+                rowSelection={{
+                  selectedRowKeys: selectedGroupKeys,
+                  onChange: setSelectedGroupKeys,
+                }}
+                size="small"
+                pagination={{ pageSize: 6 }}
+                scroll={{ y: 320 }}
+              />
+            ) : (
+              <AntTable
+                dataSource={batchOverrides}
+                rowKey="id"
+                columns={[
+                  {
+                    title: 'Họ tên',
+                    dataIndex: 'full_name',
+                    render: (v, r) => (
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: 13 }}>{v}</div>
+                        <div style={{ fontSize: 11, color: '#9ca3af' }}>{r.employee_code}</div>
+                      </div>
+                    ),
+                  },
+                  {
+                    title: 'Bộ phận',
+                    dataIndex: 'department',
+                  },
+                  {
+                    title: 'Ngày',
+                    dataIndex: 'work_date',
+                    render: (d) => dayjs(d).format('DD/MM/YYYY'),
+                    sorter: (a, b) => a.work_date.localeCompare(b.work_date),
+                  },
+                  {
+                    title: 'Ca tùy chỉnh',
+                    dataIndex: 'shift_code',
+                    render: (c) => <Tag color="green" style={{ fontWeight: 600 }}>{c}</Tag>,
+                    filters: Array.from(new Set(batchOverrides.map(o => o.shift_code))).map(c => ({ text: c, value: c })),
+                    onFilter: (value, record) => record.shift_code === value,
+                  },
+                  {
+                    title: 'Hành động',
+                    key: 'action',
+                    width: 80,
+                    align: 'center',
+                    render: (_, r) => (
+                      <Popconfirm
+                        title="Xóa ca tùy chỉnh này?"
+                        description="Lịch làm sẽ quay về mặc định."
+                        onConfirm={() => handleBatchDelete([r.id])}
+                        okText="Xóa"
+                        cancelText="Hủy"
+                        okButtonProps={{ danger: true }}
+                      >
+                        <Button type="text" danger icon={<DeleteOutlined />} size="small" />
+                      </Popconfirm>
+                    ),
+                  },
+                ]}
+                rowSelection={{
+                  selectedRowKeys: batchHistorySelectedKeys,
+                  onChange: setBatchHistorySelectedKeys,
+                }}
+                size="small"
+                pagination={{ pageSize: 8 }}
+                scroll={{ y: 320 }}
+              />
+            )}
           </div>
         )}
       </Modal>
@@ -733,9 +958,15 @@ export default function Schedules() {
       <Modal
         title="Sửa mã ca tùy chỉnh"
         open={batchEditShiftModal}
-        onCancel={() => setBatchEditShiftModal(false)}
+        onCancel={() => {
+          setBatchEditShiftModal(false);
+          setBatchEditTargetGroups([]);
+        }}
         footer={[
-          <Button key="cancel" onClick={() => setBatchEditShiftModal(false)}>Hủy</Button>,
+          <Button key="cancel" onClick={() => {
+            setBatchEditShiftModal(false);
+            setBatchEditTargetGroups([]);
+          }}>Hủy</Button>,
           <Button
             key="submit"
             type="primary"
@@ -744,7 +975,9 @@ export default function Schedules() {
             style={{ background: '#f59e0b', borderColor: '#f59e0b' }}
             onClick={handleBatchUpdate}
           >
-            Lưu thay đổi cho {batchHistorySelectedKeys.length} dòng
+            Lưu thay đổi cho {batchEditTargetGroups.length > 0
+              ? `${batchEditTargetGroups.length} đợt (${batchEditTargetGroups.reduce((acc, g) => acc + g.record_count, 0)} ca)`
+              : `${batchHistorySelectedKeys.length} ca`}
           </Button>,
         ]}
         centered
