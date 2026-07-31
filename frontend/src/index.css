@@ -1903,6 +1903,130 @@ body.dark {
 .ma-tooltip-amount.meal { color: #4ade80; }
 .ma-tooltip-amount.night { color: #c084fc; }
 
+/* ══════════════════════════════════════════════════════════════
+   DARK MODE — Meal Allowance Page (comprehensive overrides)
+   ══════════════════════════════════════════════════════════════ */
+
+/* Sum bar bottom accent */
+.dark .ma-sum-bar { background: rgba(255,255,255,0.04); }
+
+/* Scrollbar dark */
+.dark .ma-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); }
+.dark .ma-scroll::-webkit-scrollbar-track { background: rgba(255,255,255,0.02); }
+
+/* Header sticky columns dark borders */
+.dark .ma-th--s0,
+.dark .ma-th--s1 { border-color: rgba(255,255,255,0.06) !important; }
+
+/* Header summary columns — dark-friendly tinted backgrounds */
+.dark .ma-th--blue {
+  color: #60a5fa !important;
+  background: rgba(39,110,241,0.10) !important;
+}
+.dark .ma-th--purple {
+  color: #a78bfa !important;
+  background: rgba(124,58,237,0.10) !important;
+}
+.dark .ma-th--green {
+  color: #34d399 !important;
+  background: rgba(16,185,129,0.10) !important;
+}
+
+/* Holiday header dark */
+.dark .ma-th--hol {
+  background: rgba(124,58,237,0.08) !important;
+  color: #c084fc !important;
+}
+
+/* Sticky cell dark borders */
+.dark .ma-td--s0 { border-color: rgba(255,255,255,0.04) !important; }
+.dark .ma-td--s1 { border-color: rgba(255,255,255,0.06) !important; }
+
+/* Employee code dark */
+.dark .ma-td--code { color: #60a5fa; }
+
+/* Summary data cells — dark-friendly tinted backgrounds */
+.dark .ma-td--blue {
+  color: #60a5fa;
+  background: rgba(39,110,241,0.08);
+}
+.dark .ma-td--purple {
+  color: #a78bfa;
+  background: rgba(124,58,237,0.08);
+}
+.dark .ma-td--green {
+  color: #34d399;
+  background: rgba(16,185,129,0.08);
+}
+.dark .ma-td--total { color: #4ade80; }
+
+/* Cell value chips — dark-friendly backgrounds & text */
+.dark .ma-cell-val {
+  color: #34d399;
+  background: rgba(16,185,129,0.15);
+}
+.dark .ma-cell-val--night {
+  color: #c084fc;
+  background: rgba(124,58,237,0.15);
+}
+.dark .ma-cell-val--double {
+  color: #22d3ee;
+  background: rgba(8,145,178,0.15);
+}
+
+/* Manual override chips dark */
+.dark .ma-cell-val--manual-night {
+  color: #c084fc;
+  background: rgba(124,58,237,0.12);
+  border-color: rgba(124,58,237,0.45);
+  box-shadow: 0 0 6px rgba(124,58,237,0.15);
+}
+.dark .ma-cell-val--manual-meal {
+  color: #34d399;
+  background: rgba(16,185,129,0.12);
+  border-color: rgba(16,185,129,0.45);
+  box-shadow: 0 0 6px rgba(16,185,129,0.15);
+}
+
+/* OT eligible chips dark */
+.dark .ma-cell-val--ot-eligible {
+  color: #fbbf24;
+  background: rgba(245,158,11,0.12);
+  border-color: rgba(251,191,36,0.40);
+  box-shadow: 0 0 4px rgba(245,158,11,0.15);
+}
+.dark .ma-cell-val--ot-eligible:hover {
+  background: rgba(245,158,11,0.22);
+  border-color: rgba(251,191,36,0.60);
+}
+
+/* Night eligible chips dark */
+.dark .ma-cell-val--night-eligible {
+  color: #60a5fa;
+  background: rgba(59,130,246,0.12);
+  border-color: rgba(96,165,250,0.40);
+  box-shadow: 0 0 4px rgba(59,130,246,0.15);
+}
+.dark .ma-cell-val--night-eligible:hover {
+  background: rgba(59,130,246,0.22);
+  border-color: rgba(96,165,250,0.60);
+}
+
+/* Empty cell indicators dark */
+.dark .ma-cell-dot { color: rgba(255,255,255,0.12); }
+.dark .ma-cell-zero { color: rgba(255,255,255,0.18); }
+
+/* Forgot scan cell dark background */
+.dark td[style*="forgot_scan"],
+.dark .ma-td--cell[style] {
+  /* handled via inline styles - this ensures border is visible */
+}
+
+/* Footer hint dark */
+.dark .ma-footer-hint { color: #64748b; }
+
+/* ══════════════════════════════════════════════════════════════ */
+
 /* Empty & footer */
 .ma-empty { padding: 48px; text-align: center; color: #9ca3af; }
 .ma-footer-hint { font-size: 11px; color: #9ca3af; font-style: italic; text-align: right; margin-top: 4px; }

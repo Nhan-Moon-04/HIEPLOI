@@ -19,6 +19,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import dayjs from 'dayjs';
 import api from '../api/client';
 import useAuthStore from '../stores/authStore';
+import useThemeStore from '../stores/themeStore';
 
 const { RangePicker } = DatePicker;
 
@@ -48,6 +49,7 @@ export default function MealAllowance() {
   const navigate = useNavigate();
   const { user } = useAuthStore();
   const isWorker = user?.role === 'worker';
+  const isDark = useThemeStore((s) => s.mode) === 'dark';
   const queryClient = useQueryClient();
   const initialFilters = useMemo(() => getInitialFilters(), []);
   const [monthKey, setMonthKey] = useState(initialFilters.monthKey);
@@ -466,11 +468,20 @@ export default function MealAllowance() {
 
       let bgColor, textColor, borderColor, statusLabel;
       if (isApproved) {
-        bgColor = '#dcfce7'; textColor = '#15803d'; borderColor = '#86efac'; statusLabel = '✓ Đã duyệt';
+        bgColor = isDark ? 'rgba(34,197,94,0.15)' : '#dcfce7';
+        textColor = isDark ? '#4ade80' : '#15803d';
+        borderColor = isDark ? 'rgba(34,197,94,0.35)' : '#86efac';
+        statusLabel = '✓ Đã duyệt';
       } else if (isRejected) {
-        bgColor = '#fef2f2'; textColor = '#991b1b'; borderColor = '#fca5a5'; statusLabel = '✗ Đã từ chối';
+        bgColor = isDark ? 'rgba(239,68,68,0.12)' : '#fef2f2';
+        textColor = isDark ? '#f87171' : '#991b1b';
+        borderColor = isDark ? 'rgba(239,68,68,0.30)' : '#fca5a5';
+        statusLabel = '✗ Đã từ chối';
       } else {
-        bgColor = '#fef3c7'; textColor = '#92400e'; borderColor = '#fcd34d'; statusLabel = '⏳ Chờ duyệt';
+        bgColor = isDark ? 'rgba(245,158,11,0.12)' : '#fef3c7';
+        textColor = isDark ? '#fbbf24' : '#92400e';
+        borderColor = isDark ? 'rgba(251,191,36,0.35)' : '#fcd34d';
+        statusLabel = '⏳ Chờ duyệt';
       }
 
       return (
@@ -522,7 +533,9 @@ export default function MealAllowance() {
             display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
             minWidth: 32, padding: '1px 5px', borderRadius: 5,
             fontSize: 11, fontWeight: 700,
-            background: '#fee2e2', color: '#b91c1c', border: '1px solid #fca5a5',
+            background: isDark ? 'rgba(239,68,68,0.15)' : '#fee2e2',
+            color: isDark ? '#f87171' : '#b91c1c',
+            border: `1px solid ${isDark ? 'rgba(239,68,68,0.30)' : '#fca5a5'}`,
           }}>
             {shortAmount || '!'}
           </div>
@@ -713,7 +726,7 @@ export default function MealAllowance() {
                 size="small"
                 icon={<ThunderboltOutlined />}
                 onClick={() => { setQuickTab('eligible'); setSelectedRowKeys(eligibleList.map((r) => r.key)); setQuickModal(true); }}
-                style={{ background: eligibleList.length > 0 ? '#fff7ed' : '#f9fafb', color: eligibleList.length > 0 ? '#d97706' : '#9ca3af', border: `1px solid ${eligibleList.length > 0 ? '#fbbf24' : '#e5e7eb'}`, borderRadius: 6, fontSize: 12 }}
+                style={{ background: eligibleList.length > 0 ? (isDark ? 'rgba(245,158,11,0.12)' : '#fff7ed') : (isDark ? 'rgba(255,255,255,0.04)' : '#f9fafb'), color: eligibleList.length > 0 ? (isDark ? '#fbbf24' : '#d97706') : '#9ca3af', border: `1px solid ${eligibleList.length > 0 ? (isDark ? 'rgba(251,191,36,0.35)' : '#fbbf24') : (isDark ? 'rgba(255,255,255,0.08)' : '#e5e7eb')}`, borderRadius: 6, fontSize: 12 }}
               >
                 Thêm nhanh OT{eligibleList.length > 0 ? ` (${eligibleList.length})` : ''}
               </Button>
@@ -722,7 +735,7 @@ export default function MealAllowance() {
                   size="small"
                   icon={<CheckCircleOutlined />}
                   onClick={() => { setQuickTab('added'); setSelectedDeleteKeys([]); setQuickModal(true); }}
-                  style={{ background: '#f0fdf4', color: '#16a34a', border: '1px solid #86efac', borderRadius: 6, fontSize: 12 }}
+                  style={{ background: isDark ? 'rgba(34,197,94,0.10)' : '#f0fdf4', color: isDark ? '#4ade80' : '#16a34a', border: `1px solid ${isDark ? 'rgba(34,197,94,0.30)' : '#86efac'}`, borderRadius: 6, fontSize: 12 }}
                 >
                   Đã thêm ({addedOtList.length})
                 </Button>
@@ -733,9 +746,15 @@ export default function MealAllowance() {
                   icon={<ExclamationCircleOutlined />}
                   onClick={() => { setApprovalTab('pending'); setSelectedApprovalKeys(pendingIrregulars.map(r => r.key)); setApprovalModal(true); }}
                   style={{
-                    background: pendingIrregulars.length > 0 ? '#fef3c7' : '#f0fdf4',
-                    color: pendingIrregulars.length > 0 ? '#92400e' : '#16a34a',
-                    border: `1px solid ${pendingIrregulars.length > 0 ? '#fcd34d' : '#86efac'}`,
+                    background: pendingIrregulars.length > 0
+                      ? (isDark ? 'rgba(245,158,11,0.12)' : '#fef3c7')
+                      : (isDark ? 'rgba(34,197,94,0.10)' : '#f0fdf4'),
+                    color: pendingIrregulars.length > 0
+                      ? (isDark ? '#fbbf24' : '#92400e')
+                      : (isDark ? '#4ade80' : '#16a34a'),
+                    border: `1px solid ${pendingIrregulars.length > 0
+                      ? (isDark ? 'rgba(251,191,36,0.35)' : '#fcd34d')
+                      : (isDark ? 'rgba(34,197,94,0.30)' : '#86efac')}`,
                     borderRadius: 6, fontSize: 12,
                     animation: pendingIrregulars.length > 0 ? 'ma-irregular-pulse 2s ease-in-out infinite' : 'none',
                   }}
@@ -892,7 +911,9 @@ export default function MealAllowance() {
                             cursor: (!isWorker && cell && cell.has_manual_xot && (cell.night_allowance > 0 || (cell.manual_meal_count || 0) > 0))
                               ? 'pointer'
                               : 'default',
-                            backgroundColor: cell?.status === 'forgot_scan' ? 'rgba(254,226,226,0.55)' : undefined,
+                            backgroundColor: cell?.status === 'forgot_scan'
+                              ? (isDark ? 'rgba(239,68,68,0.08)' : 'rgba(254,226,226,0.55)')
+                              : undefined,
                           }}
                         >
                           {cell ? renderMealCell(cell, row.employee_id) : <span className="ma-cell-dot">·</span>}
@@ -1107,7 +1128,7 @@ export default function MealAllowance() {
                 {nightOtTarget.cell.check_out ? dayjs(nightOtTarget.cell.check_out).format('HH:mm') : '--'}
               </b>
             </div>
-            <div style={{ background: '#eff6ff', borderRadius: 8, padding: '10px 14px', fontSize: 13 }}>
+            <div style={{ background: isDark ? 'rgba(59,130,246,0.10)' : '#eff6ff', borderRadius: 8, padding: '10px 14px', fontSize: 13 }}>
               <div style={{ marginBottom: 6 }}>
                 <b>Chỉ thêm bữa ăn</b> — cộng 1 suất ăn tăng ca (35k), không thêm PC đêm.
               </div>
@@ -1186,14 +1207,14 @@ export default function MealAllowance() {
       >
         {editManualTarget && (
           <div style={{ padding: '12px 0' }}>
-            <div style={{ background: '#f9fafb', borderRadius: 8, padding: '12px', marginBottom: 16, border: '1px solid #f3f4f6' }}>
+            <div style={{ background: isDark ? 'rgba(255,255,255,0.04)' : '#f9fafb', borderRadius: 8, padding: '12px', marginBottom: 16, border: `1px solid ${isDark ? 'rgba(255,255,255,0.06)' : '#f3f4f6'}` }}>
               <div style={{ marginBottom: 6 }}>
-                <span style={{ color: '#6b7280', fontSize: 13 }}>Nhân viên: </span>
-                <strong style={{ color: '#1f2937' }}>[{editManualTarget.row.employee_code}] {editManualTarget.row.full_name}</strong>
+                <span style={{ color: isDark ? '#94a3b8' : '#6b7280', fontSize: 13 }}>Nhân viên: </span>
+                <strong style={{ color: isDark ? '#e2e8f0' : '#1f2937' }}>[{editManualTarget.row.employee_code}] {editManualTarget.row.full_name}</strong>
               </div>
               <div style={{ marginBottom: 6 }}>
-                <span style={{ color: '#6b7280', fontSize: 13 }}>Ngày làm việc: </span>
-                <strong style={{ color: '#1f2937' }}>{dayjs(editManualTarget.cell.work_date).format('DD/MM/YYYY')} ({editManualTarget.cell.dow})</strong>
+                <span style={{ color: isDark ? '#94a3b8' : '#6b7280', fontSize: 13 }}>Ngày làm việc: </span>
+                <strong style={{ color: isDark ? '#e2e8f0' : '#1f2937' }}>{dayjs(editManualTarget.cell.work_date).format('DD/MM/YYYY')} ({editManualTarget.cell.dow})</strong>
               </div>
               <div>
                 <span style={{ color: '#6b7280', fontSize: 13 }}>Trạng thái hiện tại: </span>
