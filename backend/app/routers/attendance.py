@@ -727,6 +727,7 @@ async def get_attendance(
                 ev["meal_allowance"] = nu_res.meal_allowance
                 ev["meal_count"] = nu_res.meal_count
                 ev["night_allowance"] = nu_res.night_allowance
+                ev["is_irregular"] = nu_res.is_irregular
                 if nu_res.warning_note:
                     ev["notes"] = f"{ev['notes']} | {nu_res.warning_note}" if ev["notes"] else nu_res.warning_note
                 

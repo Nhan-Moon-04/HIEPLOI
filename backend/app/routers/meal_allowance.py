@@ -1,5 +1,5 @@
 from typing import List, Optional
-from datetime import date
+from datetime import date, timedelta, datetime, time
 from collections import defaultdict, Counter
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -54,6 +54,7 @@ async def get_meal_allowance(
     db: AsyncSession = Depends(get_db),
     current_user: AppUser = Depends(get_current_user),
 ):
+    from datetime import timedelta, datetime, time
     if end_date < start_date:
         raise HTTPException(400, "end_date phai lon hon hoac bang start_date")
 
@@ -398,7 +399,6 @@ async def get_meal_allowance(
                         emp_meal_count += int(xot.meal_count)
                         # Nếu ot_end_time >= 23h thì cộng phụ cấp ca đêm
                         if xot.ot_end_time:
-                            from datetime import time as dt_time
                             ot_end = xot.ot_end_time
                             if hasattr(ot_end, 'hour') and ot_end.hour >= 23:
                                 total_emp_meal += night_allowance

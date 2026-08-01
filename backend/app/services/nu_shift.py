@@ -402,6 +402,18 @@ def _build_result(mode, week_mode, shift_code, has_midday_check, warning_note, c
             meal_count = (1 if meal_has_morning else 0) + (1 if meal_has_late else 0)
             meal_allowance = 35000.0 * meal_count
 
+            # Kiểm tra giờ bất thường / làm không đủ ca cho NU (worked_hours < 5.0h hoặc thiếu check-out)
+            if check_in and check_out:
+                worked_hours = _hours_between(check_in, check_out)
+                if worked_hours < XNU_MIN_HOURS_THRESHOLD:
+                    is_irregular = True
+                    meal_allowance = 0.0
+                    meal_count = 0
+            elif check_in and not check_out:
+                is_irregular = True
+                meal_allowance = 0.0
+                meal_count = 0
+
         # Phụ cấp ca đêm chỉ cho ca tối
         if mode in (NU_NIGHT_MODE, XNU_MODE_3):
             night_allowance = night_allowance_rate if night_allowance_rate > 0 else NU_NIGHT_PCCD
