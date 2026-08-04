@@ -7,7 +7,7 @@ from sqlalchemy import select, update
 from app.database import get_db
 from app.models.user import AppUser, UserRole
 from app.models.session import UserSession
-from app.utils.security import decode_token
+from app.utils.security import decode_token, get_client_ip
 
 security = HTTPBearer()
 
@@ -47,11 +47,16 @@ async def get_current_user(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Phiên đăng nhập đã hết hạn hoặc bị thu hồi",
             )
-        # Cập nhật last_active_at (không await để không block response)
+        # Cập nhật last_active_at và ip_address nếu có
+        current_ip = get_client_ip(request)
+        update_vals = {"last_active_at": datetime.now(timezone.utc).replace(tzinfo=None)}
+        if current_ip and current_ip != "unknown":
+            update_vals["ip_address"] = current_ip
+
         await db.execute(
             update(UserSession)
             .where(UserSession.id == session_id)
-            .values(last_active_at=datetime.now(timezone.utc).replace(tzinfo=None))
+            .values(**update_vals)
         )
         await db.commit()
 

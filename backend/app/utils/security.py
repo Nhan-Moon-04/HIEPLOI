@@ -49,19 +49,23 @@ def decode_token(token: str) -> Optional[dict]:
 
 
 def get_client_ip(request: Request) -> str:
-    """Lấy IP public thực tế của client từ proxy headers hoặc fallback socket"""
+    """Lấy IP public thực tế của client từ header frontend, proxy headers hoặc fallback socket"""
+    x_client_public_ip = request.headers.get("x-client-public-ip")
+    if x_client_public_ip and x_client_public_ip.strip() and x_client_public_ip.strip() != "unknown":
+        return x_client_public_ip.strip()
+
     x_forwarded_for = request.headers.get("x-forwarded-for")
     if x_forwarded_for:
         # Lấy IP đầu tiên trong chuỗi (IP của client thực sự)
         parts = [ip.strip() for ip in x_forwarded_for.split(",")]
-        if parts:
+        if parts and parts[0]:
             return parts[0]
             
-    x_real_ip = request.headers.get("x-real-ip")
-    if x_real_ip:
-        return x_real_ip
+    x_real_ip = request.headers.get("x-real-ip") or request.headers.get("cf-connecting-ip")
+    if x_real_ip and x_real_ip.strip():
+        return x_real_ip.strip()
         
-    if request.client:
+    if request.client and request.client.host:
         return request.client.host
     return "unknown"
 

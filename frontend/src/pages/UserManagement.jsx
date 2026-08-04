@@ -326,12 +326,15 @@ export default function UserManagement() {
       render: (v) => <span style={{ fontWeight: 600, fontSize: 12 }}>@{v}</span>,
     }] : []),
     {
-      title: 'Thiết bị',
+      title: 'Thiết bị & IP Public',
       dataIndex: 'device_name',
       render: (v, r) => (
         <div>
           <div style={{ fontWeight: 600, fontSize: 12 }}>{v || 'Unknown'}</div>
-          <div style={{ fontSize: 10, color: '#9ca3af' }}>{r.ip_address}</div>
+          <div style={{ fontSize: 10, color: '#4b5563', display: 'flex', alignItems: 'center', gap: 3, marginTop: 2 }}>
+            <GlobalOutlined style={{ color: '#276EF1' }} />
+            <span>{r.ip_address || '—'}</span>
+          </div>
         </div>
       ),
     },
