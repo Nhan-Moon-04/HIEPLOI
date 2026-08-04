@@ -683,6 +683,40 @@ export default function PayrollTable() {
     return `${y}-${m}-${d}`;
   };
 
+  const parseTimeToMinutes = (value) => {
+    if (!value) return null;
+    const text = String(value).trim();
+    const match = text.match(/^(\d{1,2}):(\d{2})/);
+    if (!match) return null;
+    return Number(match[1]) * 60 + Number(match[2]);
+  };
+
+  const getDisplayedActualOtHours = (row) => {
+    const code = String(row?.shift_code || '').trim().toUpperCase();
+    const rawOtHours = Number(row?.ot_hours || 0);
+    const isNuCode = ['NU', 'NUT1', 'NUT2', 'NU1', 'NU2', 'NU3', 'NUN', 'XNU'].includes(code) || code.startsWith('NU');
+    if (!isNuCode) {
+      return rawOtHours;
+    }
+
+    const checkInMinutes = parseTimeToMinutes(row?.check_in);
+    const checkOutMinutes = parseTimeToMinutes(row?.check_out);
+    if (checkInMinutes == null || checkOutMinutes == null) {
+      return rawOtHours;
+    }
+
+    const workedMinutes = checkOutMinutes >= checkInMinutes
+      ? (checkOutMinutes - checkInMinutes)
+      : (checkOutMinutes + 24 * 60 - checkInMinutes);
+    const workedHours = workedMinutes / 60;
+    const overtimeHours = Math.max(workedHours - 8, 0);
+    const roundedOvertime = Math.round(overtimeHours * 2) / 2;
+
+    const isNightNu = checkOutMinutes < checkInMinutes || checkInMinutes >= 17 * 60;
+    const baseline = isNightNu ? 4 : 3;
+    return Math.min(baseline, roundedOvertime);
+  };
+
   const openOtApprovalModal = async () => {
     setOtModalOpen(true);
     setLoadingActualOt(true);
@@ -705,6 +739,7 @@ export default function PayrollTable() {
         const empId = empCodeToIdMap[String(row.employee_code).trim()];
         const dbDate = parseDateStr(row.work_date);
         const key = `${row.employee_code}_${dbDate}`;
+        const displayedOtHours = getDisplayedActualOtHours(row);
         
         const saved = configMap[`${empId}_${dbDate}`];
         if (saved && Number(saved.ot_hours) > 0) {
@@ -717,7 +752,7 @@ export default function PayrollTable() {
         } else {
           initialMap[key] = {
             approved: false,
-            ot_hours: Number(row.ot_hours),
+            ot_hours: displayedOtHours,
             meal_count: 0,
             ot_end_time: null,
           };
@@ -896,7 +931,7 @@ export default function PayrollTable() {
       dataIndex: 'ot_hours',
       width: 90,
       align: 'center',
-      render: (v) => <span style={{ fontWeight: 600, color: '#4b5563' }}>{v}</span>,
+      render: (_, r) => <span style={{ fontWeight: 600, color: '#4b5563' }}>{getDisplayedActualOtHours(r)}</span>,
     },
     {
       title: 'Duyệt',
@@ -906,11 +941,12 @@ export default function PayrollTable() {
       render: (_, r) => {
         const dbDate = parseDateStr(r.work_date);
         const key = `${r.employee_code}_${dbDate}`;
-        const state = approvedOtMap[key] || { approved: false, ot_hours: r.ot_hours };
+        const displayedOtHours = getDisplayedActualOtHours(r);
+        const state = approvedOtMap[key] || { approved: false, ot_hours: displayedOtHours };
         return (
           <Checkbox 
             checked={state.approved} 
-            onChange={(e) => handleToggleApprove(key, e.target.checked, r.ot_hours)}
+            onChange={(e) => handleToggleApprove(key, e.target.checked, displayedOtHours)}
           />
         );
       }
@@ -923,7 +959,8 @@ export default function PayrollTable() {
       render: (_, r) => {
         const dbDate = parseDateStr(r.work_date);
         const key = `${r.employee_code}_${dbDate}`;
-        const state = approvedOtMap[key] || { approved: false, ot_hours: r.ot_hours };
+        const displayedOtHours = getDisplayedActualOtHours(r);
+        const state = approvedOtMap[key] || { approved: false, ot_hours: displayedOtHours };
         return (
           <InputNumber
             size="small"

@@ -15,7 +15,7 @@ services:
       - pgdata:/var/lib/postgresql/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U hieploi -d hieploi_hr"]
+      test: [ "CMD-SHELL", "pg_isready -U hieploi -d hieploi_hr" ]
       interval: 10s
       timeout: 5s
       retries: 5

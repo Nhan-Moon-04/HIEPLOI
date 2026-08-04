@@ -39,6 +39,7 @@ export default function Attendance() {
   const [selectedRow, setSelectedRow] = useState(null);
   const [forgotModalVisible, setForgotModalVisible] = useState(false);
   const [fixedModalVisible, setFixedModalVisible] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   const { data: att, isLoading, refetch } = useQuery({
     queryKey: ['attendance', monthKey, dept],
@@ -60,6 +61,28 @@ export default function Attendance() {
   const totalPresent = s.rows?.reduce((sum, r) => sum + (r.summary?.total_present || 0), 0) || 0;
   const totalAbsent  = s.rows?.reduce((sum, r) => sum + (r.summary?.total_absent || 0), 0) || 0;
   const totalEarly   = s.rows?.reduce((sum, r) => sum + (r.summary?.total_early_leave || 0), 0) || 0;
+
+  const handleExportExcel = async () => {
+    setExporting(true);
+    try {
+      const response = await api.get('/attendance/export', {
+        params: { month_key: monthKey, department: dept || undefined },
+        responseType: 'blob',
+      });
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `cham_cong_${monthKey}${dept ? `_${dept}` : ''}.xlsx`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Export attendance failed', error);
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const renderCell = (cell) => {
     if (cell.status === 'no_data') return <span className="ma-cell-dot">·</span>;
@@ -147,6 +170,8 @@ export default function Attendance() {
             <Button
               icon={<DownloadOutlined />}
               type="primary"
+              loading={exporting}
+              onClick={handleExportExcel}
               style={{ background: '#276EF1', borderColor: '#276EF1', borderRadius: 7 }}
             >
               Xuất Excel

@@ -18,7 +18,7 @@ NU_DYNAMIC_SHIFT_CODES = {"NU", "NUT1", "NUT2", "NU1", "NU2", "NU3", "NUN", "XNU
 
 NU_STANDARD_HOURS = 8.0
 NU_MAX_OT_HOURS = 4.0  # Ca NU tối đa 12h = 8h standard + 4h OT
-NU_MORNING_DEFAULT_OT_HOURS = 3.5
+NU_MORNING_DEFAULT_OT_HOURS = 3.0
 NU_NIGHT_DEFAULT_OT_HOURS = 4.0
 
 NU_MORNING_MEAL_ALLOWANCE = 35000.0
@@ -149,14 +149,15 @@ def _detect_daily_mode(today_events, next_day_events, is_sunday=False, shift_cod
     if has_midday:
         return NU_MORNING_MODE, has_midday
 
+    has_morning = any(_is_morning_check(item) for item in today_events)
     has_evening = any(_is_evening_check(item) for item in today_events)
+
+    if has_morning and has_evening:
+        return NU_MORNING_MODE, has_midday
+
     has_next_day_morning = any(_is_morning_check(item) for item in next_day_events)
     if has_evening and has_next_day_morning:
         return NU_NIGHT_MODE, has_midday
-
-    has_morning = any(_is_morning_check(item) for item in today_events)
-    if not is_sunday and has_morning and has_evening:
-        return NU_MORNING_MODE, has_midday
 
     return None, has_midday
 
@@ -167,6 +168,9 @@ def _fallback_mode(today_events, is_sunday=False):
 
     first_event = today_events[0]
     if first_event.hour <= 10:
+        has_evening = any(item.hour >= 14 for item in today_events)
+        if has_evening:
+            return NU_MORNING_MODE
         return NU_NIGHT_MODE if is_sunday else NU_MORNING_MODE
     if first_event.hour >= 15:
         return NU_NIGHT_MODE
@@ -205,7 +209,8 @@ def _pick_check_times(mode, today_events, next_day_events, is_sunday=False):
         # Exception: if there's a midday scan (10-13h), this is genuine Sunday morning work.
         if is_sunday and check_in and check_in.hour < 12:
             has_midday_activity = any(10 <= item.hour <= 13 for item in today_events)
-            if not has_midday_activity:
+            has_evening_activity = any(item.hour >= 14 for item in today_events)
+            if not has_midday_activity and not has_evening_activity:
                 return None, None
 
         check_out = (
@@ -300,11 +305,7 @@ def _compute_dynamic_nu_overtime_hours(check_in, check_out, mode):
         return None
 
     raw_overtime_hours = max(worked_hours - NU_STANDARD_HOURS, 0.0)
-    
-    # Morning shift has 0.5h break deducted from OT
-    if mode == NU_MORNING_MODE and raw_overtime_hours >= 0.5:
-        raw_overtime_hours -= 0.5
-        
+
     return normalize_nu_overtime_hours(raw_overtime_hours)
 
 
@@ -477,15 +478,27 @@ def build_nu_shift_day_results(
         day_mode_candidates = {}
         week_to_modes = defaultdict(list)
         week_to_days = defaultdict(list)
+        night_shift_dates = set()
 
         for work_date in sorted_dates:
-            today_events = events_by_employee_date.get((employee_id, work_date), [])
+            raw_today_events = events_by_employee_date.get((employee_id, work_date), [])
             next_day_events = events_by_employee_date.get((employee_id, work_date + timedelta(days=1)), [])
+
+            # Night shift checkouts (before 8h) on day N+1 must not be mistaken for day N+1 check-ins.
+            if work_date - timedelta(days=1) in night_shift_dates:
+                today_events = [e for e in raw_today_events if e.hour >= 8]
+            else:
+                today_events = raw_today_events
 
             is_sun = (work_date.weekday() == 6)
             shift_code = str(nu_shift_code_map.get((employee_id, work_date), NU_SHIFT_CODE)).upper()
             detected_mode, has_midday = _detect_daily_mode(today_events, next_day_events, is_sunday=is_sun, shift_code=shift_code)
             fallback_mode = _fallback_mode(today_events, is_sunday=is_sun)
+
+            effective_check_mode = detected_mode or fallback_mode
+            if effective_check_mode in (NU_NIGHT_MODE, XNU_MODE_3):
+                night_shift_dates.add(work_date)
+
             day_mode_candidates[work_date] = {
                 "detected_mode": detected_mode,
                 "fallback_mode": fallback_mode,
@@ -498,35 +511,8 @@ def build_nu_shift_day_results(
             week_start = work_date - timedelta(days=(work_date.weekday() + 1) % 7)
             week_key = week_start
             week_to_days[week_key].append(work_date)
-
-        # Night shift checkouts (before 8h) on day N+1 must not be mistaken for day N+1 check-ins.
-        night_shift_dates = {
-            d for d, data in day_mode_candidates.items()
-            if (data["detected_mode"] in (NU_NIGHT_MODE, XNU_MODE_3) or data["fallback_mode"] in (NU_NIGHT_MODE, XNU_MODE_3))
-        }
-        for work_date in sorted_dates:
-            if work_date - timedelta(days=1) not in night_shift_dates:
-                continue
-            data = day_mode_candidates[work_date]
-            filtered = [e for e in data["today_events"] if e.hour >= 8]
-            if len(filtered) == len(data["today_events"]):
-                continue
-            is_sun = (work_date.weekday() == 6)
-            sc = str(nu_shift_code_map.get((employee_id, work_date), NU_SHIFT_CODE)).upper()
-            new_detected, new_midday = _detect_daily_mode(filtered, data["next_day_events"], is_sunday=is_sun, shift_code=sc)
-            day_mode_candidates[work_date] = {
-                "detected_mode": new_detected,
-                "fallback_mode": _fallback_mode(filtered, is_sunday=is_sun),
-                "has_midday": new_midday,
-                "today_events": filtered,
-                "next_day_events": data["next_day_events"],
-            }
-
-        # Build week_to_modes from corrected candidates
-        for work_date in sorted_dates:
-            week_start = work_date - timedelta(days=(work_date.weekday() + 1) % 7)
-            if day_mode_candidates[work_date]["detected_mode"]:
-                week_to_modes[week_start].append(day_mode_candidates[work_date]["detected_mode"])
+            if detected_mode:
+                week_to_modes[week_key].append(detected_mode)
 
         week_mode_map = {}
         previous_week_mode = None
@@ -601,10 +587,6 @@ def calculate_nu_shift_details(shift_code: str, actual_hours: float, is_night: b
     
     raw_ot = max(actual_hours - NU_STANDARD_HOURS, 0.0)
     
-    # Morning shift has 0.5h break deducted from OT
-    if not is_night and raw_ot >= 0.5:
-        raw_ot -= 0.5
-        
     normalized_ot = normalize_nu_overtime_hours(raw_ot)
     extra_ot = NU_EXTRA_OT_BY_CODE.get(code, 0.0)
     total_ot = normalized_ot + extra_ot

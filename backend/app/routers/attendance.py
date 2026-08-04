@@ -389,6 +389,8 @@ async def get_attendance(
     current_user: AppUser = Depends(get_current_user),
 ):
     """Cham cong thang - ket hop lich lam + du lieu cham cong + ma ca"""
+
+
     if current_user.role == UserRole.WORKER:
         employee_id = current_user.employee_id
 
@@ -980,6 +982,156 @@ async def get_attendance(
         days_in_month=range_days,
         is_locked=is_locked,
         rows=rows,
+    )
+
+
+@router.get("/export")
+async def export_attendance(
+    month_key: str = Query(..., description="YYYY-MM"),
+    department: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: AppUser = Depends(require_roles(UserRole.ADMIN, UserRole.ACCOUNTANT)),
+):
+    """Xuất bảng chấm công theo tháng ra file Excel."""
+    import openpyxl
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+
+    res = await get_attendance(
+        month_key=month_key,
+        employee_id=None,
+        department=department,
+        db=db,
+        current_user=current_user,
+    )
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Cham cong"
+
+    thin = Side(border_style="thin", color="000000")
+    border = Border(top=thin, left=thin, right=thin, bottom=thin)
+    header_font = Font(name="Times New Roman", bold=True, size=11)
+    title_font = Font(name="Times New Roman", bold=True, size=14)
+    normal_font = Font(name="Times New Roman", size=11)
+    center = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    left = Alignment(horizontal="left", vertical="center", wrap_text=True)
+    gray_fill = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
+    day_fill = PatternFill(start_color="EAF2FF", end_color="EAF2FF", fill_type="solid")
+    summary_fill = PatternFill(start_color="E2F0D9", end_color="E2F0D9", fill_type="solid")
+
+    days = list(range(1, res.days_in_month + 1))
+    first_row_days = {cell.day: cell for cell in (res.rows[0].days if res.rows else [])}
+
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=6 + len(days))
+    ws.cell(1, 1, "CÔNG TY TNHH HIỆP LỢI").font = Font(name="Times New Roman", bold=True, size=12)
+    ws.cell(1, 1).alignment = left
+
+    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=6 + len(days))
+    ws.cell(2, 1, "MST: 3701609885").font = normal_font
+    ws.cell(2, 1).alignment = left
+
+    ws.merge_cells(start_row=3, start_column=1, end_row=3, end_column=6 + len(days))
+    title = f"BẢNG CHẤM CÔNG - THÁNG {month_key}"
+    if department:
+        title += f" - BỘ PHẬN {department}"
+    ws.cell(3, 1, title).font = title_font
+    ws.cell(3, 1).alignment = center
+
+    ws.merge_cells(start_row=4, start_column=1, end_row=4, end_column=6 + len(days))
+    ws.cell(4, 1, "Xuất từ màn hình chấm công hệ thống").font = Font(name="Times New Roman", italic=True, size=10, color="595959")
+    ws.cell(4, 1).alignment = left
+
+    header_row = 5
+    headers = ["STT", "Mã NV", "Họ tên", "Bộ phận", "Mã ca", "Tổng có", "Tổng vắng", "Tổng quên", "Tổng về sớm"]
+    for col_idx, label in enumerate(headers, 1):
+        cell = ws.cell(header_row, col_idx, label)
+        cell.font = header_font
+        cell.alignment = center
+        cell.border = border
+        cell.fill = gray_fill if col_idx <= 5 else summary_fill
+
+    day_start_col = len(headers) + 1
+    for offset, day in enumerate(days):
+        col_idx = day_start_col + offset
+        day_cell = first_row_days.get(day)
+        label = f"{day}\n{day_cell.dow if day_cell else ''}"
+        cell = ws.cell(header_row, col_idx, label)
+        cell.font = header_font
+        cell.alignment = center
+        cell.border = border
+        cell.fill = day_fill
+
+    data_row = header_row + 1
+    for idx, row in enumerate(res.rows, 1):
+        ws.cell(data_row, 1, idx)
+        ws.cell(data_row, 2, row.employee_code)
+        ws.cell(data_row, 3, row.full_name)
+        ws.cell(data_row, 4, row.department or "")
+        ws.cell(data_row, 5, row.default_shift_code or "")
+        ws.cell(data_row, 6, row.summary.get("total_present", 0) or 0)
+        ws.cell(data_row, 7, row.summary.get("total_absent", 0) or 0)
+        ws.cell(data_row, 8, row.summary.get("total_forgot_scan", 0) or 0)
+        ws.cell(data_row, 9, row.summary.get("total_early_leave", 0) or 0)
+
+        day_map = {cell.day: cell for cell in row.days}
+        for offset, day in enumerate(days):
+            cell = day_map.get(day)
+            value = ""
+            if cell:
+                if cell.check_in:
+                    value = cell.check_in[:5]
+                elif cell.status == "holiday":
+                    value = "L"
+                elif cell.status == "off":
+                    value = "N"
+                elif cell.status == "absent":
+                    value = "V"
+                elif cell.status == "forgot_scan":
+                    value = "Q"
+                elif cell.status == "early_leave":
+                    value = "VS"
+                elif cell.status == "short":
+                    value = "TG"
+            excel_cell = ws.cell(data_row, day_start_col + offset, value)
+            excel_cell.alignment = center
+            excel_cell.border = border
+            if cell and cell.is_holiday:
+                excel_cell.fill = day_fill
+
+        for col_idx in range(1, day_start_col + len(days)):
+            ws.cell(data_row, col_idx).font = normal_font
+            ws.cell(data_row, col_idx).border = border
+            ws.cell(data_row, col_idx).alignment = center if col_idx != 3 else left
+
+        data_row += 1
+
+    widths = {
+        "A": 6,
+        "B": 12,
+        "C": 26,
+        "D": 18,
+        "E": 10,
+        "F": 10,
+        "G": 10,
+        "H": 10,
+        "I": 10,
+    }
+    for col, width in widths.items():
+        ws.column_dimensions[col].width = width
+    for idx in range(day_start_col, day_start_col + len(days)):
+        ws.column_dimensions[openpyxl.utils.get_column_letter(idx)].width = 8
+
+    ws.freeze_panes = "A6"
+
+    stream = BytesIO()
+    wb.save(stream)
+    stream.seek(0)
+
+    filename = f"cham_cong_{month_key}{'_' + department.replace(' ', '_') if department else ''}.xlsx"
+    return StreamingResponse(
+        stream,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
 
 
