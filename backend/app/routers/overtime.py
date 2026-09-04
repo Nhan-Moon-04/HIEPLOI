@@ -326,14 +326,11 @@ async def _compute_actual_ot(month_key: str, db: AsyncSession, current_user) -> 
                     shift_hours_str = "Chủ nhật"
 
                 # Giờ vào hiệu lực:
-                #   TX: làm tròn 30p gần nhất, cap tối thiểu 06:00
+                #   TX: làm tròn 30p gần nhất
                 #   Non-TX vào sớm hoặc trễ ≤15p: lấy đúng giờ bắt đầu ca
                 #   Non-TX vào trễ >15p: làm tròn lên 30p
                 if is_tx:
                     effective_in = _round_nearest_30min(check_in_dt)
-                    six_am = datetime.combine(dt, time(6, 0))
-                    if effective_in < six_am:
-                        effective_in = six_am
                 elif s_start_dt and check_in_dt <= s_start_dt + timedelta(minutes=15):
                     effective_in = s_start_dt
                 else:
@@ -410,15 +407,12 @@ async def _compute_actual_ot(month_key: str, db: AsyncSession, current_user) -> 
                             raw_min -= 30   # 30p nghỉ ngơi trước OT
                         ot_checkout = _round_ot_minutes(raw_min)
 
-                    # TX1/TX2: OT vào sớm — làm tròn 30p gần nhất, cap 6:00
+                    # TX1/TX2: OT vào sớm — làm tròn 30p gần nhất
                     ot_early = 0.0
                     if is_tx and shift.start_time:
                         shift_start_t_local = shift.start_time if isinstance(shift.start_time, time) else parse_time(shift.start_time)
                         shift_start_dt = datetime.combine(dt, shift_start_t_local)
                         effective_in = _round_nearest_30min(check_in_dt)
-                        six_am = datetime.combine(dt, time(6, 0))
-                        if effective_in < six_am:
-                            effective_in = six_am
                         if effective_in < shift_start_dt:
                             early_hours = (shift_start_dt - effective_in).total_seconds() / 3600.0
                             ot_early = _to_half(early_hours)

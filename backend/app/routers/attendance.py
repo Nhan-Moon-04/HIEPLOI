@@ -303,7 +303,7 @@ def evaluate_attendance(shift, check_in_dt, check_out_dt, work_date, is_sunday, 
                 if check_out_dt > expected_end:
                     ot = (check_out_dt - expected_end).total_seconds() / 3600.0
             
-            # OT vào sớm: làm tròn 30p gần nhất, cap tối thiểu 6:00
+            # OT vào sớm: làm tròn 30p gần nhất
             if original_check_in and shift_start_time:
                 expected_start = datetime.combine(work_date, shift_start_time)
                 # Làm tròn nearest 30min: 0-15→:00, 16-45→:30, 46-59→next:00
@@ -315,10 +315,6 @@ def evaluate_attendance(shift, check_in_dt, check_out_dt, work_date, is_sunday, 
                 else:
                     r_min, r_h = 0, (original_check_in.hour + 1) % 24
                 effective_in = original_check_in.replace(hour=r_h, minute=r_min, second=0, microsecond=0)
-                # Cap tối thiểu 6:00
-                six_am = datetime.combine(work_date, time(6, 0))
-                if effective_in < six_am:
-                    effective_in = six_am
                 if effective_in < expected_start:
                     early_hours = (expected_start - effective_in).total_seconds() / 3600.0
                     ot_early = math.floor(early_hours * 2 + 0.5) / 2  # round to 0.5h
@@ -891,14 +887,29 @@ async def get_attendance(
                     except Exception:
                         pass
 
+            if nu_res and ev["status"] != "absent":
+                if nu_res.mode == XNU_MODE_1:
+                    s_start_val, s_end_val = "06:00", "14:00"
+                elif nu_res.mode == XNU_MODE_2:
+                    s_start_val, s_end_val = "14:00", "22:00"
+                elif nu_res.mode == XNU_MODE_3:
+                    s_start_val, s_end_val = "22:00", "06:00"
+                elif nu_res.mode == "night":
+                    s_start_val, s_end_val = "18:00", "06:00"
+                else:
+                    s_start_val, s_end_val = "06:00", "18:00"
+            else:
+                s_start_val = str(shift.start_time)[:5] if shift and shift.start_time and ev["status"] != "absent" else None
+                s_end_val = str(shift.end_time)[:5] if shift and shift.end_time and ev["status"] != "absent" else None
+
             cell = AttendanceCell(
                 work_date=str(dt),
                 day=d,
                 dow=dow,
                 shift_code="N" if ev["status"] == "absent" else cell_shift_code,
                 shift_name="Nghi khong phep" if ev["status"] == "absent" else cell_shift_name,
-                shift_start=str(shift.start_time)[:5] if shift and shift.start_time and ev["status"] != "absent" else None,
-                shift_end=str(shift.end_time)[:5] if shift and shift.end_time and ev["status"] != "absent" else None,
+                shift_start=s_start_val,
+                shift_end=s_end_val,
                 standard_hours=float(nu_res.standard_hours) if nu_res else (float(shift.standard_hours) if shift and shift.standard_hours else None),
                 check_in=ci_str,
                 check_out=co_str,
@@ -992,9 +1003,10 @@ async def export_attendance(
     db: AsyncSession = Depends(get_db),
     current_user: AppUser = Depends(require_roles(UserRole.ADMIN, UserRole.ACCOUNTANT)),
 ):
-    """Xuất bảng chấm công theo tháng ra file Excel."""
+    """Xuất bảng chấm công chi tiết đa sheet theo tháng ra file Excel."""
     import openpyxl
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+    from openpyxl.utils import get_column_letter
 
     res = await get_attendance(
         month_key=month_key,
@@ -1004,130 +1016,590 @@ async def export_attendance(
         current_user=current_user,
     )
 
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "Cham cong"
+    # Load approval data & shift templates for audit sheet
+    from app.models.meal_approval import MealApproval
 
-    thin = Side(border_style="thin", color="000000")
-    border = Border(top=thin, left=thin, right=thin, bottom=thin)
-    header_font = Font(name="Times New Roman", bold=True, size=11)
-    title_font = Font(name="Times New Roman", bold=True, size=14)
-    normal_font = Font(name="Times New Roman", size=11)
-    center = Alignment(horizontal="center", vertical="center", wrap_text=True)
-    left = Alignment(horizontal="left", vertical="center", wrap_text=True)
-    gray_fill = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
-    day_fill = PatternFill(start_color="EAF2FF", end_color="EAF2FF", fill_type="solid")
-    summary_fill = PatternFill(start_color="E2F0D9", end_color="E2F0D9", fill_type="solid")
+    # Parse month dates
+    year, month = map(int, month_key.split("-"))
+    days_in_month = calendar.monthrange(year, month)[1]
+    range_start = date(year, month, 1)
+    range_end = date(year, month, days_in_month)
+
+    # Fetch OT & Meal Approvals for Sheet 3
+    approval_q = select(MealApproval, Employee).join(Employee, Employee.id == MealApproval.employee_id).where(
+        and_(
+            MealApproval.work_date >= range_start,
+            MealApproval.work_date <= range_end,
+        )
+    )
+    if department:
+        approval_q = approval_q.where(Employee.department == department)
+    approval_res = await db.execute(approval_q.order_by(MealApproval.work_date, Employee.employee_code))
+    approvals = approval_res.all()
+
+    # Fetch WorkSchedules overrides for Sheet 3
+    sched_q = select(WorkSchedule, Employee, ShiftTemplate).join(Employee, Employee.id == WorkSchedule.employee_id).outerjoin(ShiftTemplate, ShiftTemplate.id == WorkSchedule.shift_id).where(
+        and_(
+            WorkSchedule.work_date >= range_start,
+            WorkSchedule.work_date <= range_end,
+        )
+    )
+    if department:
+        sched_q = sched_q.where(Employee.department == department)
+    sched_res = await db.execute(sched_q.order_by(WorkSchedule.work_date, Employee.employee_code))
+    schedules = sched_res.all()
+
+    wb = openpyxl.Workbook()
+    
+    # ---------------------------------------------------------
+    # STYLES DEFINITION
+    # ---------------------------------------------------------
+    thin = Side(border_style="thin", color="D9D9D9")
+    dark_thin = Side(border_style="thin", color="000000")
+    
+    border_all = Border(top=thin, left=thin, right=thin, bottom=thin)
+    border_box = Border(top=dark_thin, left=dark_thin, right=dark_thin, bottom=dark_thin)
+    
+    font_title = Font(name="Times New Roman", bold=True, size=14, color="1F4E79")
+    font_company = Font(name="Times New Roman", bold=True, size=11, color="333333")
+    font_subtitle = Font(name="Times New Roman", italic=True, size=10, color="595959")
+    font_section = Font(name="Times New Roman", bold=True, size=11, color="1F4E79")
+    
+    font_header = Font(name="Times New Roman", bold=True, size=11, color="FFFFFF")
+    font_data = Font(name="Times New Roman", size=10, color="000000")
+    
+    fill_header_main = PatternFill(start_color="1F4E79", end_color="1F4E79", fill_type="solid")
+    fill_header_sub = PatternFill(start_color="2F5597", end_color="2F5597", fill_type="solid")
+    fill_summary = PatternFill(start_color="E2F0D9", end_color="E2F0D9", fill_type="solid")
+    fill_sun = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")
+    fill_holiday = PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid")
+    fill_zebra = PatternFill(start_color="F9FAFB", end_color="F9FAFB", fill_type="solid")
+    
+    align_center = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    align_left = Alignment(horizontal="left", vertical="center", wrap_text=True)
+    align_right = Alignment(horizontal="right", vertical="center")
 
     days = list(range(1, res.days_in_month + 1))
     first_row_days = {cell.day: cell for cell in (res.rows[0].days if res.rows else [])}
 
-    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=6 + len(days))
-    ws.cell(1, 1, "CÔNG TY TNHH HIỆP LỢI").font = Font(name="Times New Roman", bold=True, size=12)
-    ws.cell(1, 1).alignment = left
+    # =========================================================
+    # SHEET 1: BẢNG TỔNG HỢP (SUMMARY SHEET)
+    # =========================================================
+    ws1 = wb.active
+    ws1.title = "Bảng tổng hợp"
+    ws1.views.sheetView[0].showGridLines = True
 
-    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=6 + len(days))
-    ws.cell(2, 1, "MST: 3701609885").font = normal_font
-    ws.cell(2, 1).alignment = left
+    # Title block
+    ws1.merge_cells(start_row=1, start_column=1, end_row=1, end_column=13 + len(days))
+    ws1.cell(1, 1, "CÔNG TY TNHH HIỆP LỢI").font = font_company
+    ws1.cell(1, 1).alignment = align_left
 
-    ws.merge_cells(start_row=3, start_column=1, end_row=3, end_column=6 + len(days))
-    title = f"BẢNG CHẤM CÔNG - THÁNG {month_key}"
+    ws1.merge_cells(start_row=2, start_column=1, end_row=2, end_column=13 + len(days))
+    ws1.cell(2, 1, "MST: 3701609885").font = font_subtitle
+    ws1.cell(2, 1).alignment = align_left
+
+    ws1.merge_cells(start_row=3, start_column=1, end_row=3, end_column=13 + len(days))
+    t1 = f"BẢNG TỔNG HỢP CHẤM CÔNG & TĂNG CA - THÁNG {month_key}"
     if department:
-        title += f" - BỘ PHẬN {department}"
-    ws.cell(3, 1, title).font = title_font
-    ws.cell(3, 1).alignment = center
+        t1 += f" ({department.upper()})"
+    ws1.cell(3, 1, t1).font = font_title
+    ws1.cell(3, 1).alignment = align_center
 
-    ws.merge_cells(start_row=4, start_column=1, end_row=4, end_column=6 + len(days))
-    ws.cell(4, 1, "Xuất từ màn hình chấm công hệ thống").font = Font(name="Times New Roman", italic=True, size=10, color="595959")
-    ws.cell(4, 1).alignment = left
+    ws1.merge_cells(start_row=4, start_column=1, end_row=4, end_column=13 + len(days))
+    ws1.cell(4, 1, "Xuất từ màn hình chấm công hệ thống").font = font_subtitle
+    ws1.cell(4, 1).alignment = align_left
 
-    header_row = 5
-    headers = ["STT", "Mã NV", "Họ tên", "Bộ phận", "Mã ca", "Tổng có", "Tổng vắng", "Tổng quên", "Tổng về sớm"]
-    for col_idx, label in enumerate(headers, 1):
-        cell = ws.cell(header_row, col_idx, label)
-        cell.font = header_font
-        cell.alignment = center
-        cell.border = border
-        cell.fill = gray_fill if col_idx <= 5 else summary_fill
+    # Headers
+    h1_labels = [
+        "STT", "Mã NV", "Họ và tên", "Bộ phận", "Mã ca",
+        "Công chuẩn", "Tổng giờ chuẩn", "Tổng OT (h)",
+        "Tiền ăn (đ)", "Số bữa", "Vắng mặt", "Quên scan", "Về sớm"
+    ]
+    h1_row = 6
+    ws1.row_dimensions[h1_row].height = 28
 
-    day_start_col = len(headers) + 1
+    for col_idx, label in enumerate(h1_labels, 1):
+        c = ws1.cell(h1_row, col_idx, label)
+        c.font = font_header
+        c.fill = fill_header_main
+        c.alignment = align_center
+        c.border = border_box
+
+    day_start_col = len(h1_labels) + 1
     for offset, day in enumerate(days):
         col_idx = day_start_col + offset
         day_cell = first_row_days.get(day)
-        label = f"{day}\n{day_cell.dow if day_cell else ''}"
-        cell = ws.cell(header_row, col_idx, label)
-        cell.font = header_font
-        cell.alignment = center
-        cell.border = border
-        cell.fill = day_fill
+        dow_str = day_cell.dow if day_cell else ""
+        label = f"{day}\n{dow_str}"
+        c = ws1.cell(h1_row, col_idx, label)
+        c.font = font_header
+        c.alignment = align_center
+        c.border = border_box
+        if dow_str == "CN":
+            c.fill = PatternFill(start_color="C55A11", end_color="C55A11", fill_type="solid")
+        else:
+            c.fill = fill_header_sub
 
-    data_row = header_row + 1
-    for idx, row in enumerate(res.rows, 1):
-        ws.cell(data_row, 1, idx)
-        ws.cell(data_row, 2, row.employee_code)
-        ws.cell(data_row, 3, row.full_name)
-        ws.cell(data_row, 4, row.department or "")
-        ws.cell(data_row, 5, row.default_shift_code or "")
-        ws.cell(data_row, 6, row.summary.get("total_present", 0) or 0)
-        ws.cell(data_row, 7, row.summary.get("total_absent", 0) or 0)
-        ws.cell(data_row, 8, row.summary.get("total_forgot_scan", 0) or 0)
-        ws.cell(data_row, 9, row.summary.get("total_early_leave", 0) or 0)
+    # Populate Sheet 1 Data
+    row_idx = h1_row + 1
+    for idx, r in enumerate(res.rows, 1):
+        ws1.row_dimensions[row_idx].height = 20
+        is_even = (idx % 2 == 0)
+        base_fill = fill_zebra if is_even else None
 
-        day_map = {cell.day: cell for cell in row.days}
+        ws1.cell(row_idx, 1, idx).alignment = align_center
+        ws1.cell(row_idx, 2, r.employee_code).alignment = align_center
+        ws1.cell(row_idx, 3, r.full_name).alignment = align_left
+        ws1.cell(row_idx, 4, r.department or "").alignment = align_left
+        ws1.cell(row_idx, 5, r.default_shift_code or "").alignment = align_center
+        
+        # Summary counts
+        ws1.cell(row_idx, 6, r.summary.get("total_present", 0) or 0).number_format = "#,##0.0"
+        ws1.cell(row_idx, 7, r.summary.get("total_hours", 0.0) or 0.0).number_format = "#,##0.0"
+        ws1.cell(row_idx, 8, r.summary.get("total_ot", 0.0) or 0.0).number_format = "#,##0.0"
+        ws1.cell(row_idx, 9, r.summary.get("total_meal_allowance", 0.0) or 0.0).number_format = "#,##0"
+        ws1.cell(row_idx, 10, r.summary.get("total_meal_count", 0) or 0).number_format = "#,##0"
+        ws1.cell(row_idx, 11, r.summary.get("total_absent", 0) or 0).number_format = "#,##0"
+        ws1.cell(row_idx, 12, r.summary.get("total_forgot_scan", 0) or 0).number_format = "#,##0"
+        ws1.cell(row_idx, 13, r.summary.get("total_early_leave", 0) or 0).number_format = "#,##0"
+
+        # Apply basic formatting to columns 1..13
+        for c_i in range(1, day_start_col):
+            cell = ws1.cell(row_idx, c_i)
+            cell.font = font_data
+            cell.border = border_all
+            if base_fill and c_i <= 5:
+                cell.fill = base_fill
+            elif c_i in (6, 7, 8, 9, 10):
+                cell.fill = fill_summary
+
+        # Day columns in Sheet 1
+        day_map = {cell.day: cell for cell in r.days}
         for offset, day in enumerate(days):
-            cell = day_map.get(day)
-            value = ""
-            if cell:
-                if cell.check_in:
-                    value = cell.check_in[:5]
-                elif cell.status == "holiday":
-                    value = "L"
-                elif cell.status == "off":
-                    value = "N"
-                elif cell.status == "absent":
-                    value = "V"
-                elif cell.status == "forgot_scan":
-                    value = "Q"
-                elif cell.status == "early_leave":
-                    value = "VS"
-                elif cell.status == "short":
-                    value = "TG"
-            excel_cell = ws.cell(data_row, day_start_col + offset, value)
-            excel_cell.alignment = center
-            excel_cell.border = border
-            if cell and cell.is_holiday:
-                excel_cell.fill = day_fill
+            col_idx = day_start_col + offset
+            cell_data = day_map.get(day)
+            
+            disp_val = ""
+            if cell_data:
+                # Clean time extraction instead of [:5] on ISO datetime string
+                if cell_data.check_in:
+                    ci_time = cell_data.check_in.split(" ")[-1][:5] if " " in cell_data.check_in else cell_data.check_in[:5]
+                    if ci_time and ci_time != "2026-":
+                        disp_val = ci_time
+                    else:
+                        disp_val = "✓"
+                elif cell_data.status == "holiday":
+                    disp_val = "L"
+                elif cell_data.status == "off":
+                    disp_val = "N"
+                elif cell_data.status == "absent":
+                    disp_val = "V"
+                elif cell_data.status == "forgot_scan":
+                    disp_val = "Q"
+                elif cell_data.status == "early_leave":
+                    disp_val = "VS"
+                elif cell_data.status == "short":
+                    disp_val = "TG"
 
-        for col_idx in range(1, day_start_col + len(days)):
-            ws.cell(data_row, col_idx).font = normal_font
-            ws.cell(data_row, col_idx).border = border
-            ws.cell(data_row, col_idx).alignment = center if col_idx != 3 else left
+            excel_cell = ws1.cell(row_idx, col_idx, disp_val)
+            excel_cell.font = font_data
+            excel_cell.alignment = align_center
+            excel_cell.border = border_all
 
-        data_row += 1
+            if cell_data:
+                if cell_data.is_holiday:
+                    excel_cell.fill = fill_holiday
+                elif cell_data.is_sunday:
+                    excel_cell.fill = fill_sun
 
-    widths = {
-        "A": 6,
-        "B": 12,
-        "C": 26,
-        "D": 18,
-        "E": 10,
-        "F": 10,
-        "G": 10,
-        "H": 10,
-        "I": 10,
+        row_idx += 1
+
+    # Freeze panes for Sheet 1
+    ws1.freeze_panes = "F7"
+
+    col_w1 = {
+        "A": 6, "B": 11, "C": 24, "D": 16, "E": 10,
+        "F": 12, "G": 14, "H": 12, "I": 14, "J": 9,
+        "K": 11, "L": 11, "M": 11
     }
-    for col, width in widths.items():
-        ws.column_dimensions[col].width = width
+    for c_letter, w in col_w1.items():
+        ws1.column_dimensions[c_letter].width = w
     for idx in range(day_start_col, day_start_col + len(days)):
-        ws.column_dimensions[openpyxl.utils.get_column_letter(idx)].width = 8
+        ws1.column_dimensions[get_column_letter(idx)].width = 7.5
 
-    ws.freeze_panes = "A6"
+    # =========================================================
+    # SHEET 2: CHI TIẾT CHẤM CÔNG (DAILY DETAIL SHEET)
+    # =========================================================
+    ws2 = wb.create_sheet(title="Chi tiết từng ngày")
+    ws2.views.sheetView[0].showGridLines = True
 
+    # Title block Sheet 2
+    ws2.merge_cells("A1:P1")
+    ws2.cell(1, 1, "CÔNG TY TNHH HIỆP LỢI").font = font_company
+    ws2.cell(1, 1).alignment = align_left
+
+    ws2.merge_cells("A2:P2")
+    ws2.cell(2, 1, f"BẢNG CHI TIẾT CHẤM CÔNG HÀNG NGÀY — THÁNG {month_key}").font = font_title
+    ws2.cell(2, 1).alignment = align_center
+
+    ws2.merge_cells("A3:P3")
+    ws2.cell(3, 1, "Giờ Vào/Ra thực tế, giờ Vào/Ra tính công làm tròn theo quy định ca, giờ chuẩn, giờ OT & tiền ăn").font = font_subtitle
+    ws2.cell(3, 1).alignment = align_left
+
+    h2_labels = [
+        "STT", "Ngày", "Thứ", "Mã NV", "Họ và tên", "Bộ phận", "Mã Ca",
+        "Ca làm việc (Quy định)", "Vào thực tế", "Ra thực tế",
+        "Vào tính công", "Ra tính công", "Giờ chuẩn (h)", "Giờ OT (h)",
+        "Tiền ăn (đ)", "Trạng thái & Ghi chú"
+    ]
+    h2_row = 5
+    ws2.row_dimensions[h2_row].height = 28
+
+    for col_idx, label in enumerate(h2_labels, 1):
+        c = ws2.cell(h2_row, col_idx, label)
+        c.font = font_header
+        c.fill = fill_header_main
+        c.alignment = align_center
+        c.border = border_box
+
+    # Populate Sheet 2 Data
+    d_row2 = h2_row + 1
+    seq2 = 1
+
+    for r in res.rows:
+        for cell_data in r.days:
+            ws2.row_dimensions[d_row2].height = 20
+            
+            # Extract clean times
+            ci_raw = cell_data.check_in or ""
+            co_raw = cell_data.check_out or ""
+            
+            ci_time = ci_raw.split(" ")[-1][:5] if " " in ci_raw else (ci_raw[:5] if ci_raw else "—")
+            co_time = co_raw.split(" ")[-1][:5] if " " in co_raw else (co_raw[:5] if co_raw else "—")
+            
+            if ci_time == "2026-": ci_time = "—"
+            if co_time == "2026-": co_time = "—"
+
+            # Dynamic shift description and start/end times for NU and XNU
+            shift_code_val = (cell_data.shift_code or "").strip().upper()
+            shift_name_val = cell_data.shift_name or ""
+            
+            s_start = cell_data.shift_start or ""
+            s_end = cell_data.shift_end or ""
+
+            if shift_code_val == "XNU":
+                if "ca 3" in shift_name_val.lower() or s_start == "22:00":
+                    shift_desc = "Ca XNU 3 (22:00 - 06:00)"
+                    s_start, s_end = "22:00", "06:00"
+                elif "ca 2" in shift_name_val.lower() or s_start == "14:00":
+                    shift_desc = "Ca XNU 2 (14:00 - 22:00)"
+                    s_start, s_end = "14:00", "22:00"
+                else:
+                    shift_desc = "Ca XNU 1 (06:00 - 14:00)"
+                    s_start, s_end = "06:00", "14:00"
+            elif shift_code_val in ("NU", "NUT1", "NUT2", "NU1", "NU2", "NU3", "NUN"):
+                if "toi" in shift_name_val.lower() or "tối" in shift_name_val.lower():
+                    shift_desc = f"{shift_code_val} - Ca NU Tối (18:00 - 06:00)"
+                    s_start, s_end = "18:00", "06:00"
+                else:
+                    shift_desc = f"{shift_code_val} - Ca NU Sáng (06:00 - 18:00)"
+                    s_start, s_end = "06:00", "18:00"
+            elif s_start and s_end:
+                shift_desc = f"Ca {shift_code_val} ({s_start} - {s_end})"
+            else:
+                shift_desc = shift_name_val or shift_code_val or "—"
+
+            ci_calc = ci_time
+            co_calc = co_time
+
+            if ci_time != "—" and ci_time:
+                # 1) NU Sáng & XNU Ca 1: Quy định 06:00. Nếu vào sớm (<= 06:00) -> tính 06:00
+                if shift_code_val in ("NU", "NUT1", "NUT2", "NU1", "NU2", "NU3", "NUN") and "18:00 - 06:00" not in shift_desc:
+                    if ci_time <= "06:00":
+                        ci_calc = "06:00"
+                    if co_time != "—" and co_time and co_time >= "18:00":
+                        co_calc = "18:00"
+                
+                # 2) NU Tối: Quy định 18:00. Nếu vào trong khoảng 17:00 - 18:00 -> tính 18:00
+                elif shift_code_val in ("NU", "NUT1", "NUT2", "NU1", "NU2", "NU3", "NUN") and "18:00 - 06:00" in shift_desc:
+                    if ci_time <= "18:00" and ci_time >= "16:00":
+                        ci_calc = "18:00"
+                    if co_time != "—" and co_time and co_time >= "05:30" and co_time <= "06:30":
+                        co_calc = "06:00"
+                
+                # 3) XNU Ca 1 (06:00 - 14:00)
+                elif shift_code_val == "XNU" and "06:00 - 14:00" in shift_desc:
+                    if ci_time <= "06:00":
+                        ci_calc = "06:00"
+                    if co_time != "—" and co_time and co_time >= "14:00":
+                        co_calc = "14:00"
+
+                # 4) XNU Ca 2 (14:00 - 22:00)
+                elif shift_code_val == "XNU" and "14:00 - 22:00" in shift_desc:
+                    if ci_time <= "14:00" and ci_time >= "12:00":
+                        ci_calc = "14:00"
+                    if co_time != "—" and co_time and co_time >= "22:00":
+                        co_calc = "22:00"
+
+                # 5) XNU Ca 3 (22:00 - 06:00)
+                elif shift_code_val == "XNU" and "22:00 - 06:00" in shift_desc:
+                    if ci_time <= "22:00" and ci_time >= "20:00":
+                        ci_calc = "22:00"
+                    if co_time != "—" and co_time and co_time >= "05:30" and co_time <= "06:30":
+                        co_calc = "06:00"
+
+                # 6) Các ca chuẩn khác
+                else:
+                    if s_start and ci_time < s_start:
+                        ci_calc = s_start
+                    if s_end and co_time != "—" and co_time and co_time >= s_end:
+                        if shift_code_val in ("X", "X40", "XVP", "VP80", "SEP", "TX1", "TX2"):
+                            co_calc = s_end
+
+            # Status description
+            status_text = cell_data.notes or ""
+            if not status_text:
+                st_map = {
+                    "full": "Đủ ca",
+                    "early_leave": "Về sớm",
+                    "short": "Thiếu giờ",
+                    "forgot_scan": "Quên scan",
+                    "absent": "Vắng mặt",
+                    "off": "Nghỉ tuần",
+                    "holiday": "Nghỉ lễ",
+                    "no_data": "Chưa làm việc",
+                }
+                status_text = st_map.get(cell_data.status, cell_data.status or "—")
+
+            ws2.cell(d_row2, 1, seq2).alignment = align_center
+            ws2.cell(d_row2, 2, cell_data.work_date).alignment = align_center
+            ws2.cell(d_row2, 3, cell_data.dow).alignment = align_center
+            ws2.cell(d_row2, 4, r.employee_code).alignment = align_center
+            ws2.cell(d_row2, 5, r.full_name).alignment = align_left
+            ws2.cell(d_row2, 6, r.department or "").alignment = align_left
+            ws2.cell(d_row2, 7, cell_data.shift_code or "—").alignment = align_center
+            ws2.cell(d_row2, 8, shift_desc).alignment = align_left
+            ws2.cell(d_row2, 9, ci_time).alignment = align_center
+            ws2.cell(d_row2, 10, co_time).alignment = align_center
+            ws2.cell(d_row2, 11, ci_calc).alignment = align_center
+            ws2.cell(d_row2, 12, co_calc).alignment = align_center
+            
+            c_std = ws2.cell(d_row2, 13, cell_data.actual_hours or 0.0)
+            c_std.number_format = "#,##0.0"
+            c_std.alignment = align_right
+            
+            c_ot = ws2.cell(d_row2, 14, cell_data.ot_hours or 0.0)
+            c_ot.number_format = "#,##0.0"
+            c_ot.alignment = align_right
+            
+            c_meal = ws2.cell(d_row2, 15, cell_data.meal_allowance or 0.0)
+            c_meal.number_format = "#,##0"
+            c_meal.alignment = align_right
+            
+            ws2.cell(d_row2, 16, status_text).alignment = align_left
+
+            # Formatting borders and fills
+            for c_i in range(1, 17):
+                c_node = ws2.cell(d_row2, c_i)
+                c_node.font = font_data
+                c_node.border = border_all
+                if cell_data.is_holiday:
+                    c_node.fill = fill_holiday
+                elif cell_data.is_sunday:
+                    c_node.fill = fill_sun
+
+            d_row2 += 1
+            seq2 += 1
+
+    # Freeze panes & column widths for Sheet 2
+    ws2.freeze_panes = "A6"
+    w2_dims = {
+        "A": 6, "B": 12, "C": 6, "D": 11, "E": 24, "F": 16,
+        "G": 10, "H": 22, "I": 13, "J": 13, "K": 14, "L": 14,
+        "M": 14, "N": 13, "O": 15, "P": 35
+    }
+    for col_l, w in w2_dims.items():
+        ws2.column_dimensions[col_l].width = w
+
+    # =========================================================
+    # SHEET 3: DUYỆT TĂNG CA & LỊCH (OT & SCHEDULE AUDIT SHEET)
+    # =========================================================
+    ws3 = wb.create_sheet(title="Duyệt tăng ca & Lịch")
+    ws3.views.sheetView[0].showGridLines = True
+
+    # Title block Sheet 3
+    ws3.merge_cells("A1:I1")
+    ws3.cell(1, 1, "CÔNG TY TNHH HIỆP LỢI").font = font_company
+    ws3.cell(1, 1).alignment = align_left
+
+    ws3.merge_cells("A2:I2")
+    ws3.cell(2, 1, f"DANH SÁCH DUYỆT TĂNG CA VÀ PHÂN CA ĐẶC BIỆT — THÁNG {month_key}").font = font_title
+    ws3.cell(2, 1).alignment = align_center
+
+    # Section 1: OT & Meal Approvals Table
+    ws3.cell(4, 1, "1. DANH SÁCH DUYỆT TĂNG CA THỰC TẾ & PHỤ CẤP ĂN (MEAL ALLOWANCE)").font = font_section
+
+    h3_labels1 = ["STT", "Ngày", "Mã NV", "Họ và tên", "Bộ phận", "Số giờ OT duyệt", "Số bữa ăn duyệt", "Trạng thái", "Ghi chú"]
+    # Fetch XOvertimeConfig for Sheet 3
+    xot_q = select(XOvertimeConfig, Employee).join(Employee, Employee.id == XOvertimeConfig.employee_id).where(
+        and_(
+            XOvertimeConfig.work_date >= range_start,
+            XOvertimeConfig.work_date <= range_end,
+        )
+    )
+    if department:
+        xot_q = xot_q.where(Employee.department == department)
+    xot_res = await db.execute(xot_q.order_by(XOvertimeConfig.work_date, Employee.employee_code))
+    xot_list = xot_res.all()
+
+    # Section 1: OT & Meal Approvals Table
+    ws3.cell(4, 1, "1. DANH SÁCH DUYỆT TĂNG CA THỦ CÔNG & PHỤ CẤP ĂN (XOVERTIME CONFIGS)").font = font_section
+
+    h3_labels1 = ["STT", "Ngày", "Mã NV", "Họ và tên", "Bộ phận", "Giờ ra OT", "Số giờ OT duyệt", "Số bữa ăn duyệt", "Ghi chú"]
+    h3_row1 = 5
+    ws3.row_dimensions[h3_row1].height = 26
+    for c_i, label in enumerate(h3_labels1, 1):
+        c = ws3.cell(h3_row1, c_i, label)
+        c.font = font_header
+        c.fill = fill_header_main
+        c.alignment = align_center
+        c.border = border_box
+
+    r3 = h3_row1 + 1
+    if xot_list:
+        for idx, (xot, emp) in enumerate(xot_list, 1):
+            ws3.row_dimensions[r3].height = 19
+            ws3.cell(r3, 1, idx).alignment = align_center
+            ws3.cell(r3, 2, str(xot.work_date)).alignment = align_center
+            ws3.cell(r3, 3, emp.employee_code).alignment = align_center
+            ws3.cell(r3, 4, emp.full_name).alignment = align_left
+            ws3.cell(r3, 5, emp.department or "").alignment = align_left
+            ws3.cell(r3, 6, str(xot.ot_end_time)[:5] if xot.ot_end_time else "—").alignment = align_center
+            
+            c_ot = ws3.cell(r3, 7, float(xot.ot_hours or 0.0))
+            c_ot.number_format = "#,##0.0"
+            c_ot.alignment = align_right
+            
+            c_mc = ws3.cell(r3, 8, xot.meal_count or 0)
+            c_mc.number_format = "#,##0"
+            c_mc.alignment = align_right
+            
+            ws3.cell(r3, 9, "Duyệt OT ca X/X40").alignment = align_left
+
+            for c_i in range(1, 10):
+                c_node = ws3.cell(r3, c_i)
+                c_node.font = font_data
+                c_node.border = border_all
+            r3 += 1
+    else:
+        ws3.merge_cells(start_row=r3, start_column=1, end_row=r3, end_column=9)
+        ws3.cell(r3, 1, "Không có dữ liệu duyệt tăng ca thủ công trong tháng này").alignment = align_center
+        ws3.cell(r3, 1).font = font_subtitle
+        r3 += 1
+
+    # Section 2: Meal Approval for Irregular hours
+    r3 += 2
+    ws3.cell(r3, 1, "2. DANH SÁCH DUYỆT BẤT THƯỜNG & TIỀN ĂN (MEAL APPROVALS)").font = font_section
+    r3 += 1
+
+    h3_labels2_meal = ["STT", "Ngày", "Mã NV", "Họ và tên", "Bộ phận", "Mã ca", "Vào - Ra thực tế", "Số bữa duyệt", "Trạng thái", "Lý do"]
+    ws3.row_dimensions[r3].height = 26
+    for c_i, label in enumerate(h3_labels2_meal, 1):
+        c = ws3.cell(r3, c_i, label)
+        c.font = font_header
+        c.fill = fill_header_sub
+        c.alignment = align_center
+        c.border = border_box
+
+    r3 += 1
+    if approvals:
+        for idx, (app, emp) in enumerate(approvals, 1):
+            ws3.row_dimensions[r3].height = 19
+            ci_t = app.check_in.strftime("%H:%M") if app.check_in else "—"
+            co_t = app.check_out.strftime("%H:%M") if app.check_out else "—"
+            in_out_str = f"{ci_t} - {co_t}"
+            st_str = "Đã duyệt" if app.status == "approved" else ("Từ chối" if app.status == "rejected" else "Chờ duyệt")
+
+            ws3.cell(r3, 1, idx).alignment = align_center
+            ws3.cell(r3, 2, str(app.work_date)).alignment = align_center
+            ws3.cell(r3, 3, emp.employee_code).alignment = align_center
+            ws3.cell(r3, 4, emp.full_name).alignment = align_left
+            ws3.cell(r3, 5, emp.department or "").alignment = align_left
+            ws3.cell(r3, 6, app.shift_code or "—").alignment = align_center
+            ws3.cell(r3, 7, in_out_str).alignment = align_center
+            
+            c_mc = ws3.cell(r3, 8, app.approved_meal_count or 0)
+            c_mc.number_format = "#,##0"
+            c_mc.alignment = align_right
+            
+            ws3.cell(r3, 9, st_str).alignment = align_center
+            ws3.cell(r3, 10, app.reason or "").alignment = align_left
+
+            for c_i in range(1, 11):
+                c_node = ws3.cell(r3, c_i)
+                c_node.font = font_data
+                c_node.border = border_all
+            r3 += 1
+    else:
+        ws3.merge_cells(start_row=r3, start_column=1, end_row=r3, end_column=10)
+        ws3.cell(r3, 1, "Không có dữ liệu duyệt tiền ăn bất thường trong tháng này").alignment = align_center
+        ws3.cell(r3, 1).font = font_subtitle
+        r3 += 1
+
+    # Section 3: Work Schedule Overrides Table
+    r3 += 2
+    ws3.cell(r3, 1, "3. DANH SÁCH LỊCH PHÂN CA ĐẶC BIỆT / ĐỔI CA (WORK SCHEDULES)").font = font_section
+    r3 += 1
+
+    h3_labels2 = ["STT", "Ngày", "Mã NV", "Họ và tên", "Bộ phận", "Ca phân công", "Giờ ca", "Ghi chú phân ca"]
+    ws3.row_dimensions[r3].height = 26
+    for c_i, label in enumerate(h3_labels2, 1):
+        c = ws3.cell(r3, c_i, label)
+        c.font = font_header
+        c.fill = fill_header_sub
+        c.alignment = align_center
+        c.border = border_box
+
+    r3 += 1
+    if schedules:
+        for idx, (ws_rec, emp, shift_rec) in enumerate(schedules, 1):
+            ws3.row_dimensions[r3].height = 19
+            s_code = shift_rec.code if shift_rec else "—"
+            s_time = f"{str(shift_rec.start_time)[:5]} - {str(shift_rec.end_time)[:5]}" if shift_rec and shift_rec.start_time else "—"
+
+            ws3.cell(r3, 1, idx).alignment = align_center
+            ws3.cell(r3, 2, str(ws_rec.work_date)).alignment = align_center
+            ws3.cell(r3, 3, emp.employee_code).alignment = align_center
+            ws3.cell(r3, 4, emp.full_name).alignment = align_left
+            ws3.cell(r3, 5, emp.department or "").alignment = align_left
+            ws3.cell(r3, 6, s_code).alignment = align_center
+            ws3.cell(r3, 7, s_time).alignment = align_center
+            ws3.cell(r3, 8, ws_rec.notes or "").alignment = align_left
+
+            for c_i in range(1, 9):
+                c_node = ws3.cell(r3, c_i)
+                c_node.font = font_data
+                c_node.border = border_all
+            r3 += 1
+    else:
+        ws3.merge_cells(start_row=r3, start_column=1, end_row=r3, end_column=8)
+        ws3.cell(r3, 1, "Không có lịch phân ca đặc biệt trong tháng này (sử dụng ca mặc định)").alignment = align_center
+        ws3.cell(r3, 1).font = font_subtitle
+
+    # Column widths Sheet 3
+    w3_dims = {
+        "A": 6, "B": 12, "C": 11, "D": 24, "E": 16,
+        "F": 16, "G": 16, "H": 16, "I": 30
+    }
+    for col_l, w in w3_dims.items():
+        ws3.column_dimensions[col_l].width = w
+
+    # Return workbook stream
     stream = BytesIO()
     wb.save(stream)
     stream.seek(0)
 
-    filename = f"cham_cong_{month_key}{'_' + department.replace(' ', '_') if department else ''}.xlsx"
+    filename = f"cham_cong_chi_tiet_{month_key}{'_' + department.replace(' ', '_') if department else ''}.xlsx"
     return StreamingResponse(
         stream,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
