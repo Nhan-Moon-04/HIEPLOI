@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState, useRef, useCallback, useEffect } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeftOutlined,
@@ -11,6 +11,8 @@ import {
   CheckCircleOutlined,
   CloseCircleOutlined,
   MinusCircleOutlined,
+  FullscreenOutlined,
+  FullscreenExitOutlined,
 } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
 import { Spin, Button, Alert } from 'antd';
@@ -94,6 +96,22 @@ export default function MealAllowanceDetail() {
   const navigate = useNavigate();
   const { user } = useAuthStore();
   const isWorker = user?.role === 'worker';
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const pageRef = useRef(null);
+
+  const toggleFullscreen = useCallback(() => {
+    if (!document.fullscreenElement) {
+      pageRef.current?.requestFullscreen?.();
+    } else {
+      document.exitFullscreen?.();
+    }
+  }, []);
+
+  useEffect(() => {
+    const handler = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', handler);
+    return () => document.removeEventListener('fullscreenchange', handler);
+  }, []);
 
   if (isWorker && Number(id) !== user?.employee_id) {
     return (
@@ -200,7 +218,7 @@ export default function MealAllowanceDetail() {
   const activeDays = displayDays.filter((d) => d.status !== 'no_data').length;
 
   return (
-    <div className="mad-page">
+    <div ref={pageRef} className={`mad-page ${isFullscreen ? 'mad-page--fullscreen' : ''}`}>
       {/* Title bar */}
       <div className="emp-titlebar">
         <div className="emp-titlebar-left">
@@ -228,6 +246,10 @@ export default function MealAllowanceDetail() {
             </div>
           </div>
         </div>
+        <button className="mad-fullscreen-btn" onClick={toggleFullscreen} title={isFullscreen ? 'Thoát toàn màn hình' : 'Phóng to toàn màn hình'}>
+          {isFullscreen ? <FullscreenExitOutlined /> : <FullscreenOutlined />}
+          <span>{isFullscreen ? 'Thu nhỏ' : 'Phóng to'}</span>
+        </button>
       </div>
 
       {/* KPI row */}

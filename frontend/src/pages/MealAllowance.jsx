@@ -448,11 +448,17 @@ export default function MealAllowance() {
 
   let days = [];
   if (dateRange[0] && dateRange[1]) {
-    const start = dateRange[0].date();
-    const end = dateRange[1].date();
-    days = Array.from({ length: end - start + 1 }, (_, i) => start + i);
+    const totalDays = dateRange[1].diff(dateRange[0], 'day') + 1;
+    days = Array.from({ length: totalDays }, (_, i) => {
+      const d = dateRange[0].add(i, 'day');
+      return { day: d.date(), dateStr: d.format('YYYY-MM-DD'), month: d.month() };
+    });
   } else {
-    days = Array.from({ length: s.days_in_month }, (_, i) => i + 1);
+    days = Array.from({ length: s.days_in_month }, (_, i) => ({
+      day: i + 1,
+      dateStr: dayjs(monthKey).date(i + 1).format('YYYY-MM-DD'),
+      month: dayjs(monthKey).month(),
+    }));
   }
 
   const renderMealCell = (cell, employeeId) => {
@@ -858,13 +864,13 @@ export default function MealAllowance() {
                   <th className="ma-th ma-th--s0">Mã</th>
                   <th className="ma-th ma-th--s1">Họ tên</th>
                   {days.map((d) => {
-                    const cell = s.rows?.[0]?.days?.find((c) => c.day === d);
+                    const cell = s.rows?.[0]?.days?.find((c) => c.work_date === d.dateStr);
                     const dow = cell?.dow || '';
                     const isSun = dow === 'CN';
                     const isHol = cell?.is_holiday;
                     return (
-                      <th key={d} className={`ma-th ma-th--day ${isSun ? 'ma-th--sun' : ''} ${isHol ? 'ma-th--hol' : ''}`}>
-                        <div className="ma-th-num">{d}</div>
+                      <th key={d.dateStr} className={`ma-th ma-th--day ${isSun ? 'ma-th--sun' : ''} ${isHol ? 'ma-th--hol' : ''}`}>
+                        <div className="ma-th-num">{d.day}</div>
                         <div className="ma-th-dow">{dow}</div>
                       </th>
                     );
@@ -893,10 +899,10 @@ export default function MealAllowance() {
                       </div>
                     </td>
                     {days.map((d) => {
-                      const cell = row.days?.find((c) => c.day === d);
+                      const cell = row.days?.find((c) => c.work_date === d.dateStr);
                       return (
                         <td
-                          key={d}
+                          key={d.dateStr}
                           className="ma-td ma-td--cell"
                           onDoubleClick={() => {
                             if (!isWorker && cell) {

@@ -493,10 +493,10 @@ async def get_attendance(
 
     employees.sort(key=get_emp_sort_key)
 
-    # Load schedule overrides for date range (include 1 day before range_start to properly link cross-boundary night shifts)
+    # Load schedule overrides for date range (include 7 days before range_start for NU week mode detection)
     emp_id_list = [e.id for e in employees]
     schedule_q = select(WorkSchedule).where(
-        and_(WorkSchedule.work_date >= range_start - timedelta(days=1), WorkSchedule.work_date <= range_end)
+        and_(WorkSchedule.work_date >= range_start - timedelta(days=7), WorkSchedule.work_date <= range_end)
     )
     if emp_id_list:
         schedule_q = schedule_q.where(WorkSchedule.employee_id.in_(emp_id_list))
@@ -519,9 +519,9 @@ async def get_attendance(
     for a in att_result.scalars().all():
         att_map[(a.employee_id, a.work_date)] = a
 
-    # Load raw logs for NU mode detection (include 1 day before range_start)
+    # Load raw logs for NU mode detection (include 7 days before range_start for week context)
     log_q = select(AttendanceLog).where(
-        and_(AttendanceLog.event_time >= datetime.combine(range_start - timedelta(days=1), time(0, 0)), 
+        and_(AttendanceLog.event_time >= datetime.combine(range_start - timedelta(days=7), time(0, 0)), 
              AttendanceLog.event_time <= datetime.combine(range_end + timedelta(days=1), time(12, 0)))
     )
     log_result = await db.execute(log_q)
@@ -543,15 +543,17 @@ async def get_attendance(
     for emp in employees:
         default_shift = shifts_by_code.get(emp.default_shift_code)
         
-        # Include range_start - 1 day to link cross-boundary night shifts
-        prev_dt = range_start - timedelta(days=1)
-        override_id = override_map.get((emp.id, prev_dt))
-        if override_id:
-            s = shifts_by_id.get(override_id)
-            if s and is_nu_dynamic_shift_code(s.code):
-                nu_shift_code_map[(emp.id, prev_dt)] = s.code
-        elif default_shift and is_nu_dynamic_shift_code(default_shift.code):
-            nu_shift_code_map[(emp.id, prev_dt)] = default_shift.code
+        # Include up to 7 days before range_start to ensure NU week grouping
+        # has enough context for accurate morning/night mode detection
+        for offset in range(1, 8):
+            prev_dt = range_start - timedelta(days=offset)
+            override_id = override_map.get((emp.id, prev_dt))
+            if override_id:
+                s = shifts_by_id.get(override_id)
+                if s and is_nu_dynamic_shift_code(s.code):
+                    nu_shift_code_map[(emp.id, prev_dt)] = s.code
+            elif default_shift and is_nu_dynamic_shift_code(default_shift.code):
+                nu_shift_code_map[(emp.id, prev_dt)] = default_shift.code
 
         for dt in range_dates:
             override_id = override_map.get((emp.id, dt))

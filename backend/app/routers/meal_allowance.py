@@ -153,7 +153,7 @@ async def get_meal_allowance(
 
     sched_q = select(WorkSchedule).where(
         and_(
-            WorkSchedule.work_date >= start_date - timedelta(days=1),
+            WorkSchedule.work_date >= start_date - timedelta(days=7),
             WorkSchedule.work_date <= end_date,
             WorkSchedule.employee_id.in_(emp_ids),
         )
@@ -210,7 +210,7 @@ async def get_meal_allowance(
     from app.models.attendance import AttendanceLog
     from datetime import datetime, time, timedelta
     log_q = select(AttendanceLog).where(
-        and_(AttendanceLog.event_time >= datetime.combine(start_date - timedelta(days=1), time(0, 0)), 
+        and_(AttendanceLog.event_time >= datetime.combine(start_date - timedelta(days=7), time(0, 0)), 
              AttendanceLog.event_time <= datetime.combine(end_date + timedelta(days=1), time(12, 0)))
     )
     log_result = await db.execute(log_q)
@@ -229,8 +229,8 @@ async def get_meal_allowance(
     nu_shift_code_map = {}
     for emp in employees:
         default_shift = shifts_by_code.get(emp.default_shift_code)
-        # Scan all days in range (including 1 day before start_date to properly link cross-boundary night shifts)
-        curr = start_date - timedelta(days=1)
+        # Scan all days in range (including 7 days before start_date for NU week mode context)
+        curr = start_date - timedelta(days=7)
         while curr <= end_date:
             sid = sched_map.get((emp.id, curr))
             if sid:
