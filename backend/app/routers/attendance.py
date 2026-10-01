@@ -701,10 +701,17 @@ async def get_attendance(
             elif default_shift and is_nu_dynamic_shift_code(default_shift.code):
                 shift = default_shift
             else:
-                # Ngày CN: chỉ áp dụng ca mặc định cho tài xế (TX1/TX2) vì họ làm cả tuần
-                # Các ca khác ngày CN mặc định là nghỉ
+                # Ngày CN: mặc định là nghỉ, chỉ áp dụng ca nếu có chấm công
+                # - TX1/TX2 (tài xế) luôn dùng ca mặc định vì họ làm cả tuần
+                # - Các ca khác: chỉ áp dụng ca khi có dữ liệu chấm công
                 if is_sunday:
-                    shift = default_shift if (default_shift and (default_shift.code or "").upper() in DRIVER_AUTO_OT_SHIFT_CODES) else None
+                    if default_shift and (default_shift.code or "").upper() in DRIVER_AUTO_OT_SHIFT_CODES:
+                        shift = default_shift
+                    elif check_in_dt or check_out_dt:
+                        # Có chấm công ngày CN → áp dụng ca mặc định để tính giờ + tiền ăn
+                        shift = default_shift
+                    else:
+                        shift = None
                 else:
                     shift = default_shift
 
