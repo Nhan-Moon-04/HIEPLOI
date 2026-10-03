@@ -96,8 +96,8 @@ def _detect_daily_mode(today_events, next_day_events, is_sunday=False, shift_cod
             return None, False
 
         # --- Phát hiện XNU làm 2 ca liên tục (16 tiếng: tăng ca) ---
-        # 1. Ca 1 + Ca 2 (06:00 - 22:00):
-        # Có quẹt sáng sớm (< 10h) VÀ quẹt tối muộn (>= 20h), khoảng cách >= 13h
+        # Chỉ có làm 2 ca liên tục là Ca 1 & Ca 2 (06:00 - 22:00 cùng ngày):
+        # Vào lúc ~6h (< 10h) và ra lúc ~22h (>= 20h), khoảng cách >= 13 tiếng
         if today_events:
             first_t = today_events[0]
             last_t = today_events[-1]
@@ -107,33 +107,6 @@ def _detect_daily_mode(today_events, next_day_events, is_sunday=False, shift_cod
             if has_early_morning and has_late_night and span_hours >= 13.0:
                 has_midday = any(10 <= item.hour <= 13 for item in today_events)
                 return XNU_MODE_1_2, has_midday
-
-        # 2. Ca 2 + Ca 3 (14:00 - 06:00 hôm sau):
-        # Vào ca chiều (13h-15h), KHÔNG có quẹt sáng sớm (< 10h), CÓ quẹt giao ca đêm (>= 20h), và quẹt ra sáng hôm sau (05h-08h)
-        if today_events and next_day_events:
-            has_morning_today = any(item.hour < 10 for item in today_events)
-            has_afternoon_in = any(13 <= item.hour <= 15 for item in today_events)
-            has_night_transition = any(item.hour >= 20 for item in today_events)
-            has_next_morning_out = any(5 <= item.hour <= 8 for item in next_day_events)
-            if not has_morning_today and has_afternoon_in and has_night_transition and has_next_morning_out:
-                aft_events = [item for item in today_events if 13 <= item.hour <= 15]
-                next_morn_events = [item for item in next_day_events if 5 <= item.hour <= 8]
-                span_hours = (next_morn_events[-1] - aft_events[0]).total_seconds() / 3600.0
-                if span_hours >= 13.0:
-                    return XNU_MODE_2_3, False
-
-        # 3. Ca 3 + Ca 1 (22:00 - 14:00 hôm sau):
-        # Vào ca 3 tối (21h-23h30), quẹt giao ca sáng (05h-07h), và quẹt ra chiều hôm sau (13h-15h30)
-        if today_events and next_day_events:
-            has_night_in = any(21 <= item.hour <= 23 for item in today_events)
-            has_morning_transition = any(5 <= item.hour <= 7 for item in next_day_events)
-            has_next_afternoon = any(13 <= item.hour <= 15 for item in next_day_events)
-            if has_night_in and has_morning_transition and has_next_afternoon:
-                night_events = [item for item in today_events if 21 <= item.hour <= 23]
-                next_aft_events = [item for item in next_day_events if 13 <= item.hour <= 15]
-                span_hours = (next_aft_events[-1] - night_events[0]).total_seconds() / 3600.0
-                if span_hours >= 13.0:
-                    return XNU_MODE_3_1, False
 
         # XNU: detect by A/B/C segments (A: 06-10, B: 10-18, C: 18-24; next-day A for shift 3)
         has_very_early_today = any(item.hour < 6 for item in today_events)
@@ -251,18 +224,6 @@ def _pick_check_times(mode, today_events, next_day_events, is_sunday=False):
         check_out = next((item for item in reversed(today_events) if item.hour >= 20), (today_events[-1] if today_events else None))
         return check_in, check_out
 
-    if mode == XNU_MODE_2_3:
-        # 14:00 - 06:00 hôm sau (Ca 2 + Ca 3 liên tục)
-        check_in = next((item for item in today_events if 12 <= item.hour < 17), (today_events[0] if today_events else None))
-        check_out = next((item for item in next_day_events if item.hour < 10), None)
-        return check_in, check_out
-
-    if mode == XNU_MODE_3_1:
-        # 22:00 - 14:00 hôm sau (Ca 3 + Ca 1 liên tục)
-        check_in = next((item for item in today_events if item.hour >= 20), (today_events[0] if today_events else None))
-        check_out = next((item for item in next_day_events if item.hour >= 13), (next_day_events[-1] if next_day_events else None))
-        return check_in, check_out
-
     if mode == NU_MORNING_MODE:
         morning_candidates = [item for item in today_events if item.hour < 14]
         evening_candidates = [item for item in today_events if item.hour >= 14]
@@ -308,8 +269,6 @@ def _build_shift_name(mode, shift_code):
         if mode == XNU_MODE_2: return "Ca XNU - Ca 2 (14:00-22:00)"
         if mode == XNU_MODE_3: return "Ca XNU - Ca 3 (22:00-06:00)"
         if mode == XNU_MODE_1_2: return "Ca XNU - 2 ca liên tục (06:00-22:00: Ca 1 & Ca 2)"
-        if mode == XNU_MODE_2_3: return "Ca XNU - 2 ca liên tục (14:00-06:00: Ca 2 & Ca 3)"
-        if mode == XNU_MODE_3_1: return "Ca XNU - 2 ca liên tục (22:00-14:00: Ca 3 & Ca 1)"
         return "Ca XNU (XNU)"
 
     mode_label = "sang" if mode == NU_MORNING_MODE else "toi"
@@ -405,7 +364,7 @@ def _build_result(mode, week_mode, shift_code, has_midday_check, warning_note, c
         )
         overtime_hours += NU_EXTRA_OT_BY_CODE.get(code, 0.0)
         
-        # --- Xử lý làm 2 ca liên tục cho XNU (Ca 1+2, Ca 2+3, Ca 3+1) ---
+        # --- Xử lý làm 2 ca liên tục cho XNU (Ca 1 & Ca 2: 06:00-22:00) ---
         if mode == XNU_MODE_1_2:
             is_double_shift = True
             double_shift_desc = "Ca 1 (06:00-14:00: 8h) & Ca 2 (14:00-22:00: 8h)"
@@ -414,26 +373,6 @@ def _build_result(mode, week_mode, shift_code, has_midday_check, warning_note, c
             meal_count = 1  # 1 bữa ca chính (khi chưa xác nhận tăng ca)
             meal_allowance = 35000.0
             night_allowance = 0.0
-            is_irregular = False
-
-        elif mode == XNU_MODE_2_3:
-            is_double_shift = True
-            double_shift_desc = "Ca 2 (14:00-22:00: 8h) & Ca 3 (22:00-06:00: 8h)"
-            standard_hours = 8.0
-            overtime_hours = 8.0
-            meal_count = 1
-            meal_allowance = 35000.0
-            night_allowance = night_allowance_rate if night_allowance_rate > 0 else NU_NIGHT_PCCD
-            is_irregular = False
-
-        elif mode == XNU_MODE_3_1:
-            is_double_shift = True
-            double_shift_desc = "Ca 3 (22:00-06:00: 8h) & Ca 1 (06:00-14:00: 8h)"
-            standard_hours = 8.0
-            overtime_hours = 8.0
-            meal_count = 1
-            meal_allowance = 35000.0
-            night_allowance = night_allowance_rate if night_allowance_rate > 0 else NU_NIGHT_PCCD
             is_irregular = False
 
         # --- Tính tiền ăn theo từng ca XNU ---
@@ -600,7 +539,7 @@ def build_nu_shift_day_results(
             fallback_mode = _fallback_mode(today_events, is_sunday=is_sun)
 
             effective_check_mode = detected_mode or fallback_mode
-            if effective_check_mode in (NU_NIGHT_MODE, XNU_MODE_3, XNU_MODE_2_3):
+            if effective_check_mode in (NU_NIGHT_MODE, XNU_MODE_3):
                 night_shift_dates.add(work_date)
 
             day_mode_candidates[work_date] = {
