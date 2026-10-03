@@ -235,7 +235,7 @@ export default function MealAllowance() {
     const result = [];
     for (const row of (att?.rows || [])) {
       for (const cell of (row.days || [])) {
-        if (cell.ot_eligible || cell.night_eligible) {
+        if (cell.ot_eligible || cell.night_eligible || cell.xnu_double_eligible) {
           result.push({
             key: `${row.employee_id}_${cell.work_date}`,
             employee_id: row.employee_id,
@@ -243,6 +243,7 @@ export default function MealAllowance() {
             full_name: row.full_name,
             cell,
             is_night: !!cell.night_eligible,
+            is_xnu_double: !!cell.xnu_double_eligible,
           });
         }
       }
@@ -432,17 +433,27 @@ export default function MealAllowance() {
     {
       title: 'Loại OT',
       key: 'type',
-      width: 115,
-      render: (_, r) => r.is_night
-        ? <Tag color="blue" style={{ fontSize: 11 }}>OT sau 23h</Tag>
-        : <Tag color="orange" style={{ fontSize: 11 }}>OT sau 17h50</Tag>,
+      width: 125,
+      render: (_, r) => {
+        if (r.is_xnu_double) {
+          return <Tag color="volcano" style={{ fontSize: 11 }}>2 ca liên tục (XNU)</Tag>;
+        }
+        return r.is_night
+          ? <Tag color="blue" style={{ fontSize: 11 }}>OT sau 23h</Tag>
+          : <Tag color="orange" style={{ fontSize: 11 }}>OT sau 17h50</Tag>;
+      },
     },
     {
       title: 'Sẽ thêm',
       key: 'action',
-      render: (_, r) => r.is_night
-        ? <span style={{ fontSize: 11, color: '#1d4ed8' }}>1 bữa + PC đêm</span>
-        : <span style={{ fontSize: 11, color: '#d97706' }}>1 bữa ăn</span>,
+      render: (_, r) => {
+        if (r.is_xnu_double) {
+          return <span style={{ fontSize: 11, color: '#c2410c', fontWeight: 600 }}>1 phần cơm tăng ca</span>;
+        }
+        return r.is_night
+          ? <span style={{ fontSize: 11, color: '#1d4ed8' }}>1 bữa + PC đêm</span>
+          : <span style={{ fontSize: 11, color: '#d97706' }}>1 bữa ăn</span>;
+      },
     },
   ];
 
@@ -565,14 +576,98 @@ export default function MealAllowance() {
       );
     }
 
+    if (cell.xnu_double_eligible) {
+      const amount = cell.meal_allowance || 0;
+      const shortAmount = amount >= 1000 ? `${amount / 1000}k` : String(amount || '0');
+      const doubleTooltipContent = (
+        <div className="ma-tooltip">
+          <div className="ma-tooltip-hd">
+            <span className="ma-tooltip-code" style={{ color: '#fb923c' }}>XNU</span>
+            <span className="ma-tooltip-name">2 ca liên tục (Tăng ca)</span>
+          </div>
+          {cell.xnu_double_desc && (
+            <div className="ma-tooltip-row" style={{ color: '#fdba74', fontWeight: 600 }}>
+              {cell.xnu_double_desc}
+            </div>
+          )}
+          {cell.check_in && <div className="ma-tooltip-row">Vào: <b>{dayjs(cell.check_in).format('HH:mm')}</b></div>}
+          {cell.check_out && <div className="ma-tooltip-row">Ra: <b>{dayjs(cell.check_out).format('HH:mm')}</b></div>}
+          <div className="ma-tooltip-row">Thời gian làm: <b>{cell.actual_hours || 16} tiếng (2 ca)</b></div>
+          <div className="ma-tooltip-amount meal">Tiền ăn hiện tại: <b>{amount.toLocaleString()} đ (1 bữa)</b></div>
+          {!isWorker && (
+            <div style={{ color: '#ea580c', fontSize: 11, marginTop: 4, borderTop: '1px dashed rgba(255,255,255,0.2)', paddingTop: 4 }}>
+              ⚡ Làm 2 ca liên tục (Click để thêm phần cơm)
+            </div>
+          )}
+        </div>
+      );
+
+      if (isWorker) {
+        return (
+          <Tooltip title={doubleTooltipContent}>
+            <div className="ma-cell-val ma-cell-val--xnu-double-eligible" style={{ cursor: 'default' }}>
+              {shortAmount}
+            </div>
+          </Tooltip>
+        );
+      }
+
+      return (
+        <Popconfirm
+          title="Thêm phần cơm tăng ca (2 ca liên tục)?"
+          description={`Ngày ${dayjs(cell.work_date).format('DD/MM')} — Làm 2 ca liên tục (${cell.xnu_double_desc || '16 tiếng'}). Thêm 1 suất ăn tăng ca (35k)?`}
+          onConfirm={async () => {
+            try {
+              await api.put('/schedules/x-overtime', {
+                employee_id: employeeId,
+                work_date: cell.work_date,
+                meal_count: 1,
+              });
+              message.success('Đã thêm phần cơm cho 2 ca liên tục');
+              queryClient.invalidateQueries({ queryKey: ['attendance'] });
+            } catch {
+              message.error('Lỗi khi thêm phần cơm tăng ca');
+            }
+          }}
+          okText="Thêm cơm"
+          cancelText="Bỏ qua"
+        >
+          <Tooltip title={doubleTooltipContent}>
+            <div className="ma-cell-val ma-cell-val--xnu-double-eligible">
+              {shortAmount}
+            </div>
+          </Tooltip>
+        </Popconfirm>
+      );
+    }
+
     if (cell.ot_eligible) {
       const amount = cell.meal_allowance || 0;
       const shortAmount = amount >= 1000 ? `${amount / 1000}k` : String(amount || '0');
+      const otTooltipContent = (
+        <div className="ma-tooltip">
+          <div className="ma-tooltip-hd">
+            <span className="ma-tooltip-code">{cell.shift_code}</span>
+            <span className="ma-tooltip-name">{cell.shift_name}</span>
+          </div>
+          {cell.check_in && <div className="ma-tooltip-row">Vào: <b>{dayjs(cell.check_in).format('HH:mm')}</b></div>}
+          {cell.check_out && <div className="ma-tooltip-row">Ra: <b>{dayjs(cell.check_out).format('HH:mm')}</b></div>}
+          <div className="ma-tooltip-amount meal">Tiền ăn: <b>{amount.toLocaleString()} đ</b></div>
+          {!isWorker && (
+            <div style={{ color: '#d97706', fontSize: 11, marginTop: 4, borderTop: '1px dashed rgba(255,255,255,0.2)', paddingTop: 4 }}>
+              ⚡ Có dấu hiệu tăng ca (Click để thêm bữa)
+            </div>
+          )}
+        </div>
+      );
+
       if (isWorker) {
         return (
-          <div className="ma-cell-val ma-cell-val--ot-eligible" style={{ cursor: 'default' }}>
-            {shortAmount}
-          </div>
+          <Tooltip title={otTooltipContent}>
+            <div className="ma-cell-val ma-cell-val--ot-eligible" style={{ cursor: 'default' }}>
+              {shortAmount}
+            </div>
+          </Tooltip>
         );
       }
       return (
@@ -595,9 +690,11 @@ export default function MealAllowance() {
           okText="Thêm bữa"
           cancelText="Bỏ qua"
         >
-          <div className="ma-cell-val ma-cell-val--ot-eligible">
-            {shortAmount}
-          </div>
+          <Tooltip title={otTooltipContent}>
+            <div className="ma-cell-val ma-cell-val--ot-eligible">
+              {shortAmount}
+            </div>
+          </Tooltip>
         </Popconfirm>
       );
     }
@@ -607,15 +704,18 @@ export default function MealAllowance() {
     const amount = cell.meal_allowance;
     const shortAmount = amount >= 1000 ? `${amount / 1000}k` : amount;
 
+    const isXnuDoubleConfirmed = cell.xnu_double_confirmed;
     const isManualNight = cell.has_manual_xot && cell.night_allowance > 0;
     const isManualMeal = cell.has_manual_xot && (cell.manual_meal_count || 0) > 0;
     const hasActiveManual = isManualNight || isManualMeal;
 
-    const extraClass = hasActiveManual
-      ? (isManualNight ? 'ma-cell-val--manual-night' : 'ma-cell-val--manual-meal')
-      : (cell.night_allowance > 0
-        ? 'ma-cell-val--night'
-        : (cell.meal_count >= 2 ? 'ma-cell-val--double' : ''));
+    const extraClass = isXnuDoubleConfirmed
+      ? 'ma-cell-val--xnu-double-confirmed'
+      : (hasActiveManual
+        ? (isManualNight ? 'ma-cell-val--manual-night' : 'ma-cell-val--manual-meal')
+        : (cell.night_allowance > 0
+          ? 'ma-cell-val--night'
+          : (cell.meal_count >= 2 ? 'ma-cell-val--double' : '')));
 
     return (
       <Tooltip title={
@@ -629,7 +729,12 @@ export default function MealAllowance() {
           <div className="ma-tooltip-amount meal">Tiền ăn: <b>{amount.toLocaleString()} đ</b></div>
           {cell.meal_count >= 2 && <div className="ma-tooltip-row" style={{ color: '#2563eb' }}>Bữa ăn: <b>{cell.meal_count} bữa</b></div>}
           {cell.night_allowance > 0 && <div className="ma-tooltip-amount night">PC Đêm: <b>{cell.night_allowance.toLocaleString()} đ</b></div>}
-          {hasActiveManual && <div className="ma-tooltip-row" style={{ color: '#7c3aed', fontWeight: 600, marginTop: 2 }}>★ Nhập thủ công</div>}
+          {isXnuDoubleConfirmed && (
+            <div className="ma-tooltip-row" style={{ color: '#34d399', fontWeight: 700, marginTop: 2 }}>
+              ★ Ca XNU: Làm 2 ca liên tục ({cell.xnu_double_desc || '16h'})
+            </div>
+          )}
+          {hasActiveManual && !isXnuDoubleConfirmed && <div className="ma-tooltip-row" style={{ color: '#7c3aed', fontWeight: 600, marginTop: 2 }}>★ Nhập thủ công</div>}
           {!isWorker && cell.status !== 'no_data' && (
             <div style={{ color: '#9ca3af', fontSize: 10, marginTop: 4, borderTop: '1px dashed #e5e7eb', paddingTop: 4 }}>
               💡 Double-click để chỉnh sửa thủ công

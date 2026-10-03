@@ -1886,6 +1886,38 @@ body.dark {
   transform: scale(1.05);
 }
 
+/* XNU 2 ca liên tục eligible (MÀU CAM) */
+.ma-cell-val--xnu-double-eligible {
+  color: #c2410c;
+  background: #ffedd5;
+  border: 1.5px solid #f97316;
+  cursor: pointer;
+  box-shadow: 0 0 3px rgba(249, 115, 22, 0.3);
+  font-weight: 700;
+}
+.ma-cell-val--xnu-double-eligible:hover {
+  background: #fed7aa;
+  border-color: #ea580c;
+  transform: scale(1.05);
+  box-shadow: 0 0 6px rgba(234, 88, 12, 0.4);
+}
+
+/* XNU 2 ca liên tục đã xác nhận/thêm cơm (MÀU KHÁC: XANH EMERALD NỔI BẬT) */
+.ma-cell-val--xnu-double-confirmed {
+  color: #047857;
+  background: #ecfdf5;
+  border: 1.5px solid #10b981;
+  cursor: pointer;
+  box-shadow: 0 0 3px rgba(16, 185, 129, 0.3);
+  font-weight: 800;
+}
+.ma-cell-val--xnu-double-confirmed:hover {
+  background: #d1fae5;
+  border-color: #059669;
+  transform: scale(1.05);
+  box-shadow: 0 0 6px rgba(16, 185, 129, 0.45);
+}
+
 .ma-cell-dot { color: #e2e8f0; font-size: 13px; }
 .ma-cell-zero { color: #d1d5db; font-size: 10px; }
 
@@ -2010,6 +2042,28 @@ body.dark {
 .dark .ma-cell-val--night-eligible:hover {
   background: rgba(59,130,246,0.22);
   border-color: rgba(96,165,250,0.60);
+}
+
+/* XNU double shift chips dark */
+.dark .ma-cell-val--xnu-double-eligible {
+  color: #fb923c;
+  background: rgba(249, 115, 22, 0.16);
+  border-color: rgba(249, 115, 22, 0.55);
+  box-shadow: 0 0 4px rgba(249, 115, 22, 0.2);
+}
+.dark .ma-cell-val--xnu-double-eligible:hover {
+  background: rgba(249, 115, 22, 0.28);
+  border-color: #fb923c;
+}
+.dark .ma-cell-val--xnu-double-confirmed {
+  color: #34d399;
+  background: rgba(16, 185, 129, 0.16);
+  border-color: rgba(16, 185, 129, 0.55);
+  box-shadow: 0 0 4px rgba(16, 185, 129, 0.2);
+}
+.dark .ma-cell-val--xnu-double-confirmed:hover {
+  background: rgba(16, 185, 129, 0.28);
+  border-color: #34d399;
 }
 
 /* Empty cell indicators dark */

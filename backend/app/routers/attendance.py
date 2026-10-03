@@ -24,6 +24,9 @@ from app.services.nu_shift import (
     XNU_MODE_1,
     XNU_MODE_2,
     XNU_MODE_3,
+    XNU_MODE_1_2,
+    XNU_MODE_2_3,
+    XNU_MODE_3_1,
 )
 from app.utils.audit_helper import log_audit
 from pydantic import BaseModel
@@ -100,6 +103,10 @@ class AttendanceCell(BaseModel):
     is_irregular: bool = False  # Giờ làm bất thường, cần duyệt
     meal_approval_id: Optional[int] = None
     meal_approval_status: Optional[str] = None  # pending | approved | rejected
+    is_xnu_double: bool = False  # True = ca XNU làm 2 ca liên tục
+    xnu_double_eligible: bool = False  # True = có dấu hiệu làm 2 ca liên tục (tô màu cam)
+    xnu_double_confirmed: bool = False  # True = đã thêm tăng ca cho 2 ca liên tục (tô màu khác)
+    xnu_double_desc: Optional[str] = None  # Mô tả 2 ca liên tục
 
 
 class AttendanceRow(BaseModel):
@@ -646,6 +653,10 @@ async def get_attendance(
                     has_manual_xot=False,
                     manual_meal_count=None,
                     manual_ot_end_time=None,
+                    is_xnu_double=False,
+                    xnu_double_eligible=False,
+                    xnu_double_confirmed=False,
+                    xnu_double_desc=None,
                 )
                 days_cells.append(cell)
                 continue
@@ -745,6 +756,12 @@ async def get_attendance(
                         XNU_MODE_2: "Ca 2",
                         XNU_MODE_3: "Ca 3",
                     }[nu_res.mode]
+                elif getattr(nu_res, "is_double_shift", False):
+                    mode_note = "2 ca liên tục"
+                    ev["actual_hours"] = 16.0
+                    ev["deviation"] = 0.0
+                    ev["status"] = "full"
+                    ev["ot_hours"] = 8.0
                 else:
                     mode_str = "Sáng" if nu_res.mode == "morning" else "Tối"
                     mode_note = f"Ca {mode_str}"
@@ -792,8 +809,35 @@ async def get_attendance(
             ot_eligible_val = False
             night_eligible_val = False
 
+            # XNU 2 ca liên tục (làm 2 ca trong 3 ca: tăng ca)
+            is_xnu_double_val = False
+            xnu_double_eligible_val = False
+            xnu_double_confirmed_val = False
+            xnu_double_desc_val = None
+
+            if is_xnu_shift and getattr(nu_res, "is_double_shift", False):
+                is_xnu_double_val = True
+                xnu_double_desc_val = getattr(nu_res, "double_shift_desc", None)
+                if xot and xot.meal_count and xot.meal_count > 0:
+                    xnu_double_confirmed_val = True
+                    xnu_double_eligible_val = False
+                    ot_meal = 35000.0 * int(xot.meal_count)
+                    ev["meal_allowance"] = 35000.0 + ot_meal
+                    ev["meal_count"] = 1 + int(xot.meal_count)
+                    if xot.ot_hours:
+                        ev["ot_hours"] = float(xot.ot_hours)
+                    if xot.ot_end_time:
+                        end_t = parse_time(xot.ot_end_time)
+                        if end_t and end_t.hour >= 23:
+                            ev["night_allowance"] = (ev["night_allowance"] or 0) + night_allowance_rate
+                else:
+                    xnu_double_eligible_val = True
+                    xnu_double_confirmed_val = False
+                    ev["meal_count"] = 1
+                    ev["meal_allowance"] = 35000.0
+
             # XNU: hỗ trợ OT thủ công giống X/X40
-            if is_xnu_shift and ev["status"] in ("full", "early_leave", "short", "forgot_scan"):
+            elif is_xnu_shift and ev["status"] in ("full", "early_leave", "short", "forgot_scan"):
                 if xot and xot.meal_count and xot.meal_count > 0:
                     x_meal_rate = 35000.0
                     ot_meal = x_meal_rate * int(xot.meal_count)
@@ -940,6 +984,10 @@ async def get_attendance(
                 is_irregular=is_irregular_val,
                 meal_approval_id=meal_approval_id_val,
                 meal_approval_status=meal_approval_status_val,
+                is_xnu_double=is_xnu_double_val,
+                xnu_double_eligible=xnu_double_eligible_val,
+                xnu_double_confirmed=xnu_double_confirmed_val,
+                xnu_double_desc=xnu_double_desc_val,
             )
             days_cells.append(cell)
 
