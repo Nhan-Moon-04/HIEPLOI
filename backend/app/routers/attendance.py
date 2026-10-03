@@ -1,6 +1,7 @@
 from typing import List, Optional, Literal
 from datetime import date, datetime, time, timedelta
 import calendar
+import math
 import re
 from decimal import Decimal
 from io import BytesIO
@@ -32,6 +33,34 @@ from app.utils.audit_helper import log_audit
 from pydantic import BaseModel
 from app.utils.lock_helper import check_date_locked, check_month_locked
 from app.models.salary import MonthlyWorkdayConfig
+
+
+def _round_ot_minutes(raw_minutes: float) -> float:
+    """15-min threshold, then round up to nearest 0.5h slot."""
+    if raw_minutes <= 15:
+        return 0.0
+    return math.ceil((raw_minutes - 15) / 30) * 0.5
+
+
+def _to_half(h: float) -> float:
+    """Round any hours value to the nearest 0.5h (standard round-half-up)."""
+    return math.floor(h * 2 + 0.5) / 2
+
+
+def _round_nearest_30min(dt: datetime) -> datetime:
+    """Làm tròn đến 30 phút gần nhất.
+    0-15p → :00, 16-30p → :30, 31-45p → :30, 46-59p → giờ chẵn kế."""
+    m = dt.minute
+    if m <= 15:
+        rounded_min = 0
+        h = dt.hour
+    elif m <= 45:
+        rounded_min = 30
+        h = dt.hour
+    else:
+        rounded_min = 0
+        h = (dt.hour + 1) % 24
+    return dt.replace(hour=h, minute=rounded_min, second=0, microsecond=0)
 
 
 def parse_input_time(time_str: str) -> Optional[time]:
@@ -302,29 +331,21 @@ def evaluate_attendance(shift, check_in_dt, check_out_dt, work_date, is_sunday, 
             result["ot_hours"] = actual
         elif shift and (shift.code or "").upper() in DRIVER_AUTO_OT_SHIFT_CODES:
             # Tinh OT cho tai xe: checkout trễ + vào sớm (làm tròn 30p gần nhất, cap 6:00)
-            import math
             ot = 0.0
             shift_end_time_local = parse_time(shift.end_time)
             if shift_end_time_local and check_out_dt:
                 expected_end = datetime.combine(work_date, shift_end_time_local)
                 if check_out_dt > expected_end:
-                    ot = (check_out_dt - expected_end).total_seconds() / 3600.0
+                    raw_min = (check_out_dt - expected_end).total_seconds() / 60.0
+                    ot = _round_ot_minutes(raw_min)
             
             # OT vào sớm: làm tròn 30p gần nhất
             if original_check_in and shift_start_time:
                 expected_start = datetime.combine(work_date, shift_start_time)
-                # Làm tròn nearest 30min: 0-15→:00, 16-45→:30, 46-59→next:00
-                m = original_check_in.minute
-                if m <= 15:
-                    r_min, r_h = 0, original_check_in.hour
-                elif m <= 45:
-                    r_min, r_h = 30, original_check_in.hour
-                else:
-                    r_min, r_h = 0, (original_check_in.hour + 1) % 24
-                effective_in = original_check_in.replace(hour=r_h, minute=r_min, second=0, microsecond=0)
+                effective_in = _round_nearest_30min(original_check_in)
                 if effective_in < expected_start:
                     early_hours = (expected_start - effective_in).total_seconds() / 3600.0
-                    ot_early = math.floor(early_hours * 2 + 0.5) / 2  # round to 0.5h
+                    ot_early = _to_half(early_hours)
                     if ot_early >= 1.0:
                         ot += ot_early
             
@@ -343,14 +364,35 @@ def evaluate_attendance(shift, check_in_dt, check_out_dt, work_date, is_sunday, 
             if is_auto:
                 # Quy tắc thời gian cho ca tự động (TX1, TX2, NU, XNU):
                 #   Bữa sáng : check-in trước 9h
-                #   Bữa tối  : check-out >= 17h50 HOẶC check-in >= 18h HOẶC OT >= 3h
+                #   Bữa tối  : check-out >= 17h46 (làm tròn lên 18h) HOẶC tăng ca đến >= 18h HOẶC check-in >= 18h HOẶC OT >= 3h
                 ci = original_check_in or check_in_dt
                 ot = result.get("ot_hours") or 0.0
                 has_morning = bool(ci and ci.hour < 9)
+
+                # Giờ checkout được làm tròn lên 18:00 (từ 17:46 trở đi theo quy tắc làm tròn 30p gần nhất)
+                co_rounds_to_18h = False
+                if check_out_dt:
+                    if check_out_dt.date() > work_date:
+                        co_rounds_to_18h = True
+                    else:
+                        co_rounds_to_18h = (check_out_dt.hour * 60 + check_out_dt.minute) >= (17 * 60 + 46)
+
+                # Hoặc giờ kết thúc ca + OT làm tròn >= 18:00 (tăng ca từ 18h trở về sau)
+                ot_reaches_18h = False
+                if ot > 0 and shift and shift.end_time:
+                    s_end = parse_time(shift.end_time)
+                    if s_end:
+                        eff_end_dt = datetime.combine(work_date, s_end) + timedelta(hours=ot)
+                        ot_reaches_18h = (
+                            eff_end_dt.date() > work_date
+                            or (eff_end_dt.hour * 60 + eff_end_dt.minute) >= 18 * 60
+                        )
+
                 # Chủ nhật/ngày lễ: toàn bộ giờ làm tính OT → không dùng ot>=3 để xét bữa tối
-                # (tránh tính 2 bữa khi tài xế về trước 17h50)
+                # (tránh tính 2 bữa khi tài xế về trước 18h)
                 has_late = bool(
-                    (check_out_dt and (check_out_dt.hour * 60 + check_out_dt.minute) >= 17 * 60 + 50)
+                    co_rounds_to_18h
+                    or ot_reaches_18h
                     or (ci and ci.hour >= 18)
                     or (not (is_sunday or is_holiday) and ot >= 3)
                 )
@@ -858,10 +900,12 @@ async def get_attendance(
                     xnu_end_t = xnu_shift_ends.get(nu_res.mode)
                     if xnu_end_t:
                         xnu_end_dt = datetime.combine(dt, xnu_end_t)
-                        actual_ot_h = max(0.0, (check_out_dt - xnu_end_dt).total_seconds() / 3600.0)
+                        raw_ot_m = max(0.0, (check_out_dt - xnu_end_dt).total_seconds() / 60.0)
+                        actual_ot_h = _round_ot_minutes(raw_ot_m)
+                        co_rounds_to_18h = (check_out_dt.date() > dt) or ((check_out_dt.hour * 60 + check_out_dt.minute) >= 17 * 60 + 46)
                         if check_out_dt >= datetime.combine(dt, time(23, 0)):
                             night_eligible_val = True
-                        elif ((check_out_dt.hour * 60 + check_out_dt.minute) >= 17 * 60 + 50 and xnu_end_t.hour < 18) or (actual_ot_h >= 3):
+                        elif (co_rounds_to_18h and xnu_end_t.hour < 18) or (actual_ot_h >= 3):
                             ot_eligible_val = True
 
             elif not is_auto_shift and ev["status"] in ("full", "early_leave", "short", "forgot_scan"):
@@ -879,11 +923,13 @@ async def get_attendance(
                 elif shift and shift.end_time and check_out_dt:
                     shift_end_t = parse_time(shift.end_time)
                     shift_end_dt_elig = datetime.combine(dt, shift_end_t)
-                    actual_ot_h = max(0.0, (check_out_dt - shift_end_dt_elig).total_seconds() / 3600.0)
+                    raw_ot_m = max(0.0, (check_out_dt - shift_end_dt_elig).total_seconds() / 60.0)
+                    actual_ot_h = _round_ot_minutes(raw_ot_m)
+                    co_rounds_to_18h = (check_out_dt.date() > dt) or ((check_out_dt.hour * 60 + check_out_dt.minute) >= 17 * 60 + 46)
                     # Checkout từ 23h trở lên → đề xuất thêm PCCD ca đêm (ưu tiên hơn ot_eligible)
                     if check_out_dt >= datetime.combine(dt, time(23, 0)):
                         night_eligible_val = True
-                    elif ((check_out_dt.hour * 60 + check_out_dt.minute) >= 17 * 60 + 50 and shift_end_t.hour < 18) or (actual_ot_h >= 3):
+                    elif (co_rounds_to_18h and shift_end_t.hour < 18) or (actual_ot_h >= 3):
                         ot_eligible_val = True
 
             if ot_style == "new":

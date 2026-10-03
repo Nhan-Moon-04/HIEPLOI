@@ -440,7 +440,7 @@ export default function MealAllowance() {
         }
         return r.is_night
           ? <Tag color="blue" style={{ fontSize: 11 }}>OT sau 23h</Tag>
-          : <Tag color="orange" style={{ fontSize: 11 }}>OT sau 17h50</Tag>;
+          : <Tag color="orange" style={{ fontSize: 11 }}>OT từ 18h (≥ 17h46)</Tag>;
       },
     },
     {
@@ -673,7 +673,7 @@ export default function MealAllowance() {
       return (
         <Popconfirm
           title="Thêm bữa tăng ca?"
-          description={`Ngày ${dayjs(cell.work_date).format('DD/MM')} — OT sau 17h50 hoặc ≥ 3h`}
+          description={`Ngày ${dayjs(cell.work_date).format('DD/MM')} — OT từ 18h (≥ 17h46 làm tròn) hoặc ≥ 3h`}
           onConfirm={async () => {
             try {
               await api.put('/schedules/x-overtime', {
@@ -1111,7 +1111,7 @@ export default function MealAllowance() {
         {quickTab === 'eligible' ? (
           <>
             <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 12 }}>
-              <Tag color="orange">OT sau 17h50</Tag> → thêm 1 bữa ăn &nbsp;|&nbsp;
+              <Tag color="orange">OT từ 18h (≥ 17h46)</Tag> → thêm 1 bữa ăn &nbsp;|&nbsp;
               <Tag color="blue">OT sau 23h</Tag> → thêm 1 bữa + PC ca đêm ({nightAllowanceRate.toLocaleString()}đ)
             </div>
             {eligibleList.length === 0 ? (

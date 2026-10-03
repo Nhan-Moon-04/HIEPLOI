@@ -15,7 +15,7 @@ from app.models.x_overtime import XOvertimeConfig
 from app.models.user import AppUser, UserRole
 from app.middleware.auth import get_current_user
 from app.services.nu_shift import is_nu_dynamic_shift_code, build_nu_shift_day_results, calculate_nu_shift_details
-from app.routers.attendance import check_holiday_applies_to_employee
+from app.routers.attendance import check_holiday_applies_to_employee, parse_time, _round_ot_minutes
 
 router = APIRouter(prefix="/meal-allowance", tags=["Meal Allowance - Tien An"])
 
@@ -427,15 +427,41 @@ async def get_meal_allowance(
                             break
                 is_sunday_or_holiday = work_date.weekday() == 6 or is_holiday_for_emp
 
-                if shift.code.upper() in ("TX1", "TX2") and is_sunday_or_holiday:
-                    # Chủ nhật/lễ: dùng giờ thực tế, không dùng ot>=3 (tránh tính 2 bữa khi về trước 18h)
+                if shift.code.upper() in ("TX1", "TX2"):
                     att = att_map.get((emp.id, work_date))
                     ci = att.first_check_in if att else None
                     co = att.last_check_out if att else None
                     has_morning = bool(ci and ci.hour < 9)
+
+                    # Tính OT làm tròn cho tài xế
+                    ot_h = 0.0
+                    if co and shift.end_time:
+                        shift_end_t = shift.end_time if isinstance(shift.end_time, time) else parse_time(shift.end_time)
+                        if shift_end_t:
+                            s_end_dt = datetime.combine(work_date, shift_end_t)
+                            if co > s_end_dt:
+                                raw_min = (co - s_end_dt).total_seconds() / 60.0
+                                ot_h = _round_ot_minutes(raw_min)
+
+                    co_rounds_to_18h = bool(
+                        co and (
+                            co.date() > work_date
+                            or (co.hour * 60 + co.minute) >= (17 * 60 + 46)
+                        )
+                    )
+                    ot_reaches_18h = False
+                    if ot_h > 0 and shift.end_time:
+                        shift_end_t = shift.end_time if isinstance(shift.end_time, time) else parse_time(shift.end_time)
+                        if shift_end_t:
+                            eff_dt = datetime.combine(work_date, shift_end_t) + timedelta(hours=ot_h)
+                            ot_reaches_18h = eff_dt.date() > work_date or (eff_dt.hour * 60 + eff_dt.minute) >= 18 * 60
+
+                    # Chủ nhật/lễ: dùng giờ thực tế, không dùng ot>=3 (tránh tính 2 bữa khi về trước 18h)
                     has_late = bool(
-                        (co and (co.hour * 60 + co.minute) >= 17 * 60 + 50)
+                        co_rounds_to_18h
+                        or ot_reaches_18h
                         or (ci and ci.hour >= 18)
+                        or (not is_sunday_or_holiday and ot_h >= 3)
                     )
                     day_meal_count = (1 if has_morning else 0) + (1 if has_late else 0)
                 else:

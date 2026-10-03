@@ -495,7 +495,10 @@ def _build_result(mode, week_mode, shift_code, has_midday_check, warning_note, c
             # Các ca NU/NUT1/NUT2/... khác: giữ quy tắc cũ
             meal_has_morning = bool(check_in and check_in.hour < 9)
             meal_has_late = bool(
-                (check_out and (check_out.hour * 60 + check_out.minute) >= 17 * 60 + 50)
+                (check_out and (
+                    (check_out.hour * 60 + check_out.minute) >= 17 * 60 + 46
+                    or (check_in and check_out < check_in)
+                ))
                 or (check_in and check_in.hour >= 18)
                 or (overtime_hours >= 3)
             )
