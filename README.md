@@ -70,6 +70,7 @@ CREATE USER hieploi WITH PASSWORD 'hieploi2026';
 
 -- Tạo database
 CREATE DATABASE hieploi_hr OWNER hieploi;
+sgk
 
 -- Cấp quyền
 GRANT ALL PRIVILEGES ON DATABASE hieploi_hr TO hieploi;
