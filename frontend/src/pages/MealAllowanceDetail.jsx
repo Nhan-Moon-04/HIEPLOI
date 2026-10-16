@@ -44,18 +44,18 @@ const SUMMARY_KEYS = [
 ];
 
 const DEFAULT_COLUMNS = [
-  { id: 'day', label: 'Ngày', align: 'center', visible: true, width: '55px' },
-  { id: 'dow', label: 'Thứ', align: 'center', visible: true, width: '60px' },
-  { id: 'shift_code', label: 'Ca', align: 'center', visible: true, width: '70px' },
-  { id: 'check_in', label: 'Giờ vào', align: 'center', visible: true, width: '75px' },
-  { id: 'check_out', label: 'Giờ ra', align: 'center', visible: true, width: '75px' },
-  { id: 'work_hours', label: 'Giờ làm', align: 'center', visible: true, width: '80px' },
-  { id: 'ot_hours', label: 'Tăng ca', align: 'center', visible: true, width: '80px' },
-  { id: 'meal_count', label: 'Bữa', align: 'center', visible: true, width: '60px' },
-  { id: 'meal_allowance', label: 'Tiền ăn', align: 'right', visible: true, width: '100px' },
-  { id: 'night_allowance', label: 'Phụ cấp đêm', align: 'right', visible: true, width: '100px' },
-  { id: 'total_amount', label: 'Tổng tiền', align: 'right', visible: true, width: '110px' },
-  { id: 'status', label: 'Trạng thái', align: 'center', visible: true, width: '115px' },
+  { id: 'day', label: 'Ngày', align: 'center', visible: true, width: '60px' },
+  { id: 'dow', label: 'Thứ', align: 'center', visible: true, width: '65px' },
+  { id: 'shift_code', label: 'Ca', align: 'center', visible: true, width: '75px' },
+  { id: 'check_in', label: 'Giờ vào', align: 'center', visible: true, width: '85px' },
+  { id: 'check_out', label: 'Giờ ra', align: 'center', visible: true, width: '85px' },
+  { id: 'work_hours', label: 'Giờ làm', align: 'center', visible: true, width: '85px' },
+  { id: 'ot_hours', label: 'Tăng ca', align: 'center', visible: true, width: '90px' },
+  { id: 'meal_count', label: 'Bữa', align: 'center', visible: true, width: '65px' },
+  { id: 'meal_allowance', label: 'Tiền ăn', align: 'right', visible: true, width: '105px' },
+  { id: 'night_allowance', label: 'Phụ cấp đêm', align: 'right', visible: true, width: '105px' },
+  { id: 'total_amount', label: 'Tổng tiền', align: 'right', visible: true, width: '115px' },
+  { id: 'status', label: 'Trạng thái', align: 'center', visible: true, width: '120px' },
   { id: 'notes', label: 'Ghi chú', align: 'left', visible: false, width: '130px' },
 ];
 
@@ -68,7 +68,7 @@ const getStoredColumns = () => {
         const defaultMap = new Map(DEFAULT_COLUMNS.map((c) => [c.id, c]));
         const merged = parsed
           .filter((c) => defaultMap.has(c.id))
-          .map((c) => ({ ...defaultMap.get(c.id), ...c }));
+          .map((c) => ({ ...defaultMap.get(c.id), visible: c.visible }));
         DEFAULT_COLUMNS.forEach((c) => {
           if (!merged.find((m) => m.id === c.id)) {
             merged.push(c);
@@ -725,7 +725,7 @@ export default function MealAllowanceDetail() {
                   <th
                     key={col.id}
                     className="mad-th"
-                    style={{ textAlign: col.align, minWidth: col.width }}
+                    style={{ textAlign: col.align, width: col.width, minWidth: col.width }}
                   >
                     {col.label}
                   </th>
@@ -752,10 +752,11 @@ export default function MealAllowanceDetail() {
                 return (
                   <tr key={cell.work_date || cell.day} className={rowClass}>
                     {visibleColumns.map((col) => {
+                      const cellStyle = { textAlign: col.align };
                       switch (col.id) {
                         case 'day':
                           return (
-                            <td key="day" className="mad-td mad-td--day">
+                            <td key="day" className="mad-td mad-td--day" style={cellStyle}>
                               <span className={isSun || isHol ? 'mad-day--accent' : 'mad-day--normal'}>
                                 {isMultiMonth && cell.work_date ? dayjs(cell.work_date).format('DD/MM') : cell.day}
                               </span>
@@ -764,7 +765,7 @@ export default function MealAllowanceDetail() {
 
                         case 'dow':
                           return (
-                            <td key="dow" className="mad-td">
+                            <td key="dow" className="mad-td" style={cellStyle}>
                               <span className={isSun ? 'mad-dow-tag mad-dow-tag--sun' : isHol ? 'mad-dow-tag mad-dow-tag--hol' : 'mad-dow-tag'}>
                                 {cell.dow}
                               </span>
@@ -773,7 +774,7 @@ export default function MealAllowanceDetail() {
 
                         case 'shift_code':
                           return (
-                            <td key="shift_code" className="mad-td">
+                            <td key="shift_code" className="mad-td" style={cellStyle}>
                               {cell.shift_code ? (
                                 <span className="mad-shift-badge">{cell.shift_code}</span>
                               ) : (
@@ -784,28 +785,28 @@ export default function MealAllowanceDetail() {
 
                         case 'check_in':
                           return (
-                            <td key="check_in" className="mad-td mad-td--time">
+                            <td key="check_in" className="mad-td mad-td--time" style={cellStyle}>
                               {cell.check_in ? dayjs(cell.check_in).format('HH:mm') : <span className="mad-dash">–</span>}
                             </td>
                           );
 
                         case 'check_out':
                           return (
-                            <td key="check_out" className="mad-td mad-td--time">
+                            <td key="check_out" className="mad-td mad-td--time" style={cellStyle}>
                               {cell.check_out ? dayjs(cell.check_out).format('HH:mm') : <span className="mad-dash">–</span>}
                             </td>
                           );
 
                         case 'work_hours':
                           return (
-                            <td key="work_hours" className="mad-td mad-td--mono">
+                            <td key="work_hours" className="mad-td mad-td--mono" style={cellStyle}>
                               {cell.actual_hours > 0 ? `${cell.actual_hours.toFixed(1)}h` : <span className="mad-dash">–</span>}
                             </td>
                           );
 
                         case 'ot_hours':
                           return (
-                            <td key="ot_hours" className="mad-td">
+                            <td key="ot_hours" className="mad-td" style={cellStyle}>
                               {cell.ot_hours > 0 ? (
                                 <span className="mad-ot-pill">+{cell.ot_hours.toFixed(1)}h</span>
                               ) : (
@@ -816,7 +817,7 @@ export default function MealAllowanceDetail() {
 
                         case 'meal_count':
                           return (
-                            <td key="meal_count" className="mad-td">
+                            <td key="meal_count" className="mad-td" style={cellStyle}>
                               {cell.meal_count > 0 ? (
                                 <span className="mad-meal-badge">{cell.meal_count}</span>
                               ) : (
@@ -827,7 +828,7 @@ export default function MealAllowanceDetail() {
 
                         case 'meal_allowance':
                           return (
-                            <td key="meal_allowance" className="mad-td mad-td--amount">
+                            <td key="meal_allowance" className="mad-td mad-td--amount" style={cellStyle}>
                               {cell.meal_allowance > 0 ? (
                                 `${cell.meal_allowance.toLocaleString()} đ`
                               ) : (
@@ -838,7 +839,7 @@ export default function MealAllowanceDetail() {
 
                         case 'night_allowance':
                           return (
-                            <td key="night_allowance" className="mad-td mad-td--amount">
+                            <td key="night_allowance" className="mad-td mad-td--amount" style={cellStyle}>
                               {cell.night_allowance > 0 ? (
                                 `${cell.night_allowance.toLocaleString()} đ`
                               ) : (
@@ -849,27 +850,27 @@ export default function MealAllowanceDetail() {
 
                         case 'total_amount':
                           return (
-                            <td key="total_amount" className="mad-td mad-td--amount mad-td--total-cell">
+                            <td key="total_amount" className="mad-td mad-td--amount mad-td--total-cell" style={cellStyle}>
                               {rowTotal > 0 ? `${rowTotal.toLocaleString()} đ` : <span className="mad-dash">–</span>}
                             </td>
                           );
 
                         case 'status':
                           return (
-                            <td key="status" className="mad-td">
+                            <td key="status" className="mad-td" style={cellStyle}>
                               {renderStatusBadge(cell)}
                             </td>
                           );
 
                         case 'notes':
                           return (
-                            <td key="notes" className="mad-td mad-td--notes">
+                            <td key="notes" className="mad-td mad-td--notes" style={cellStyle}>
                               {cell.notes || <span className="mad-dash">–</span>}
                             </td>
                           );
 
                         default:
-                          return <td key={col.id} className="mad-td">–</td>;
+                          return <td key={col.id} className="mad-td" style={cellStyle}>–</td>;
                       }
                     })}
                   </tr>
@@ -880,70 +881,76 @@ export default function MealAllowanceDetail() {
             {/* Table Footer Totals */}
             <tfoot>
               <tr className="mad-row mad-row--footer">
-                {visibleColumns.map((col) => {
+                {visibleColumns.map((col, idx) => {
+                  const footerStyle = { textAlign: col.align };
+                  const hasDayCol = visibleColumns.some((c) => c.id === 'day');
+                  const isFirstCol = idx === 0;
+
+                  if (col.id === 'day' || (!hasDayCol && isFirstCol)) {
+                    return (
+                      <td key="tot-day" className="mad-td mad-footer-title" style={footerStyle}>
+                        TỔNG
+                      </td>
+                    );
+                  }
+
                   switch (col.id) {
-                    case 'day':
-                      return (
-                        <td key="tot-day" className="mad-td mad-footer-title">
-                          TỔNG
-                        </td>
-                      );
                     case 'dow':
                       return (
-                        <td key="tot-dow" className="mad-td mad-footer-count">
+                        <td key="tot-dow" className="mad-td mad-footer-count" style={footerStyle}>
                           {displayDays.length} ngày
                         </td>
                       );
                     case 'shift_code':
                     case 'check_in':
                     case 'check_out':
-                      return <td key={`tot-${col.id}`} className="mad-td mad-dash">–</td>;
+                      return <td key={`tot-${col.id}`} className="mad-td mad-dash" style={footerStyle}>–</td>;
 
                     case 'work_hours':
                       return (
-                        <td key="tot-work_hours" className="mad-td mad-footer-val">
+                        <td key="tot-work_hours" className="mad-td mad-footer-val" style={footerStyle}>
                           {totals.totalHours.toFixed(1)}h
                         </td>
                       );
 
                     case 'ot_hours':
                       return (
-                        <td key="tot-ot_hours" className="mad-td mad-footer-val">
+                        <td key="tot-ot_hours" className="mad-td mad-footer-val" style={footerStyle}>
                           {totals.totalOt > 0 ? `+${totals.totalOt.toFixed(1)}h` : '0h'}
                         </td>
                       );
 
                     case 'meal_count':
                       return (
-                        <td key="tot-meal_count" className="mad-td mad-footer-val">
+                        <td key="tot-meal_count" className="mad-td mad-footer-val" style={footerStyle}>
                           {totals.totalMeals}
                         </td>
                       );
 
                     case 'meal_allowance':
                       return (
-                        <td key="tot-meal_allowance" className="mad-td mad-td--amount mad-footer-val">
+                        <td key="tot-meal_allowance" className="mad-td mad-td--amount mad-footer-val" style={footerStyle}>
                           {totals.totalMealAllowance.toLocaleString()} đ
                         </td>
                       );
 
                     case 'night_allowance':
                       return (
-                        <td key="tot-night_allowance" className="mad-td mad-td--amount mad-footer-val">
+                        <td key="tot-night_allowance" className="mad-td mad-td--amount mad-footer-val" style={footerStyle}>
                           {totals.totalNightAllowance > 0 ? `${totals.totalNightAllowance.toLocaleString()} đ` : '–'}
                         </td>
                       );
 
                     case 'total_amount':
                       return (
-                        <td key="tot-total_amount" className="mad-td mad-td--amount mad-footer-total">
+                        <td key="tot-total_amount" className="mad-td mad-td--amount mad-footer-total" style={footerStyle}>
                           {totals.grandTotal.toLocaleString()} đ
                         </td>
                       );
 
                     case 'status':
                       return (
-                        <td key="tot-status" className="mad-td">
+                        <td key="tot-status" className="mad-td" style={footerStyle}>
                           <span className="mad-status mad-status--present">
                             <span className="mad-status-dot" />
                             {totals.workedDays} ngày công
@@ -952,10 +959,10 @@ export default function MealAllowanceDetail() {
                       );
 
                     case 'notes':
-                      return <td key="tot-notes" className="mad-td mad-dash">–</td>;
+                      return <td key="tot-notes" className="mad-td mad-dash" style={footerStyle}>–</td>;
 
                     default:
-                      return <td key={`tot-${col.id}`} className="mad-td">–</td>;
+                      return <td key={`tot-${col.id}`} className="mad-td" style={footerStyle}>–</td>;
                   }
                 })}
               </tr>

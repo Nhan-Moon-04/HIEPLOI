@@ -2091,9 +2091,8 @@ body.dark {
 
 /* Main Page Container */
 .mad-page {
-  padding: 24px 32px 48px;
-  max-width: 1600px;
-  margin: 0 auto;
+  padding: 0 0 32px;
+  width: 100%;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   color: #0F172A;
   background: transparent;
@@ -2857,21 +2856,31 @@ body.dark {
   color: #F8FAFC;
 }
 
-/* OT Tag (Subtle Amber) */
+/* OT Tag (Pastel Warm Pill - Mathematically Centered & Soft Amber) */
 .mad-ot-pill {
-  display: inline-block;
-  font-size: 11px;
-  font-weight: 700;
-  padding: 1px 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 22px;
+  min-width: 46px;
+  padding: 0 7px;
+  box-sizing: border-box;
   border-radius: 6px;
-  background: #FEF3C7;
-  color: #D97706;
-  border: 1px solid #FDE68A;
+  background: #FFFDF0;
+  color: #B45309;
+  border: 1px solid #FEF08A;
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.2px;
+  font-variant-numeric: tabular-nums;
+  vertical-align: middle;
+  text-align: center;
 }
 .dark .mad-ot-pill {
-  background: rgba(217, 119, 6, 0.2);
-  color: #FBBF24;
-  border-color: rgba(217, 119, 6, 0.4);
+  background: rgba(245, 158, 11, 0.08);
+  color: #FCD34D;
+  border-color: rgba(245, 158, 11, 0.22);
 }
 
 /* Meal Count Badge */
@@ -2884,12 +2893,17 @@ body.dark {
   border-radius: 6px;
   background: #F1F5F9;
   color: #334155;
-  font-weight: 700;
-  font-size: 12px;
+  font-weight: 600;
+  font-size: 11.5px;
+  line-height: 1;
+  box-sizing: border-box;
+  vertical-align: middle;
+  border: 1px solid #E2E8F0;
 }
 .dark .mad-meal-badge {
-  background: #334155;
-  color: #E2E8F0;
+  background: #1E293B;
+  color: #CBD5E1;
+  border-color: #334155;
 }
 
 /* Amounts */
