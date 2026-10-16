@@ -284,7 +284,12 @@ def evaluate_attendance(shift, check_in_dt, check_out_dt, work_date, is_sunday, 
     actual = 0.0
     if check_in_dt and check_out_dt:
         actual = calc_hours_between(check_in_dt, check_out_dt, break_mins)
-    result["actual_hours"] = actual
+    
+    # Ca tieu chuan ngay thuong: neu lam du ca (>= standard) thi gio lam mac dinh la standard (VD: ca VP80 8h-17h mac dinh 8.0h)
+    if not (is_sunday or is_holiday) and standard > 0 and actual >= standard:
+        result["actual_hours"] = standard
+    else:
+        result["actual_hours"] = actual
 
     # Check ve som
     shift_end_time = parse_time(shift.end_time) if shift else None
@@ -351,9 +356,18 @@ def evaluate_attendance(shift, check_in_dt, check_out_dt, work_date, is_sunday, 
             
             result["ot_hours"] = round(max(ot, 0), 2)
         else:
-            # Ngay thuong
+            # Ngay thuong (VP80, X, X40, XVP, etc.): tinh OT neu checkout sau gio ket thuc ca (ap dung quy tac lam tron)
             ot = float(shift.default_overtime_hours or 0) if shift else 0.0
-            result["ot_hours"] = ot
+            shift_end_time_local = parse_time(shift.end_time) if shift else None
+            if shift_end_time_local and check_out_dt:
+                effective_is_night = is_night_override if is_night_override is not None else (shift.is_night_shift if shift else False)
+                expected_end = datetime.combine(work_date + timedelta(days=1) if effective_is_night else work_date, shift_end_time_local)
+                if check_out_dt > expected_end:
+                    raw_min = (check_out_dt - expected_end).total_seconds() / 60.0
+                    calc_ot = _round_ot_minutes(raw_min)
+                    if calc_ot > 0:
+                        ot = max(ot, calc_ot)
+            result["ot_hours"] = round(max(ot, 0), 2)
 
         # Tiền ăn: Nếu có mặt (hoặc có ít nhất 1 đầu quẹt) thì tính meal_allowance * meal_count
         if result["status"] in ("full", "early_leave", "short", "forgot_scan") or ((is_sunday or is_holiday) and actual > 0):
