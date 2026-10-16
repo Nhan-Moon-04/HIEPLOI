@@ -749,7 +749,7 @@ export default function MealAllowance() {
     );
   };
 
-  const totalMeal  = s.rows?.reduce((sum, r) => sum + (r.summary?.total_meal_allowance || 0), 0) || 0;
+  const totalMeal = s.rows?.reduce((sum, r) => sum + (r.summary?.total_meal_allowance || 0), 0) || 0;
   const totalNight = s.rows?.reduce((sum, r) => sum + (r.summary?.total_night_allowance || 0), 0) || 0;
 
   const normalizedSearch = searchTerm.trim().toLowerCase();
@@ -1427,7 +1427,7 @@ export default function MealAllowance() {
           <>
             <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 8 }}>
               Các ngày nhân viên chấm công nhưng <b>giờ làm dưới 6 tiếng</b>. Mặc định không tính tiền ăn.
-              <br/>Duyệt nếu sếp cho về sớm (hết hàng, lý do khác).
+              <br />Duyệt nếu sếp cho về sớm (hết hàng, lý do khác).
             </div>
             <div style={{ marginBottom: 12 }}>
               <Input
