@@ -80,62 +80,66 @@ def _send(to_email: str, subject: str, html_body: str) -> bool:
             smtp.sendmail(settings.SMTP_USER, to_email, msg.as_string())
 
         logger.info(f"[EMAIL OK] Sent to {to_email}: {subject}")
-        print(f"[EMAIL OK] Sent to {to_email}: {subject}", flush=True)
         return True
     except smtplib.SMTPAuthenticationError as e:
         logger.error(f"[EMAIL FAIL] SMTP auth error: {e}")
-        print(f"[EMAIL FAIL] SMTP auth error — kiểm tra SMTP_USER/SMTP_PASSWORD trong .env: {e}")
         return False
     except smtplib.SMTPException as e:
         logger.error(f"[EMAIL FAIL] SMTP error to {to_email}: {e}")
-        print(f"[EMAIL FAIL] SMTP error to {to_email}: {e}")
         return False
     except Exception as e:
         logger.error(f"[EMAIL FAIL] Unexpected error to {to_email}: {e}")
-        print(f"[EMAIL FAIL] Unexpected error to {to_email}: {e}")
         return False
 
 
 def send_reset_password_email(to_email: str, full_name: str, reset_token: str, frontend_origin: str = None) -> bool:
     """Gửi email chứa link reset mật khẩu (hiệu lực 5 phút)"""
-    print(f"[EMAIL] send_reset_password_email called → {to_email}", flush=True)
-    base_url = (frontend_origin or "").rstrip("/") or settings.FRONTEND_URL
-    reset_url = f"{base_url}/reset-password?token={reset_token}"
-    name = full_name or to_email.split("@")[0]
+    try:
+        logger.info(f"[EMAIL] send_reset_password_email called -> {to_email}")
+        base_url = (frontend_origin or "").rstrip("/") or settings.FRONTEND_URL
+        reset_url = f"{base_url}/reset-password?token={reset_token}"
+        name = full_name or to_email.split("@")[0]
 
-    body = f"""
-    <p>Xin chào <strong>{name}</strong>,</p>
-    <p>Chúng tôi nhận được yêu cầu đặt lại mật khẩu cho tài khoản của bạn.</p>
-    <a href="{reset_url}" class="btn">🔑 Đặt lại mật khẩu</a>
-    <div class="warning">
-      ⏱ Link có hiệu lực trong <strong>5 phút</strong> kể từ lúc gửi.<br>
-      Nếu bạn không yêu cầu, hãy bỏ qua email này.
-    </div>
-    <hr class="divider">
-    <p style="font-size:12px;color:#9ca3af">Hoặc copy link này vào trình duyệt:<br>
-      <span style="color:#276EF1;word-break:break-all">{reset_url}</span>
-    </p>"""
+        body = f"""
+        <p>Xin chào <strong>{name}</strong>,</p>
+        <p>Chúng tôi nhận được yêu cầu đặt lại mật khẩu cho tài khoản của bạn.</p>
+        <a href="{reset_url}" class="btn">🔑 Đặt lại mật khẩu</a>
+        <div class="warning">
+          ⏱ Link có hiệu lực trong <strong>5 phút</strong> kể từ lúc gửi.<br>
+          Nếu bạn không yêu cầu, hãy bỏ qua email này.
+        </div>
+        <hr class="divider">
+        <p style="font-size:12px;color:#9ca3af">Hoặc copy link này vào trình duyệt:<br>
+          <span style="color:#276EF1;word-break:break-all">{reset_url}</span>
+        </p>"""
 
-    html = _build_base_html("Đặt lại mật khẩu", body)
-    return _send(to_email, f"[{settings.EMAIL_FROM_NAME}] Đặt lại mật khẩu", html)
+        html = _build_base_html("Đặt lại mật khẩu", body)
+        return _send(to_email, f"[{settings.EMAIL_FROM_NAME}] Đặt lại mật khẩu", html)
+    except Exception as e:
+        logger.error(f"[EMAIL FAIL] send_reset_password_email failed: {e}")
+        return False
 
 
 def send_otp_email(to_email: str, full_name: str, otp_code: str, ip_address: str = "") -> bool:
     """Gửi mã OTP 6 số để xác thực đăng nhập từ IP lạ"""
-    print(f"[EMAIL] send_otp_email called → {to_email} | OTP: {otp_code}", flush=True)
-    name = full_name or to_email.split("@")[0]
-    ip_info = f"từ IP <strong>{ip_address}</strong> " if ip_address else ""
+    try:
+        logger.info(f"[EMAIL] send_otp_email called -> {to_email} | OTP: {otp_code}")
+        name = full_name or to_email.split("@")[0]
+        ip_info = f"từ IP <strong>{ip_address}</strong> " if ip_address else ""
 
-    body = f"""
-    <p>Xin chào <strong>{name}</strong>,</p>
-    <p>Có yêu cầu đăng nhập {ip_info}vào tài khoản của bạn từ một thiết bị chưa được nhận dạng.</p>
-    <div class="otp-box">
-      <div class="otp-code">{otp_code}</div>
-      <div class="otp-timer">⏱ Mã có hiệu lực trong <strong>5 phút</strong></div>
-    </div>
-    <div class="warning">
-      ⚠️ Nếu bạn không thực hiện đăng nhập này, hãy đổi mật khẩu ngay.
-    </div>"""
+        body = f"""
+        <p>Xin chào <strong>{name}</strong>,</p>
+        <p>Có yêu cầu đăng nhập {ip_info}vào tài khoản của bạn từ một thiết bị chưa được nhận dạng.</p>
+        <div class="otp-box">
+          <div class="otp-code">{otp_code}</div>
+          <div class="otp-timer">⏱ Mã có hiệu lực trong <strong>5 phút</strong></div>
+        </div>
+        <div class="warning">
+          ⚠️ Nếu bạn không thực hiện đăng nhập này, hãy đổi mật khẩu ngay.
+        </div>"""
 
-    html = _build_base_html("Xác thực đăng nhập", body)
-    return _send(to_email, f"[{settings.EMAIL_FROM_NAME}] Mã OTP đăng nhập: {otp_code}", html)
+        html = _build_base_html("Xác thực đăng nhập", body)
+        return _send(to_email, f"[{settings.EMAIL_FROM_NAME}] Mã OTP đăng nhập: {otp_code}", html)
+    except Exception as e:
+        logger.error(f"[EMAIL FAIL] send_otp_email failed: {e}")
+        return False

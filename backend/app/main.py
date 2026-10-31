@@ -17,33 +17,17 @@ from app.services.seed import seed_database
 async def run_migration():
     """Chạy migration thủ công — thêm cột nếu chưa tồn tại"""
     for stmt in [
-        "ALTER TABLE employees ADD COLUMN dependents INTEGER DEFAULT 0",
-        "ALTER TABLE advance_payments ADD COLUMN loan_id INTEGER",
-        "ALTER TABLE advance_payments ADD COLUMN installment_no INTEGER DEFAULT 1",
-        "ALTER TABLE app_users ADD COLUMN is_setup_completed BOOLEAN DEFAULT FALSE",
-        "ALTER TABLE user_sessions ADD COLUMN device_id VARCHAR(100)",
-        "ALTER TABLE otp_codes ADD COLUMN last_sent_at DATETIME",
-        """CREATE TABLE IF NOT EXISTS advance_loans (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            employee_id INTEGER NOT NULL,
-            loan_date DATE NOT NULL,
-            total_amount NUMERIC(12,2) NOT NULL,
-            advance_type VARCHAR(16) DEFAULT 'cash',
-            repayment_months INTEGER DEFAULT 1,
-            monthly_repayment NUMERIC(12,2),
-            start_month VARCHAR(7) NOT NULL,
-            paid_amount NUMERIC(12,2) DEFAULT 0,
-            status VARCHAR(16) DEFAULT 'active',
-            notes VARCHAR(255),
-            created_by VARCHAR(64),
-            created_at DATETIME,
-            updated_at DATETIME
-        )""",
-        "ALTER TABLE departments ADD COLUMN sort_order INTEGER DEFAULT 0",
-        "ALTER TABLE employees ADD COLUMN sort_order INTEGER DEFAULT 9999",
-        "ALTER TABLE company_holidays ADD COLUMN scope VARCHAR(32) DEFAULT 'all'",
-        "ALTER TABLE company_holidays ADD COLUMN departments VARCHAR(512)",
-        "ALTER TABLE company_holidays ADD COLUMN duration VARCHAR(16) DEFAULT 'full'",
+        "ALTER TABLE employees ADD COLUMN IF NOT EXISTS dependents INTEGER DEFAULT 0",
+        "ALTER TABLE advance_payments ADD COLUMN IF NOT EXISTS loan_id INTEGER",
+        "ALTER TABLE advance_payments ADD COLUMN IF NOT EXISTS installment_no INTEGER DEFAULT 1",
+        "ALTER TABLE app_users ADD COLUMN IF NOT EXISTS is_setup_completed BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS device_id VARCHAR(100)",
+        "ALTER TABLE otp_codes ADD COLUMN IF NOT EXISTS last_sent_at TIMESTAMP",
+        "ALTER TABLE departments ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 0",
+        "ALTER TABLE employees ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 9999",
+        "ALTER TABLE company_holidays ADD COLUMN IF NOT EXISTS scope VARCHAR(32) DEFAULT 'all'",
+        "ALTER TABLE company_holidays ADD COLUMN IF NOT EXISTS departments VARCHAR(512)",
+        "ALTER TABLE company_holidays ADD COLUMN IF NOT EXISTS duration VARCHAR(16) DEFAULT 'full'",
     ]:
         try:
             async with engine.begin() as conn:

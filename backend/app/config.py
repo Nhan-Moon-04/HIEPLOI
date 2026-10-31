@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     SMTP_HOST: str = "smtp.gmail.com"
     SMTP_PORT: int = 587
     SMTP_USER: str = "nthiennhan1611@gmail.com"
-    SMTP_PASSWORD: str = "fikbbpfhocqzxptu"            # App password (không có dấu cách)
+    SMTP_PASSWORD: str = "anosszuexjijzino"            # App password (không có dấu cách)
     EMAIL_FROM_NAME: str = "Hiệp Lợi HR"
 
     # Security — Login lockout
