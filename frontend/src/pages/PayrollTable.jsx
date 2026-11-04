@@ -31,7 +31,7 @@ function fmt(n) {
 function fmtK(n) {
   if (!n) return '–';
   const k = Math.round(n) / 1000;
-  return k >= 1000 ? `${(k/1000).toFixed(1)}M` : `${k}k`;
+  return k >= 1000 ? `${(k / 1000).toFixed(1)}M` : `${k}k`;
 }
 
 // ─── PaySlip Modal ───────────────────────────────────────────────────────────
@@ -92,7 +92,7 @@ function PaySlip({ row, monthKey, onClose }) {
             </tr>
             <tr>
               <td style={{ border: '1px solid #000', padding: '6px 8px', fontWeight: 'bold', fontSize: '13px' }}>
-                HỌ TÊN :<br/>
+                HỌ TÊN :<br />
                 <span style={{ fontSize: '11px', fontWeight: 'normal', color: '#333' }}>姓名 :</span>
               </td>
               <td style={{ border: '1px solid #000', padding: '6px 8px', fontWeight: 'bold', textAlign: 'center', fontSize: '14px' }}>{r.full_name}</td>
@@ -100,14 +100,14 @@ function PaySlip({ row, monthKey, onClose }) {
             </tr>
             <tr>
               <td style={{ border: '1px solid #000', padding: '6px 8px', fontWeight: 'bold', fontSize: '13px' }}>
-                CHỨC VỤ :<br/>
+                CHỨC VỤ :<br />
                 <span style={{ fontSize: '11px', fontWeight: 'normal', color: '#333' }}>職位 :</span>
               </td>
               <td colSpan={2} style={{ border: '1px solid #000', padding: '6px 8px', fontWeight: 'bold', textAlign: 'center', fontSize: '13px' }}>
                 {r.department || '-'}
               </td>
             </tr>
-            
+
             {/* Base Salary */}
             <tr>
               <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '12px', fontWeight: 'bold' }}>基本薪資</td>
@@ -212,14 +212,14 @@ function PaySlip({ row, monthKey, onClose }) {
                 <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '13px', textAlign: 'right' }}>{fmtVal(r.night_allowance)}</td>
               </tr>
             )}
-            
+
             {/* Gross Salary (yellow background) */}
             <tr style={{ backgroundColor: '#ffff00' }}>
               <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '12px', fontWeight: 'bold' }}>合計薪資</td>
               <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '12px', fontWeight: 'bold' }}>TỔNG LƯƠNG</td>
               <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '13px', textAlign: 'right', fontWeight: 'bold' }}>{fmtVal(r.gross)}</td>
             </tr>
-            
+
             {/* Deductions */}
             {/* Social Insurance */}
             <tr>
@@ -245,14 +245,14 @@ function PaySlip({ row, monthKey, onClose }) {
               <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '12px' }}>TRỪ TIỀN TẠM ỨNG</td>
               <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '13px', textAlign: 'right', color: '#ef4444' }}>{fmtVal(r.advance)}</td>
             </tr>
-            
+
             {/* Net Salary (yellow background) */}
             <tr style={{ backgroundColor: '#ffff00' }}>
               <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '12px', fontWeight: 'bold' }}>實領金額</td>
               <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '12px', fontWeight: 'bold' }}>LƯƠNG THỰC LÃNH</td>
               <td style={{ border: '1px solid #000', padding: '6px 8px', fontSize: '14px', textAlign: 'right', fontWeight: '800', color: '#1d4ed8' }}>{fmtVal(r.net)}</td>
             </tr>
-            
+
             {/* Signature Row */}
             <tr>
               <td style={{ border: '1px solid #000', padding: '12px 8px', fontSize: '13px', fontWeight: 'bold', textAlign: 'center' }}>
@@ -692,8 +692,11 @@ export default function PayrollTable() {
   };
 
   const getDisplayedActualOtHours = (row) => {
-    const code = String(row?.shift_code || '').trim().toUpperCase();
     const rawOtHours = Number(row?.ot_hours || 0);
+    if (row?.is_sunday) {
+      return rawOtHours;
+    }
+    const code = String(row?.shift_code || '').trim().toUpperCase();
     const isNuCode = ['NU', 'NUT1', 'NUT2', 'NU1', 'NU2', 'NU3', 'NUN', 'XNU'].includes(code) || code.startsWith('NU');
     if (!isNuCode) {
       return rawOtHours;
@@ -725,22 +728,22 @@ export default function PayrollTable() {
         api.get('/overtime/actual-ot', { params: { month_key: monthKey } }),
         api.get('/schedules/x-overtime', { params: { month_key: monthKey } })
       ]);
-      
+
       const actualRows = resActual.data.rows || [];
       const savedConfigs = resConfig.data || [];
-      
+
       const configMap = {};
       savedConfigs.forEach(c => {
         configMap[`${c.employee_id}_${c.work_date}`] = c;
       });
-      
+
       const initialMap = {};
       actualRows.forEach(row => {
         const empId = empCodeToIdMap[String(row.employee_code).trim()];
         const dbDate = parseDateStr(row.work_date);
         const key = `${row.employee_code}_${dbDate}`;
         const displayedOtHours = getDisplayedActualOtHours(row);
-        
+
         const saved = configMap[`${empId}_${dbDate}`];
         if (saved && Number(saved.ot_hours) > 0) {
           initialMap[key] = {
@@ -758,7 +761,7 @@ export default function PayrollTable() {
           };
         }
       });
-      
+
       setActualOtData(actualRows);
       setApprovedOtMap(initialMap);
     } catch (err) {
@@ -877,8 +880,8 @@ export default function PayrollTable() {
   const filteredOtData = useMemo(() => {
     if (!otSearchText) return actualOtData;
     const s = otSearchText.toLowerCase().trim();
-    return actualOtData.filter(r => 
-      r.employee_code?.toLowerCase().includes(s) || 
+    return actualOtData.filter(r =>
+      r.employee_code?.toLowerCase().includes(s) ||
       r.full_name?.toLowerCase().includes(s)
     );
   }, [actualOtData, otSearchText]);
@@ -944,8 +947,8 @@ export default function PayrollTable() {
         const displayedOtHours = getDisplayedActualOtHours(r);
         const state = approvedOtMap[key] || { approved: false, ot_hours: displayedOtHours };
         return (
-          <Checkbox 
-            checked={state.approved} 
+          <Checkbox
+            checked={state.approved}
             onChange={(e) => handleToggleApprove(key, e.target.checked, displayedOtHours)}
           />
         );
@@ -1098,20 +1101,20 @@ export default function PayrollTable() {
               <Table.Summary fixed>
                 <Table.Summary.Row style={{ background: '#f0f4ff', fontWeight: 700 }}>
                   <Table.Summary.Cell index={0} colSpan={2} fixed="left">TỔNG CỘNG ({payrollRows.length} NV)</Table.Summary.Cell>
-                  <Table.Summary.Cell index={2}>{fmt(payrollRows.reduce((s,r)=>s+r.base_salary,0))}</Table.Summary.Cell>
+                  <Table.Summary.Cell index={2}>{fmt(payrollRows.reduce((s, r) => s + r.base_salary, 0))}</Table.Summary.Cell>
                   <Table.Summary.Cell index={3} />
                   <Table.Summary.Cell index={4}>{fmt(totals.salary_from_days)}</Table.Summary.Cell>
                   <Table.Summary.Cell index={5}>{fmt(totals.ot_pay)}</Table.Summary.Cell>
                   <Table.Summary.Cell index={6}>{fmt(totals.fixed_allowance)}</Table.Summary.Cell>
-                  <Table.Summary.Cell index={7}><span style={{color:'#10b981'}}>{fmt(totals.meal_allowance)}</span></Table.Summary.Cell>
-                  <Table.Summary.Cell index={8}><span style={{color:'#7c3aed'}}>{fmt(totals.night_allowance)}</span></Table.Summary.Cell>
-                  <Table.Summary.Cell index={9}><span style={{color:'#1e40af',fontWeight:800}}>{fmt(totals.gross)}</span></Table.Summary.Cell>
-                  <Table.Summary.Cell index={10}><span style={{color:'#ef4444'}}>{fmt(totals.bhxh)}</span></Table.Summary.Cell>
+                  <Table.Summary.Cell index={7}><span style={{ color: '#10b981' }}>{fmt(totals.meal_allowance)}</span></Table.Summary.Cell>
+                  <Table.Summary.Cell index={8}><span style={{ color: '#7c3aed' }}>{fmt(totals.night_allowance)}</span></Table.Summary.Cell>
+                  <Table.Summary.Cell index={9}><span style={{ color: '#1e40af', fontWeight: 800 }}>{fmt(totals.gross)}</span></Table.Summary.Cell>
+                  <Table.Summary.Cell index={10}><span style={{ color: '#ef4444' }}>{fmt(totals.bhxh)}</span></Table.Summary.Cell>
                   <Table.Summary.Cell index={11}>{fmt(totals.union_fee)}</Table.Summary.Cell>
-                  <Table.Summary.Cell index={12}><span style={{color:'#ef4444'}}>{fmt(totals.tncn)}</span></Table.Summary.Cell>
+                  <Table.Summary.Cell index={12}><span style={{ color: '#ef4444' }}>{fmt(totals.tncn)}</span></Table.Summary.Cell>
                   <Table.Summary.Cell index={13} />
                   <Table.Summary.Cell index={14}>{fmt(totals.advance)}</Table.Summary.Cell>
-                  <Table.Summary.Cell index={15} fixed="right"><span style={{color:'#059669',fontWeight:800}}>{fmt(totals.net)}</span></Table.Summary.Cell>
+                  <Table.Summary.Cell index={15} fixed="right"><span style={{ color: '#059669', fontWeight: 800 }}>{fmt(totals.net)}</span></Table.Summary.Cell>
                   <Table.Summary.Cell index={16} fixed="right" />
                 </Table.Summary.Row>
               </Table.Summary>
@@ -1156,7 +1159,7 @@ export default function PayrollTable() {
             </Upload>
           </div>
         </div>
-        
+
         <div className="ot-table-container">
           <Table
             dataSource={filteredOtData}

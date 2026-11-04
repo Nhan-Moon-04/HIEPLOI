@@ -21,7 +21,7 @@ from app.middleware.auth import get_current_user
 from app.routers.attendance import evaluate_attendance, parse_time, check_holiday_applies_to_employee
 from app.services.nu_shift import (
     is_nu_dynamic_shift_code, build_nu_shift_day_results,
-    XNU_MODE_1, XNU_MODE_2, XNU_MODE_3, NU_MORNING_MODE, NU_NIGHT_MODE, NU_STANDARD_HOURS,
+    XNU_MODE_1, XNU_MODE_2, XNU_MODE_3, XNU_MODE_1_2, NU_MORNING_MODE, NU_NIGHT_MODE, NU_STANDARD_HOURS,
 )
 from pydantic import BaseModel
 
@@ -44,6 +44,7 @@ _XNU_SCHEDULE = {
     XNU_MODE_1: (time(6, 0),  time(14, 0), False),
     XNU_MODE_2: (time(14, 0), time(22, 0), False),
     XNU_MODE_3: (time(22, 0), time(6, 0),  True),
+    XNU_MODE_1_2: (time(6, 0), time(22, 0), False),
 }
 
 
@@ -183,7 +184,7 @@ async def _compute_actual_ot(month_key: str, db: AsyncSession, current_user) -> 
     # ── NU raw logs (for mode detection) ───────────────────────────────────
     log_res = await db.execute(
         select(AttendanceLog).where(and_(
-            AttendanceLog.event_time >= datetime.combine(first_day, time(0, 0)),
+            AttendanceLog.event_time >= datetime.combine(first_day - timedelta(days=7), time(0, 0)),
             AttendanceLog.event_time <= datetime.combine(last_day + timedelta(days=1), time(12, 0)),
         ))
     )
@@ -200,6 +201,16 @@ async def _compute_actual_ot(month_key: str, db: AsyncSession, current_user) -> 
     emp_id_list = [e.id for e in employees]
     for emp in employees:
         default_shift = shifts_by_code.get(emp.default_shift_code)
+        for offset in range(1, 8):
+            prev_dt = first_day - timedelta(days=offset)
+            ov_id = override_map.get((emp.id, prev_dt.day))
+            if ov_id:
+                s = shifts_by_id.get(ov_id)
+                if s and is_nu_dynamic_shift_code(s.code):
+                    nu_shift_code_map[(emp.id, prev_dt)] = s.code
+            elif default_shift and is_nu_dynamic_shift_code(default_shift.code):
+                nu_shift_code_map[(emp.id, prev_dt)] = default_shift.code
+
         for d in range(1, days_in_month + 1):
             dt = date(year, month, d)
             ov_id = override_map.get((emp.id, d))
@@ -294,59 +305,64 @@ async def _compute_actual_ot(month_key: str, db: AsyncSession, current_user) -> 
             # ── Sunday: tính giờ OT thực tế (không ×2 — kế toán tự nhân) ──────
             if is_sunday:
                 is_tx  = bool(shift and (shift.code or "").upper() in _TX_CODES)
-                is_xnu = bool(shift and (shift.code or "").upper() == "XNU")
                 s_code = (shift_code or "").upper()
+                is_xnu = bool(shift and (shift.code or "").upper() == "XNU") or s_code == "XNU"
                 is_nu_sun = is_nu_dynamic_shift_code(s_code) or bool(nu_res)
 
-                # Xác định lịch ca cho chủ nhật
+                # Xác định lịch ca và giờ OT cho chủ nhật
                 if is_xnu and nu_res:
-                    sched = _XNU_SCHEDULE.get(nu_res.mode)
-                    if not sched:
-                        continue
-                    s_start_t, s_end_t, s_next = sched
-                elif shift and shift.start_time and shift.end_time:
-                    s_start_t = shift.start_time if isinstance(shift.start_time, time) else parse_time(shift.start_time)
-                    s_end_t   = shift.end_time   if isinstance(shift.end_time,   time) else parse_time(shift.end_time)
-                    s_next    = bool(getattr(shift, 'is_night_shift', False))
-                else:
-                    s_start_t = s_end_t = None
-                    s_next = False
-
-                if s_start_t and s_end_t:
-                    s_start_dt = datetime.combine(dt, s_start_t)
-                    s_end_dt   = datetime.combine(dt + timedelta(days=1) if s_next else dt, s_end_t)
-                    shift_hours_str = f"{s_start_t.strftime('%H:%M')}-{s_end_t.strftime('%H:%M')}"
+                    if nu_res.mode == XNU_MODE_1_2:
+                        shift_hours_str = "06:00-22:00"
+                        ot_hours = 16.0
+                    else:
+                        sched = _XNU_SCHEDULE.get(nu_res.mode)
+                        if not sched:
+                            continue
+                        s_start_t, s_end_t, s_next = sched
+                        s_start_dt = datetime.combine(dt, s_start_t)
+                        s_end_dt   = datetime.combine(dt + timedelta(days=1) if s_next else dt, s_end_t)
+                        shift_hours_str = f"{s_start_t.strftime('%H:%M')}-{s_end_t.strftime('%H:%M')}"
+                        effective_in = s_start_dt if check_in_dt <= s_start_dt + timedelta(minutes=15) else _ceil_30min(check_in_dt)
+                        raw_h = max((check_out_dt - effective_in).total_seconds() / 3600.0, 0.0)
+                        # Ca XNU ngày Chủ Nhật: làm đủ ca (>= 6h) -> mặc định tính 8h OT (hoặc thực tế nếu > 8h)
+                        if raw_h >= 6.0:
+                            ot_hours = max(8.0, _to_half(raw_h))
+                        else:
+                            ot_hours = _to_half(raw_h)
                 elif is_nu_sun:
                     mode = nu_res.mode if nu_res else (
                         NU_NIGHT_MODE if (check_in_dt.hour >= 17 or check_out_dt < check_in_dt) else NU_MORNING_MODE
                     )
                     shift_hours_str = "18:00-06:00" if mode == NU_NIGHT_MODE else "06:00-18:00"
-                else:
-                    s_start_dt = s_end_dt = None
-                    shift_hours_str = "Chủ nhật"
-
-                # Giờ vào hiệu lực:
-                #   TX: làm tròn 30p gần nhất
-                #   Non-TX vào sớm hoặc trễ ≤15p: lấy đúng giờ bắt đầu ca
-                #   Non-TX vào trễ >15p: làm tròn lên 30p
-                if is_tx:
                     effective_in = _round_nearest_30min(check_in_dt)
-                elif s_start_dt and check_in_dt <= s_start_dt + timedelta(minutes=15):
-                    effective_in = s_start_dt
-                else:
-                    effective_in = _ceil_30min(check_in_dt)
-                raw_h = max((check_out_dt - effective_in).total_seconds() / 3600.0, 0.0)
-
-                # Trừ 30p nghỉ giữa giờ nếu:
-                #   - Ca có span >= 8.5h (tức ca 9h, ví dụ X, TX — span 7h-16h=9h)
-                #   - Và giờ vào hiệu lực < giờ kết thúc ca - 5h (tức có làm buổi sáng)
-                #   - XNU span = 8h → không đủ điều kiện, không trừ
-                if s_start_dt and s_end_dt:
+                    raw_h = max((check_out_dt - effective_in).total_seconds() / 3600.0, 0.0)
+                    # Ca NU ngày Chủ Nhật: làm từ 6h trở lên -> mặc định 8h OT
+                    if raw_h >= 6.0:
+                        ot_hours = max(8.0, _to_half(raw_h))
+                    else:
+                        ot_hours = _to_half(raw_h)
+                elif shift and shift.start_time and shift.end_time:
+                    s_start_t = shift.start_time if isinstance(shift.start_time, time) else parse_time(shift.start_time)
+                    s_end_t   = shift.end_time   if isinstance(shift.end_time,   time) else parse_time(shift.end_time)
+                    s_next    = bool(getattr(shift, 'is_night_shift', False))
+                    s_start_dt = datetime.combine(dt, s_start_t)
+                    s_end_dt   = datetime.combine(dt + timedelta(days=1) if s_next else dt, s_end_t)
+                    shift_hours_str = f"{s_start_t.strftime('%H:%M')}-{s_end_t.strftime('%H:%M')}"
+                    if is_tx:
+                        effective_in = _round_nearest_30min(check_in_dt)
+                    elif s_start_dt and check_in_dt <= s_start_dt + timedelta(minutes=15):
+                        effective_in = s_start_dt
+                    else:
+                        effective_in = _ceil_30min(check_in_dt)
+                    raw_h = max((check_out_dt - effective_in).total_seconds() / 3600.0, 0.0)
                     span_h = (s_end_dt - s_start_dt).total_seconds() / 3600.0
                     if span_h >= 8.5 and effective_in < (s_end_dt - timedelta(hours=5)):
                         raw_h = max(raw_h - 0.5, 0.0)
-
-                ot_hours = _to_half(raw_h)  # không ×2; kế toán tự có công thức trong Excel
+                    ot_hours = _to_half(raw_h)
+                else:
+                    shift_hours_str = "Chủ nhật"
+                    raw_h = max((check_out_dt - check_in_dt).total_seconds() / 3600.0, 0.0)
+                    ot_hours = _to_half(raw_h)
 
                 if ot_hours <= 0:
                     continue
@@ -378,6 +394,24 @@ async def _compute_actual_ot(month_key: str, db: AsyncSession, current_user) -> 
 
                     # Xác định giờ kết thúc ca
                     if is_nu and nu_res and s_code == "XNU":
+                        if nu_res.mode == XNU_MODE_1_2:
+                            shift_hours_str = "06:00-22:00"
+                            ot_hours = 8.0
+                            stt += 1
+                            rows.append({
+                                "stt": stt,
+                                "employee_code": emp.employee_code,
+                                "full_name": emp.full_name,
+                                "work_date": dt.strftime("%d/%m/%Y"),
+                                "weekday": dow,
+                                "shift_code": shift_code,
+                                "shift_hours": shift_hours_str,
+                                "check_in":  check_in_dt.strftime("%H:%M")  if check_in_dt  else "",
+                                "check_out": check_out_dt.strftime("%H:%M") if check_out_dt else "",
+                                "ot_hours": ot_hours,
+                                "is_sunday": is_sunday,
+                            })
+                            continue
                         sched = _XNU_SCHEDULE.get(nu_res.mode)
                         if not sched:
                             continue

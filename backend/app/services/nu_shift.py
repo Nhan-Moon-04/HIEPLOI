@@ -338,12 +338,15 @@ def _compute_dynamic_nu_overtime_hours(check_in, check_out, mode):
 XNU_MIN_HOURS_THRESHOLD = 6.0  # Dưới 6h = bất thường, cần duyệt
 
 
-def _build_result(mode, week_mode, shift_code, has_midday_check, warning_note, check_in, check_out, night_allowance_rate=0.0):
+def _build_result(mode, week_mode, shift_code, has_midday_check, warning_note, check_in, check_out, night_allowance_rate=0.0, is_sunday=False):
     code = (shift_code or NU_SHIFT_CODE).upper()
-    standard_hours = max(
-        NU_STANDARD_HOURS - NU_STANDARD_HOURS_DEDUCTION_BY_CODE.get(code, 0.0),
-        0.0,
-    )
+    if is_sunday:
+        standard_hours = 0.0
+    else:
+        standard_hours = max(
+            NU_STANDARD_HOURS - NU_STANDARD_HOURS_DEDUCTION_BY_CODE.get(code, 0.0),
+            0.0,
+        )
     base_overtime = (
         NU_NIGHT_DEFAULT_OT_HOURS if mode == NU_NIGHT_MODE else NU_MORNING_DEFAULT_OT_HOURS
     )
@@ -367,13 +370,18 @@ def _build_result(mode, week_mode, shift_code, has_midday_check, warning_note, c
         # --- Xử lý làm 2 ca liên tục cho XNU (Ca 1 & Ca 2: 06:00-22:00) ---
         if mode == XNU_MODE_1_2:
             is_double_shift = True
-            double_shift_desc = "Ca 1 (06:00-14:00: 8h) & Ca 2 (14:00-22:00: 8h)"
-            standard_hours = 8.0
-            overtime_hours = 8.0
+            is_irregular = False
+            if is_sunday:
+                double_shift_desc = "Ca 1 (06:00-14:00: 8h) & Ca 2 (14:00-22:00: 8h) - Chủ nhật (16h OT)"
+                standard_hours = 0.0
+                overtime_hours = 16.0
+            else:
+                double_shift_desc = "Ca 1 (06:00-14:00: 8h) & Ca 2 (14:00-22:00: 8h)"
+                standard_hours = 8.0
+                overtime_hours = 8.0
             meal_count = 1  # 1 bữa ca chính (khi chưa xác nhận tăng ca)
             meal_allowance = 35000.0
             night_allowance = 0.0
-            is_irregular = False
 
         # --- Tính tiền ăn theo từng ca XNU ---
         elif mode == XNU_MODE_2:
@@ -455,6 +463,19 @@ def _build_result(mode, week_mode, shift_code, has_midday_check, warning_note, c
                 is_irregular = True
                 meal_allowance = 0.0
                 meal_count = 0
+
+        # Quy tắc Chủ Nhật: nếu có làm thì mặc định 8h OT cho ca XNU và NU
+        if is_sunday and mode != XNU_MODE_1_2:
+            standard_hours = 0.0
+            if check_in and check_out:
+                worked_hours = _hours_between(check_in, check_out)
+                if worked_hours >= XNU_MIN_HOURS_THRESHOLD:
+                    # Làm đủ ca (>= 6h) -> mặc định tính 8h OT (hoặc hơn nếu làm thêm giờ)
+                    overtime_hours = max(8.0, normalize_nu_overtime_hours(worked_hours))
+                else:
+                    overtime_hours = normalize_nu_overtime_hours(worked_hours)
+            elif check_in or check_out:
+                overtime_hours = 8.0
 
         # Phụ cấp ca đêm chỉ cho ca tối
         if mode in (NU_NIGHT_MODE, XNU_MODE_3):
@@ -613,7 +634,8 @@ def build_nu_shift_day_results(
                 warning_note=warning_note,
                 check_in=check_in,
                 check_out=check_out,
-                night_allowance_rate=night_allowance_rate
+                night_allowance_rate=night_allowance_rate,
+                is_sunday=(work_date.weekday() == 6)
             )
 
     return results
@@ -623,16 +645,21 @@ def is_nu_warning_note(notes):
     text_value = str(notes or "").lower()
     return NU_WARNING_NOTE_PREFIX.lower() in text_value
 
-def calculate_nu_shift_details(shift_code: str, actual_hours: float, is_night: bool = False, night_allowance_rate: float = 0.0):
+def calculate_nu_shift_details(shift_code: str, actual_hours: float, is_night: bool = False, night_allowance_rate: float = 0.0, is_sunday: bool = False):
     # This is a simplified version for single-day calculation without log access
     code = shift_code.upper()
-    standard_hours = max(NU_STANDARD_HOURS - NU_STANDARD_HOURS_DEDUCTION_BY_CODE.get(code, 0.0), 0.0)
-    
-    raw_ot = max(actual_hours - NU_STANDARD_HOURS, 0.0)
-    
-    normalized_ot = normalize_nu_overtime_hours(raw_ot)
-    extra_ot = NU_EXTRA_OT_BY_CODE.get(code, 0.0)
-    total_ot = normalized_ot + extra_ot
+    if is_sunday:
+        standard_hours = 0.0
+        if actual_hours >= XNU_MIN_HOURS_THRESHOLD:
+            total_ot = max(8.0, normalize_nu_overtime_hours(actual_hours))
+        else:
+            total_ot = normalize_nu_overtime_hours(actual_hours)
+    else:
+        standard_hours = max(NU_STANDARD_HOURS - NU_STANDARD_HOURS_DEDUCTION_BY_CODE.get(code, 0.0), 0.0)
+        raw_ot = max(actual_hours - NU_STANDARD_HOURS, 0.0)
+        normalized_ot = normalize_nu_overtime_hours(raw_ot)
+        extra_ot = NU_EXTRA_OT_BY_CODE.get(code, 0.0)
+        total_ot = normalized_ot + extra_ot
     
     # Không có check_in/out thực tế: dùng is_night để suy luận điều kiện bữa ăn
     # Ca tối (is_night=True): check-in >= 18h → bữa tối; Ca sáng: giả định check-in 6h < 9h → bữa sáng

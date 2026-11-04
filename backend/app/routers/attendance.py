@@ -321,7 +321,7 @@ def evaluate_attendance(shift, check_in_dt, check_out_dt, work_date, is_sunday, 
     # Special logic for NU shifts
     if shift and is_nu_dynamic_shift_code(shift.code):
         effective_is_night = is_night_override if is_night_override is not None else shift.is_night_shift
-        nu_calc = calculate_nu_shift_details(shift.code, actual, is_night=effective_is_night, night_allowance_rate=night_allowance_rate)
+        nu_calc = calculate_nu_shift_details(shift.code, actual, is_night=effective_is_night, night_allowance_rate=night_allowance_rate, is_sunday=is_sunday)
         result["ot_hours"] = nu_calc["ot_hours"]
         result["meal_allowance"] = nu_calc["meal_allowance"]
         result["night_allowance"] = nu_calc["night_allowance"]
@@ -817,7 +817,7 @@ async def get_attendance(
                     ev["actual_hours"] = 16.0
                     ev["deviation"] = 0.0
                     ev["status"] = "full"
-                    ev["ot_hours"] = 8.0
+                    ev["ot_hours"] = 16.0 if is_sunday else 8.0
                 else:
                     mode_str = "Sáng" if nu_res.mode == "morning" else "Tối"
                     mode_note = f"Ca {mode_str}"
