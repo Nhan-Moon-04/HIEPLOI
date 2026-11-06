@@ -344,13 +344,14 @@ export default function MealAllowanceDetail() {
     scrollEl.style.overflow = 'visible';
 
     try {
-      await new Promise((resolve) => setTimeout(resolve, 150));
+      await new Promise((resolve) => setTimeout(resolve, 200));
 
       const canvas = await html2canvas(cardEl, {
-        scale: 2,
+        scale: 3, // Siêu nét Ultra-HD
         useCORS: true,
-        backgroundColor: isDark ? '#111827' : '#f8fafc',
+        backgroundColor: isDark ? '#1a1f2e' : '#ffffff',
         logging: false,
+        imageTimeout: 0,
       });
 
       scrollEl.style.maxHeight = originalMaxHeight;
@@ -545,8 +546,8 @@ export default function MealAllowanceDetail() {
         </div>
       </div>
 
-      {/* ─── CAPTURABLE WRAPPER (EMPLOYEE PROFILE + KPIS + TABLE) ───── */}
-      <div id="mad-capture-card" className="mad-capture-container">
+      {/* ─── PAGE CONTENT (EMPLOYEE PROFILE + KPIS + TABLE) ──────── */}
+      <div className="mad-content-wrapper">
         
         {/* ─── 1. EMPLOYEE PROFILE HERO CARD ────────────────────────── */}
         <div className="mad-emp-card">
@@ -681,7 +682,7 @@ export default function MealAllowanceDetail() {
         </div>
 
         {/* ─── 3. BẢNG CHẤM CÔNG CHI TIẾT (CLEAN TABLE) ─────────────── */}
-        <div className="mad-table-card">
+        <div id="mad-capture-card" className="mad-table-card">
           <div className="mad-table-header">
             <div className="mad-table-title-box">
               <h2 className="mad-table-title">Bảng chấm công chi tiết</h2>
@@ -971,10 +972,10 @@ export default function MealAllowanceDetail() {
               </tfoot>
             </table>
           </div>
-        </div>
 
-        <div className="mad-footer-note">
-          * Quy tắc tính: Ca tiêu chuẩn làm đủ thời gian mặc định 8h; thời gian làm việc sau ca được tính tăng ca và làm tròn theo mốc 30 phút. Phụ cấp ca đêm tính theo mức cấu hình.
+          <div className="mad-table-footer-note">
+            * Quy tắc tính: Ca tiêu chuẩn làm đủ thời gian mặc định 8h; thời gian làm việc sau ca được tính tăng ca và làm tròn theo mốc 30 phút. Phụ cấp ca đêm tính theo mức cấu hình.
+          </div>
         </div>
       </div>
 
