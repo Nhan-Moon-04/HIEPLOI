@@ -6,7 +6,6 @@ import {
   DollarCircleOutlined,
   MoonOutlined,
   CoffeeOutlined,
-  UserOutlined,
   TeamOutlined,
   FullscreenOutlined,
   FullscreenExitOutlined,
@@ -19,7 +18,8 @@ import {
   EyeOutlined,
   EyeInvisibleOutlined,
   ClockCircleOutlined,
-  FireOutlined,
+  CheckCircleOutlined,
+  WalletOutlined,
 } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
 import { Spin, Button, Alert, Modal, Checkbox, message, Space } from 'antd';
@@ -28,6 +28,7 @@ import html2canvas from 'html2canvas';
 import api from '../api/client';
 import useAuthStore from '../stores/authStore';
 import useThemeStore from '../stores/themeStore';
+import './MealAllowanceDetail.css';
 
 const DOW_VN = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
 const SUMMARY_KEYS = [
@@ -44,16 +45,16 @@ const SUMMARY_KEYS = [
 ];
 
 const DEFAULT_COLUMNS = [
-  { id: 'day', label: 'Ngày', align: 'center', visible: true, width: '60px' },
-  { id: 'dow', label: 'Thứ', align: 'center', visible: true, width: '65px' },
+  { id: 'day', label: 'Ngày', align: 'center', visible: true, width: '56px' },
+  { id: 'dow', label: 'Thứ', align: 'center', visible: true, width: '60px' },
   { id: 'shift_code', label: 'Ca', align: 'center', visible: true, width: '75px' },
-  { id: 'check_in', label: 'Giờ vào', align: 'center', visible: true, width: '85px' },
-  { id: 'check_out', label: 'Giờ ra', align: 'center', visible: true, width: '85px' },
-  { id: 'work_hours', label: 'Giờ làm', align: 'center', visible: true, width: '85px' },
-  { id: 'ot_hours', label: 'Tăng ca', align: 'center', visible: true, width: '90px' },
-  { id: 'meal_count', label: 'Bữa', align: 'center', visible: true, width: '65px' },
+  { id: 'check_in', label: 'Giờ vào', align: 'center', visible: true, width: '80px' },
+  { id: 'check_out', label: 'Giờ ra', align: 'center', visible: true, width: '80px' },
+  { id: 'work_hours', label: 'Giờ làm', align: 'center', visible: true, width: '80px' },
+  { id: 'ot_hours', label: 'Tăng ca', align: 'center', visible: true, width: '85px' },
+  { id: 'meal_count', label: 'Bữa', align: 'center', visible: true, width: '60px' },
   { id: 'meal_allowance', label: 'Tiền ăn', align: 'right', visible: true, width: '105px' },
-  { id: 'night_allowance', label: 'Phụ cấp đêm', align: 'right', visible: true, width: '105px' },
+  { id: 'night_allowance', label: 'PC Đêm', align: 'right', visible: true, width: '105px' },
   { id: 'total_amount', label: 'Tổng tiền', align: 'right', visible: true, width: '115px' },
   { id: 'status', label: 'Trạng thái', align: 'center', visible: true, width: '120px' },
   { id: 'notes', label: 'Ghi chú', align: 'left', visible: false, width: '130px' },
@@ -61,7 +62,7 @@ const DEFAULT_COLUMNS = [
 
 const getStoredColumns = () => {
   try {
-    const raw = localStorage.getItem('mad_columns_v4');
+    const raw = localStorage.getItem('mad_columns_v5');
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) {
@@ -139,6 +140,13 @@ const mergeAttendanceResponses = (responses) => {
   return { rows: Array.from(rowMap.values()) };
 };
 
+const getInitials = (name) => {
+  if (!name) return '?';
+  const parts = name.trim().split(/\s+/);
+  if (parts.length === 1) return parts[0][0].toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+};
+
 export default function MealAllowanceDetail() {
   const { id } = useParams();
   const [searchParams] = useSearchParams();
@@ -168,7 +176,7 @@ export default function MealAllowanceDetail() {
 
   const saveColumns = (newCols) => {
     setColumns(newCols);
-    localStorage.setItem('mad_columns_v4', JSON.stringify(newCols));
+    localStorage.setItem('mad_columns_v5', JSON.stringify(newCols));
   };
 
   const handleMoveColumn = (index, direction) => {
@@ -260,6 +268,14 @@ export default function MealAllowanceDetail() {
   const data = attResponse?.rows?.[0];
   const cellsByDate = data?.cellsByDate || {};
 
+  useEffect(() => {
+    if (data?.full_name) {
+      document.title = `Chi tiết tiền ăn - ${data.full_name} | Hiệp Lợi HR`;
+    } else {
+      document.title = 'Chi tiết tiền ăn | Hiệp Lợi HR';
+    }
+  }, [data?.full_name]);
+
   const displayDays = useMemo(() => {
     if (!data) return [];
     return dateList.map((d) => {
@@ -328,12 +344,12 @@ export default function MealAllowanceDetail() {
     scrollEl.style.overflow = 'visible';
 
     try {
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await new Promise((resolve) => setTimeout(resolve, 150));
 
       const canvas = await html2canvas(cardEl, {
         scale: 2,
         useCORS: true,
-        backgroundColor: isDark ? '#1e293b' : '#ffffff',
+        backgroundColor: isDark ? '#111827' : '#f8fafc',
         logging: false,
       });
 
@@ -394,29 +410,29 @@ export default function MealAllowanceDetail() {
     if (hasWorked || ['full', 'present'].includes(cell.status)) {
       if (isSun) {
         return (
-          <span className="mad-status mad-status--worked-sun">
-            <span className="mad-status-dot" />
+          <span className="mad-badge mad-badge--worked-sun">
+            <span className="mad-badge-dot" />
             Đi làm (CN)
           </span>
         );
       }
       if (isHol) {
         return (
-          <span className="mad-status mad-status--worked-hol">
-            <span className="mad-status-dot" />
+          <span className="mad-badge mad-badge--worked-hol">
+            <span className="mad-badge-dot" />
             Đi làm (Lễ)
           </span>
         );
       }
       if (isEarly) {
-        return <span className="mad-status mad-status--early">Về sớm</span>;
+        return <span className="mad-badge mad-badge--early">Về sớm</span>;
       }
       if (isShort) {
-        return <span className="mad-status mad-status--short">Thiếu giờ</span>;
+        return <span className="mad-badge mad-badge--short">Thiếu giờ</span>;
       }
       return (
-        <span className="mad-status mad-status--present">
-          <span className="mad-status-dot" />
+        <span className="mad-badge mad-badge--present">
+          <span className="mad-badge-dot" />
           Đi làm
         </span>
       );
@@ -424,35 +440,39 @@ export default function MealAllowanceDetail() {
 
     // 2. Only 1 punch
     if (isForgot && cell.status !== 'absent') {
-      return <span className="mad-status mad-status--forgot">Quên quét thẻ</span>;
+      return <span className="mad-badge mad-badge--forgot">Quên quét thẻ</span>;
     }
 
     // 3. Absent
     if (isAbsent) {
-      return <span className="mad-status mad-status--absent">Vắng</span>;
+      return <span className="mad-badge mad-badge--absent">Vắng</span>;
     }
 
     // 4. Off on weekend/holiday without work
     if (isSun) {
-      return <span className="mad-status mad-status--sun">Nghỉ CN</span>;
+      return <span className="mad-badge mad-badge--sun">Nghỉ CN</span>;
     }
     if (isHol) {
-      return <span className="mad-status mad-status--hol">Nghỉ lễ</span>;
+      return <span className="mad-badge mad-badge--hol">Nghỉ lễ</span>;
     }
     if (cell.status === 'off') {
-      return <span className="mad-status mad-status--off">Nghỉ</span>;
+      return <span className="mad-badge mad-badge--off">Nghỉ</span>;
     }
 
     // 5. No data
     if (isNoData) {
-      return <span className="mad-status mad-status--nodata">Không có DL</span>;
+      return <span className="mad-dash">–</span>;
     }
 
-    return <span className="mad-status mad-status--nodata">{cell.status || '–'}</span>;
+    return <span className="mad-badge mad-badge--default">{cell.status || '–'}</span>;
   };
 
   if (isLoading) {
-    return <div className="mad-loading"><Spin size="large" /></div>;
+    return (
+      <div className="mad-loading">
+        <Spin size="large" />
+      </div>
+    );
   }
 
   if (!data) {
@@ -460,526 +480,509 @@ export default function MealAllowanceDetail() {
       <div className="mad-loading">
         <div style={{ color: '#94a3b8', textAlign: 'center' }}>
           <MinusCircleOutlined style={{ fontSize: 32, marginBottom: 12 }} />
-          <div>Không tìm thấy dữ liệu</div>
-          <Button type="link" onClick={() => navigate(-1)} style={{ marginTop: 8 }}>Quay lại</Button>
+          <div>Không tìm thấy dữ liệu nhân viên</div>
+          <Button type="link" onClick={() => navigate(-1)} style={{ marginTop: 8 }}>
+            Quay lại danh sách
+          </Button>
         </div>
       </div>
     );
   }
 
-  const activeDays = displayDays.filter((d) => d.status !== 'no_data').length;
   const visibleColumns = columns.filter((c) => c.visible);
 
   return (
     <div ref={pageRef} className={`mad-page ${isFullscreen ? 'mad-page--fullscreen' : ''}`}>
-      {/* ─── PAGE HEADER ────────────────────────────────────────────── */}
-      <div className="mad-header">
-        <div className="mad-header-left">
-          {/* Breadcrumb */}
-          <nav className="mad-breadcrumb" aria-label="Breadcrumb">
-            <span className="mad-breadcrumb-item">Lương &amp; Thuế</span>
-            <span className="mad-breadcrumb-separator">/</span>
-            <span
-              className="mad-breadcrumb-item mad-breadcrumb-link"
-              onClick={() => navigate('/meal-allowance')}
-            >
-              Tiền ăn
-            </span>
-            <span className="mad-breadcrumb-separator">/</span>
-            <span className="mad-breadcrumb-item mad-breadcrumb-item--active">Chi tiết</span>
-          </nav>
+      {/* ─── TOP ACTION BAR & BREADCRUMB ───────────────────────────── */}
+      <div className="mad-topbar">
+        <div className="mad-breadcrumb">
+          <span className="mad-breadcrumb-dim">Lương &amp; Thuế</span>
+          <span className="mad-breadcrumb-sep">/</span>
+          <span
+            className="mad-breadcrumb-link"
+            onClick={() => navigate('/meal-allowance')}
+          >
+            Tiền ăn
+          </span>
+          <span className="mad-breadcrumb-sep">/</span>
+          <span className="mad-breadcrumb-curr">Chi tiết chấm công &amp; tiền ăn</span>
+        </div>
 
-          <div className="mad-title-block">
-            <h1 className="mad-title">Chi tiết tiền ăn</h1>
-            <p className="mad-subtitle">Theo dõi ngày công, số bữa ăn và phụ cấp của nhân viên.</p>
-          </div>
+        <div className="mad-top-actions">
+          <Button
+            icon={<ArrowLeftOutlined />}
+            onClick={() => navigate(-1)}
+            className="mad-btn"
+          >
+            Quay lại
+          </Button>
 
-          {/* Employee Info Meta Strip */}
-          <div className="mad-emp-strip">
+          <Button
+            icon={<SettingOutlined />}
+            onClick={() => setIsColModalOpen(true)}
+            className="mad-btn"
+          >
+            Tùy chỉnh cột
+          </Button>
+
+          <Button
+            icon={isFullscreen ? <FullscreenExitOutlined /> : <FullscreenOutlined />}
+            onClick={toggleFullscreen}
+            className="mad-btn"
+          >
+            {isFullscreen ? 'Thu nhỏ' : 'Phóng to'}
+          </Button>
+
+          <Button
+            type="primary"
+            icon={<CameraOutlined />}
+            loading={isCapturing}
+            onClick={handleCaptureScreenshot}
+            className="mad-btn-primary"
+          >
+            Chụp ảnh bảng
+          </Button>
+        </div>
+      </div>
+
+      {/* ─── CAPTURABLE WRAPPER (EMPLOYEE PROFILE + KPIS + TABLE) ───── */}
+      <div id="mad-capture-card" className="mad-capture-container">
+        
+        {/* ─── 1. EMPLOYEE PROFILE HERO CARD ────────────────────────── */}
+        <div className="mad-emp-card">
+          <div className="mad-emp-left">
             <div className="mad-emp-avatar">
-              <UserOutlined />
+              {getInitials(data.full_name)}
             </div>
-            <div className="mad-emp-meta">
+            <div className="mad-emp-info">
               <div className="mad-emp-name-row">
                 <span className="mad-emp-name">{data.full_name}</span>
                 <span className="mad-emp-code">#{data.employee_code}</span>
+                <span className="mad-emp-dept">
+                  <TeamOutlined style={{ marginRight: 4 }} />
+                  {data.department || 'Nhân viên'}
+                </span>
               </div>
-              <div className="mad-emp-sub-row">
-                {data.department && (
-                  <span className="mad-emp-info-item">
-                    <TeamOutlined style={{ fontSize: 12, marginRight: 5 }} />
-                    {data.department}
-                  </span>
-                )}
-                {data.department && <span className="mad-emp-dot">•</span>}
-                <span className="mad-emp-info-item">
-                  <CalendarOutlined style={{ fontSize: 12, marginRight: 5 }} />
-                  {rangeStart.format('DD/MM/YYYY')} – {rangeEnd.format('DD/MM/YYYY')}
+              <div className="mad-emp-meta-row">
+                <span className="mad-emp-pill">
+                  <CalendarOutlined style={{ marginRight: 5, color: '#64748b' }} />
+                  Kỳ: <b>{rangeStart.format('DD/MM/YYYY')}</b> – <b>{rangeEnd.format('DD/MM/YYYY')}</b>
                 </span>
                 {nightRate > 0 && (
-                  <>
-                    <span className="mad-emp-dot">•</span>
-                    <span className="mad-emp-info-item mad-emp-rate">
-                      PC đêm: {nightRate.toLocaleString()} đ/ca
-                    </span>
-                  </>
+                  <span className="mad-emp-pill mad-emp-pill--purple">
+                    <MoonOutlined style={{ marginRight: 5, color: '#7c3aed' }} />
+                    PC đêm: <b>{nightRate.toLocaleString()} đ/ca</b>
+                  </span>
                 )}
               </div>
             </div>
           </div>
-        </div>
 
-        {/* Action Buttons Group */}
-        <div className="mad-header-right">
-          <div className="mad-actions-wrapper">
-            <Button
-              icon={<ArrowLeftOutlined />}
-              onClick={() => navigate(-1)}
-              className="mad-btn-ghost"
-            >
-              Quay lại
-            </Button>
-
-            <Button
-              icon={<SettingOutlined />}
-              onClick={() => setIsColModalOpen(true)}
-              className="mad-btn-secondary"
-            >
-              Tùy chỉnh cột
-            </Button>
-
-            <Button
-              icon={isFullscreen ? <FullscreenExitOutlined /> : <FullscreenOutlined />}
-              onClick={toggleFullscreen}
-              className="mad-btn-secondary"
-            >
-              {isFullscreen ? 'Thu nhỏ' : 'Phóng to'}
-            </Button>
-
-            <Button
-              type="primary"
-              icon={<CameraOutlined />}
-              loading={isCapturing}
-              onClick={handleCaptureScreenshot}
-              className="mad-btn-primary"
-            >
-              Chụp ảnh bảng
-            </Button>
-          </div>
-        </div>
-      </div>
-
-      {/* ─── SUMMARY CARDS (GRID WITH HIERARCHY) ────────────────────── */}
-      <div className="mad-kpi-grid">
-        {/* Hero Card - Tổng cộng (spans 2 columns) */}
-        <div className="mad-kpi-card mad-kpi-card--hero">
-          <div className="mad-kpi-hero-top">
-            <span className="mad-kpi-label">Tổng cộng phụ cấp</span>
-            <span className="mad-kpi-hero-badge">Tổng chi trả</span>
-          </div>
-          <div className="mad-kpi-hero-middle">
-            <div className="mad-kpi-hero-number">
-              {totals.grandTotal.toLocaleString()} <span className="mad-kpi-curr">đ</span>
-            </div>
-            <div className="mad-kpi-hero-breakdown">
-              <span className="mad-hero-pill">
-                <span className="mad-hero-dot mad-hero-dot--green" />
-                Tiền ăn: <b>{totals.totalMealAllowance.toLocaleString()} đ</b>
+          <div className="mad-emp-right">
+            <div className="mad-summary-stat">
+              <span className="mad-summary-stat-label">Ngày công</span>
+              <span className="mad-summary-stat-val">
+                <CheckCircleOutlined style={{ color: '#10b981', marginRight: 4 }} />
+                {totals.workedDays}
               </span>
-              <span className="mad-hero-pill">
-                <span className="mad-hero-dot mad-hero-dot--purple" />
-                PC Đêm: <b>{totals.totalNightAllowance.toLocaleString()} đ</b>
+            </div>
+            <div className="mad-summary-stat-sep" />
+            <div className="mad-summary-stat">
+              <span className="mad-summary-stat-label">Số bữa</span>
+              <span className="mad-summary-stat-val">{totals.totalMeals}</span>
+            </div>
+            <div className="mad-summary-stat-sep" />
+            <div className="mad-summary-stat">
+              <span className="mad-summary-stat-label">Tổng nhận</span>
+              <span className="mad-summary-stat-val mad-summary-stat-val--blue">
+                {totals.grandTotal.toLocaleString()} đ
               </span>
             </div>
           </div>
-          <div className="mad-kpi-hero-bottom">
-            <span>{totals.workedDays} ngày công</span>
-            <span className="mad-hero-sep">·</span>
-            <span>{totals.totalMeals} phần cơm đã tính</span>
+        </div>
+
+        {/* ─── 2. KPI SUMMARY CARDS (STREAMLINED 4-CARD ROW) ─────────── */}
+        <div className="mad-kpi-row">
+          {/* Card 1: Tổng tiền ăn */}
+          <div className="mad-kpi-card mad-kpi-card--green">
+            <div className="mad-kpi-card-inner">
+              <div className="mad-kpi-card-header">
+                <span className="mad-kpi-label">TỔNG TIỀN ĂN</span>
+                <div className="mad-kpi-icon mad-kpi-icon--green">
+                  <DollarCircleOutlined />
+                </div>
+              </div>
+              <div className="mad-kpi-value mad-kpi-value--green">
+                {totals.totalMealAllowance.toLocaleString()} <span>đ</span>
+              </div>
+              <div className="mad-kpi-sub">
+                {totals.totalMeals} phần cơm đã tính
+              </div>
+            </div>
+            <div className="mad-kpi-accent-bar mad-kpi-accent-bar--green" />
+          </div>
+
+          {/* Card 2: Phụ cấp ca đêm */}
+          <div className="mad-kpi-card mad-kpi-card--purple">
+            <div className="mad-kpi-card-inner">
+              <div className="mad-kpi-card-header">
+                <span className="mad-kpi-label">TỔNG PC ĐÊM</span>
+                <div className="mad-kpi-icon mad-kpi-icon--purple">
+                  <MoonOutlined />
+                </div>
+              </div>
+              <div className="mad-kpi-value mad-kpi-value--purple">
+                {totals.totalNightAllowance.toLocaleString()} <span>đ</span>
+              </div>
+              <div className="mad-kpi-sub">
+                Mức: {nightRate.toLocaleString()} đ/ca
+              </div>
+            </div>
+            <div className="mad-kpi-accent-bar mad-kpi-accent-bar--purple" />
+          </div>
+
+          {/* Card 3: Tổng cộng thực nhận */}
+          <div className="mad-kpi-card mad-kpi-card--blue">
+            <div className="mad-kpi-card-inner">
+              <div className="mad-kpi-card-header">
+                <span className="mad-kpi-label">TỔNG CỘNG THỰC NHẬN</span>
+                <div className="mad-kpi-icon mad-kpi-icon--blue">
+                  <WalletOutlined />
+                </div>
+              </div>
+              <div className="mad-kpi-value mad-kpi-value--blue">
+                {totals.grandTotal.toLocaleString()} <span>đ</span>
+              </div>
+              <div className="mad-kpi-sub">
+                Tiền ăn + Phụ cấp ca đêm
+              </div>
+            </div>
+            <div className="mad-kpi-accent-bar mad-kpi-accent-bar--blue" />
+          </div>
+
+          {/* Card 4: Công & Giờ làm */}
+          <div className="mad-kpi-card mad-kpi-card--cyan">
+            <div className="mad-kpi-card-inner">
+              <div className="mad-kpi-card-header">
+                <span className="mad-kpi-label">CÔNG &amp; GIỜ LÀM</span>
+                <div className="mad-kpi-icon mad-kpi-icon--cyan">
+                  <ClockCircleOutlined />
+                </div>
+              </div>
+              <div className="mad-kpi-value mad-kpi-value--cyan">
+                {totals.workedDays} <span>ngày</span>
+              </div>
+              <div className="mad-kpi-sub">
+                {totals.totalHours.toFixed(1)}h làm{totals.totalOt > 0 ? ` · +${totals.totalOt.toFixed(1)}h OT` : ''}
+              </div>
+            </div>
+            <div className="mad-kpi-accent-bar mad-kpi-accent-bar--cyan" />
           </div>
         </div>
 
-        {/* Card 2 - Tiền ăn */}
-        <div className="mad-kpi-card">
-          <div className="mad-kpi-card-header">
-            <span className="mad-kpi-label">Tiền ăn</span>
-            <div className="mad-kpi-icon-box">
-              <DollarCircleOutlined />
+        {/* ─── 3. BẢNG CHẤM CÔNG CHI TIẾT (CLEAN TABLE) ─────────────── */}
+        <div className="mad-table-card">
+          <div className="mad-table-header">
+            <div className="mad-table-title-box">
+              <h2 className="mad-table-title">Bảng chấm công chi tiết</h2>
+              <div className="mad-table-subtitle">
+                <span className="mad-sub-name">{data.full_name}</span>
+                <span className="mad-sub-sep">·</span>
+                <span className="mad-sub-code">#{data.employee_code}</span>
+                <span className="mad-sub-sep">·</span>
+                <span className="mad-sub-dept">{data.department || 'Nhân viên'}</span>
+                <span className="mad-sub-sep">·</span>
+                <span className="mad-sub-range">
+                  Kỳ: {rangeStart.format('DD/MM/YYYY')} – {rangeEnd.format('DD/MM/YYYY')}
+                </span>
+              </div>
+            </div>
+
+            <div className="mad-table-chips">
+              <span className="mad-chip">
+                <b>{totals.workedDays}</b> ngày công
+              </span>
+              <span className="mad-chip">
+                <b>{totals.totalMeals}</b> bữa
+              </span>
+              <span className="mad-chip mad-chip--total">
+                Tổng: <b>{totals.grandTotal.toLocaleString()} đ</b>
+              </span>
             </div>
           </div>
-          <div className="mad-kpi-card-value mad-kpi-card-value--success">
-            {totals.totalMealAllowance.toLocaleString()} <span className="mad-kpi-curr">đ</span>
-          </div>
-          <div className="mad-kpi-card-sub">
-            {(totals.totalMealAllowance / 1000).toLocaleString('vi-VN')}k · {totals.totalMeals} phần cơm
-          </div>
-        </div>
 
-        {/* Card 3 - Phụ cấp ca đêm */}
-        <div className="mad-kpi-card">
-          <div className="mad-kpi-card-header">
-            <span className="mad-kpi-label">Phụ cấp ca đêm</span>
-            <div className="mad-kpi-icon-box">
-              <MoonOutlined />
-            </div>
-          </div>
-          <div className="mad-kpi-card-value">
-            {totals.totalNightAllowance.toLocaleString()} <span className="mad-kpi-curr">đ</span>
-          </div>
-          <div className="mad-kpi-card-sub">
-            Mức: {nightRate.toLocaleString()} đ/ca
-          </div>
-        </div>
+          <div id="mad-capture-scroll" className="mad-table-scroll">
+            <table className="mad-table">
+              <thead>
+                <tr>
+                  {visibleColumns.map((col) => (
+                    <th
+                      key={col.id}
+                      className="mad-th"
+                      style={{ textAlign: col.align, width: col.width, minWidth: col.width }}
+                    >
+                      {col.label}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {displayDays.map((cell, idx) => {
+                  const isSun = cell.dow === 'CN' || cell.is_sunday;
+                  const isHol = cell.is_holiday;
+                  const isAbsent = cell.status === 'absent';
+                  const hasWorked = (cell.actual_hours > 0) || (cell.check_in && cell.check_out) || (cell.meal_count > 0 && !isAbsent);
+                  const rowTotal = (cell.meal_allowance || 0) + (cell.night_allowance || 0);
 
-        {/* Card 4 - Ngày làm việc */}
-        <div className="mad-kpi-card">
-          <div className="mad-kpi-card-header">
-            <span className="mad-kpi-label">Ngày làm việc</span>
-            <div className="mad-kpi-icon-box">
-              <UserOutlined />
-            </div>
-          </div>
-          <div className="mad-kpi-card-value">
-            {totals.workedDays} <span className="mad-kpi-unit">ngày</span>
-          </div>
-          <div className="mad-kpi-card-sub">
-            Trên tổng {activeDays} ngày trong kỳ
-          </div>
-        </div>
-
-        {/* Card 5 - Tổng giờ làm */}
-        <div className="mad-kpi-card">
-          <div className="mad-kpi-card-header">
-            <span className="mad-kpi-label">Tổng giờ làm</span>
-            <div className="mad-kpi-icon-box">
-              <ClockCircleOutlined />
-            </div>
-          </div>
-          <div className="mad-kpi-card-value">
-            {totals.totalHours.toFixed(1)} <span className="mad-kpi-unit">h</span>
-          </div>
-          <div className="mad-kpi-card-sub">
-            Thời gian làm việc tiêu chuẩn
-          </div>
-        </div>
-
-        {/* Card 6 - Tăng ca (OT) */}
-        <div className="mad-kpi-card">
-          <div className="mad-kpi-card-header">
-            <span className="mad-kpi-label">Tăng ca (OT)</span>
-            <div className="mad-kpi-icon-box">
-              <FireOutlined />
-            </div>
-          </div>
-          <div className={`mad-kpi-card-value ${totals.totalOt > 0 ? 'mad-kpi-card-value--warning' : ''}`}>
-            {totals.totalOt > 0 ? `+${totals.totalOt.toFixed(1)}` : '0'} <span className="mad-kpi-unit">h</span>
-          </div>
-          <div className="mad-kpi-card-sub">
-            Làm tròn theo quy tắc 30 phút
-          </div>
-        </div>
-
-        {/* Card 7 - Số bữa ăn */}
-        <div className="mad-kpi-card">
-          <div className="mad-kpi-card-header">
-            <span className="mad-kpi-label">Số bữa ăn</span>
-            <div className="mad-kpi-icon-box">
-              <CoffeeOutlined />
-            </div>
-          </div>
-          <div className="mad-kpi-card-value">
-            {totals.totalMeals} <span className="mad-kpi-unit">bữa</span>
-          </div>
-          <div className="mad-kpi-card-sub">
-            Tổng số phần ăn theo ca
-          </div>
-        </div>
-      </div>
-
-      {/* ─── DATA TABLE CARD ────────────────────────────────────────── */}
-      <div id="mad-capture-card" className="mad-table-card">
-        {/* Clean, integrated card header */}
-        <div className="mad-table-card-header">
-          <div className="mad-table-card-header-left">
-            <h3 className="mad-table-card-title">Bảng chấm công chi tiết</h3>
-            <p className="mad-table-card-subtitle">
-              {data.full_name} · #{data.employee_code} · {data.department || 'Nhân viên'} · Kỳ: {rangeStart.format('DD/MM/YYYY')} – {rangeEnd.format('DD/MM/YYYY')}
-            </p>
-          </div>
-          <div className="mad-table-card-header-right">
-            <div className="mad-table-summary-chip">
-              <span className="mad-chip-item"><b>{totals.workedDays}</b> ngày công</span>
-              <span className="mad-chip-sep">·</span>
-              <span className="mad-chip-item"><b>{totals.totalMeals}</b> bữa</span>
-              <span className="mad-chip-sep">·</span>
-              <span className="mad-chip-total">Tổng: <b>{totals.grandTotal.toLocaleString()} đ</b></span>
-            </div>
-          </div>
-        </div>
-
-        <div id="mad-capture-scroll" className="mad-table-scroll">
-          <table className="mad-table">
-            <thead>
-              <tr>
-                {visibleColumns.map((col) => (
-                  <th
-                    key={col.id}
-                    className="mad-th"
-                    style={{ textAlign: col.align, width: col.width, minWidth: col.width }}
-                  >
-                    {col.label}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {displayDays.map((cell, idx) => {
-                const isSun = cell.dow === 'CN' || cell.is_sunday;
-                const isHol = cell.is_holiday;
-                const isAbsent = cell.status === 'absent';
-                const hasWorked = (cell.actual_hours > 0) || (cell.check_in && cell.check_out) || (cell.meal_count > 0 && !isAbsent);
-                const rowTotal = (cell.meal_allowance || 0) + (cell.night_allowance || 0);
-
-                let rowClass = 'mad-row';
-                if (isSun) {
-                  rowClass += hasWorked ? ' mad-row--sun-worked' : ' mad-row--sun';
-                } else if (isHol) {
-                  rowClass += hasWorked ? ' mad-row--hol-worked' : ' mad-row--hol';
-                } else if (idx % 2 === 1) {
-                  rowClass += ' mad-row--alt';
-                }
-
-                return (
-                  <tr key={cell.work_date || cell.day} className={rowClass}>
-                    {visibleColumns.map((col) => {
-                      const cellStyle = { textAlign: col.align };
-                      switch (col.id) {
-                        case 'day':
-                          return (
-                            <td key="day" className="mad-td mad-td--day" style={cellStyle}>
-                              <span className={isSun || isHol ? 'mad-day--accent' : 'mad-day--normal'}>
-                                {isMultiMonth && cell.work_date ? dayjs(cell.work_date).format('DD/MM') : cell.day}
-                              </span>
-                            </td>
-                          );
-
-                        case 'dow':
-                          return (
-                            <td key="dow" className="mad-td" style={cellStyle}>
-                              <span className={isSun ? 'mad-dow-tag mad-dow-tag--sun' : isHol ? 'mad-dow-tag mad-dow-tag--hol' : 'mad-dow-tag'}>
-                                {cell.dow}
-                              </span>
-                            </td>
-                          );
-
-                        case 'shift_code':
-                          return (
-                            <td key="shift_code" className="mad-td" style={cellStyle}>
-                              {cell.shift_code ? (
-                                <span className="mad-shift-badge">{cell.shift_code}</span>
-                              ) : (
-                                <span className="mad-dash">–</span>
-                              )}
-                            </td>
-                          );
-
-                        case 'check_in':
-                          return (
-                            <td key="check_in" className="mad-td mad-td--time" style={cellStyle}>
-                              {cell.check_in ? dayjs(cell.check_in).format('HH:mm') : <span className="mad-dash">–</span>}
-                            </td>
-                          );
-
-                        case 'check_out':
-                          return (
-                            <td key="check_out" className="mad-td mad-td--time" style={cellStyle}>
-                              {cell.check_out ? dayjs(cell.check_out).format('HH:mm') : <span className="mad-dash">–</span>}
-                            </td>
-                          );
-
-                        case 'work_hours':
-                          return (
-                            <td key="work_hours" className="mad-td mad-td--mono" style={cellStyle}>
-                              {cell.actual_hours > 0 ? `${cell.actual_hours.toFixed(1)}h` : <span className="mad-dash">–</span>}
-                            </td>
-                          );
-
-                        case 'ot_hours':
-                          return (
-                            <td key="ot_hours" className="mad-td" style={cellStyle}>
-                              {cell.ot_hours > 0 ? (
-                                <span className="mad-ot-pill">+{cell.ot_hours.toFixed(1)}h</span>
-                              ) : (
-                                <span className="mad-dash">–</span>
-                              )}
-                            </td>
-                          );
-
-                        case 'meal_count':
-                          return (
-                            <td key="meal_count" className="mad-td" style={cellStyle}>
-                              {cell.meal_count > 0 ? (
-                                <span className="mad-meal-badge">{cell.meal_count}</span>
-                              ) : (
-                                <span className="mad-dash">–</span>
-                              )}
-                            </td>
-                          );
-
-                        case 'meal_allowance':
-                          return (
-                            <td key="meal_allowance" className="mad-td mad-td--amount" style={cellStyle}>
-                              {cell.meal_allowance > 0 ? (
-                                `${cell.meal_allowance.toLocaleString()} đ`
-                              ) : (
-                                <span className="mad-dash">–</span>
-                              )}
-                            </td>
-                          );
-
-                        case 'night_allowance':
-                          return (
-                            <td key="night_allowance" className="mad-td mad-td--amount" style={cellStyle}>
-                              {cell.night_allowance > 0 ? (
-                                `${cell.night_allowance.toLocaleString()} đ`
-                              ) : (
-                                <span className="mad-dash">–</span>
-                              )}
-                            </td>
-                          );
-
-                        case 'total_amount':
-                          return (
-                            <td key="total_amount" className="mad-td mad-td--amount mad-td--total-cell" style={cellStyle}>
-                              {rowTotal > 0 ? `${rowTotal.toLocaleString()} đ` : <span className="mad-dash">–</span>}
-                            </td>
-                          );
-
-                        case 'status':
-                          return (
-                            <td key="status" className="mad-td" style={cellStyle}>
-                              {renderStatusBadge(cell)}
-                            </td>
-                          );
-
-                        case 'notes':
-                          return (
-                            <td key="notes" className="mad-td mad-td--notes" style={cellStyle}>
-                              {cell.notes || <span className="mad-dash">–</span>}
-                            </td>
-                          );
-
-                        default:
-                          return <td key={col.id} className="mad-td" style={cellStyle}>–</td>;
-                      }
-                    })}
-                  </tr>
-                );
-              })}
-            </tbody>
-
-            {/* Table Footer Totals */}
-            <tfoot>
-              <tr className="mad-row mad-row--footer">
-                {visibleColumns.map((col, idx) => {
-                  const footerStyle = { textAlign: col.align };
-                  const hasDayCol = visibleColumns.some((c) => c.id === 'day');
-                  const isFirstCol = idx === 0;
-
-                  if (col.id === 'day' || (!hasDayCol && isFirstCol)) {
-                    return (
-                      <td key="tot-day" className="mad-td mad-footer-title" style={footerStyle}>
-                        TỔNG
-                      </td>
-                    );
+                  let rowClass = 'mad-row';
+                  if (isSun) {
+                    rowClass += hasWorked ? ' mad-row--sun-worked' : ' mad-row--sun';
+                  } else if (isHol) {
+                    rowClass += hasWorked ? ' mad-row--hol-worked' : ' mad-row--hol';
+                  } else if (idx % 2 === 1) {
+                    rowClass += ' mad-row--alt';
                   }
 
-                  switch (col.id) {
-                    case 'dow':
-                      return (
-                        <td key="tot-dow" className="mad-td mad-footer-count" style={footerStyle}>
-                          {displayDays.length} ngày
-                        </td>
-                      );
-                    case 'shift_code':
-                    case 'check_in':
-                    case 'check_out':
-                      return <td key={`tot-${col.id}`} className="mad-td mad-dash" style={footerStyle}>–</td>;
+                  return (
+                    <tr key={cell.work_date || cell.day} className={rowClass}>
+                      {visibleColumns.map((col) => {
+                        const cellStyle = { textAlign: col.align };
+                        switch (col.id) {
+                          case 'day':
+                            return (
+                              <td key="day" className="mad-td mad-td--day" style={cellStyle}>
+                                <span className={isSun || isHol ? 'mad-day--accent' : 'mad-day--normal'}>
+                                  {isMultiMonth && cell.work_date ? dayjs(cell.work_date).format('DD/MM') : cell.day}
+                                </span>
+                              </td>
+                            );
 
-                    case 'work_hours':
-                      return (
-                        <td key="tot-work_hours" className="mad-td mad-footer-val" style={footerStyle}>
-                          {totals.totalHours.toFixed(1)}h
-                        </td>
-                      );
+                          case 'dow':
+                            return (
+                              <td key="dow" className="mad-td" style={cellStyle}>
+                                <span className={isSun ? 'mad-dow-tag mad-dow-tag--sun' : isHol ? 'mad-dow-tag mad-dow-tag--hol' : 'mad-dow-tag'}>
+                                  {cell.dow}
+                                </span>
+                              </td>
+                            );
 
-                    case 'ot_hours':
-                      return (
-                        <td key="tot-ot_hours" className="mad-td mad-footer-val" style={footerStyle}>
-                          {totals.totalOt > 0 ? `+${totals.totalOt.toFixed(1)}h` : '0h'}
-                        </td>
-                      );
+                          case 'shift_code':
+                            return (
+                              <td key="shift_code" className="mad-td" style={cellStyle}>
+                                {cell.shift_code ? (
+                                  <span className="mad-shift-badge">{cell.shift_code}</span>
+                                ) : (
+                                  <span className="mad-dash">–</span>
+                                )}
+                              </td>
+                            );
 
-                    case 'meal_count':
-                      return (
-                        <td key="tot-meal_count" className="mad-td mad-footer-val" style={footerStyle}>
-                          {totals.totalMeals}
-                        </td>
-                      );
+                          case 'check_in':
+                            return (
+                              <td key="check_in" className="mad-td mad-td--mono" style={cellStyle}>
+                                {cell.check_in ? dayjs(cell.check_in).format('HH:mm') : <span className="mad-dash">–</span>}
+                              </td>
+                            );
 
-                    case 'meal_allowance':
-                      return (
-                        <td key="tot-meal_allowance" className="mad-td mad-td--amount mad-footer-val" style={footerStyle}>
-                          {totals.totalMealAllowance.toLocaleString()} đ
-                        </td>
-                      );
+                          case 'check_out':
+                            return (
+                              <td key="check_out" className="mad-td mad-td--mono" style={cellStyle}>
+                                {cell.check_out ? dayjs(cell.check_out).format('HH:mm') : <span className="mad-dash">–</span>}
+                              </td>
+                            );
 
-                    case 'night_allowance':
-                      return (
-                        <td key="tot-night_allowance" className="mad-td mad-td--amount mad-footer-val" style={footerStyle}>
-                          {totals.totalNightAllowance > 0 ? `${totals.totalNightAllowance.toLocaleString()} đ` : '–'}
-                        </td>
-                      );
+                          case 'work_hours':
+                            return (
+                              <td key="work_hours" className="mad-td mad-td--mono" style={cellStyle}>
+                                {cell.actual_hours > 0 ? (
+                                  <span className="mad-hours-val">{cell.actual_hours.toFixed(1)}h</span>
+                                ) : (
+                                  <span className="mad-dash">–</span>
+                                )}
+                              </td>
+                            );
 
-                    case 'total_amount':
-                      return (
-                        <td key="tot-total_amount" className="mad-td mad-td--amount mad-footer-total" style={footerStyle}>
-                          {totals.grandTotal.toLocaleString()} đ
-                        </td>
-                      );
+                          case 'ot_hours':
+                            return (
+                              <td key="ot_hours" className="mad-td" style={cellStyle}>
+                                {cell.ot_hours > 0 ? (
+                                  <span className="mad-ot-pill">+{cell.ot_hours.toFixed(1)}h</span>
+                                ) : (
+                                  <span className="mad-dash">–</span>
+                                )}
+                              </td>
+                            );
 
-                    case 'status':
-                      return (
-                        <td key="tot-status" className="mad-td" style={footerStyle}>
-                          <span className="mad-status mad-status--present">
-                            <span className="mad-status-dot" />
-                            {totals.workedDays} ngày công
-                          </span>
-                        </td>
-                      );
+                          case 'meal_count':
+                            return (
+                              <td key="meal_count" className="mad-td" style={cellStyle}>
+                                {cell.meal_count > 0 ? (
+                                  <span className="mad-meal-pill">{cell.meal_count}</span>
+                                ) : (
+                                  <span className="mad-dash">–</span>
+                                )}
+                              </td>
+                            );
 
-                    case 'notes':
-                      return <td key="tot-notes" className="mad-td mad-dash" style={footerStyle}>–</td>;
+                          case 'meal_allowance':
+                            return (
+                              <td key="meal_allowance" className="mad-td mad-td--amount" style={cellStyle}>
+                                {cell.meal_allowance > 0 ? (
+                                  <span className="mad-money-val">{cell.meal_allowance.toLocaleString()} đ</span>
+                                ) : (
+                                  <span className="mad-dash">–</span>
+                                )}
+                              </td>
+                            );
 
-                    default:
-                      return <td key={`tot-${col.id}`} className="mad-td" style={footerStyle}>–</td>;
-                  }
+                          case 'night_allowance':
+                            return (
+                              <td key="night_allowance" className="mad-td mad-td--amount" style={cellStyle}>
+                                {cell.night_allowance > 0 ? (
+                                  <span className="mad-money-night">{cell.night_allowance.toLocaleString()} đ</span>
+                                ) : (
+                                  <span className="mad-dash">–</span>
+                                )}
+                              </td>
+                            );
+
+                          case 'total_amount':
+                            return (
+                              <td key="total_amount" className="mad-td mad-td--amount mad-td--total-cell" style={cellStyle}>
+                                {rowTotal > 0 ? (
+                                  <span className="mad-money-total">{rowTotal.toLocaleString()} đ</span>
+                                ) : (
+                                  <span className="mad-dash">–</span>
+                                )}
+                              </td>
+                            );
+
+                          case 'status':
+                            return (
+                              <td key="status" className="mad-td" style={cellStyle}>
+                                {renderStatusBadge(cell)}
+                              </td>
+                            );
+
+                          case 'notes':
+                            return (
+                              <td key="notes" className="mad-td mad-td--notes" style={cellStyle}>
+                                {cell.notes || <span className="mad-dash">–</span>}
+                              </td>
+                            );
+
+                          default:
+                            return <td key={col.id} className="mad-td" style={cellStyle}>–</td>;
+                        }
+                      })}
+                    </tr>
+                  );
                 })}
-              </tr>
-            </tfoot>
-          </table>
-        </div>
-      </div>
+              </tbody>
 
-      <div className="mad-footer-note">
-        * Quy tắc tính: Ca tiêu chuẩn làm đủ thời gian mặc định 8h; thời gian làm việc sau ca được tính tăng ca và làm tròn theo mốc 30 phút. Phụ cấp ca đêm tính theo mức cấu hình.
+              {/* Table Footer Totals */}
+              <tfoot>
+                <tr className="mad-row mad-row--footer">
+                  {visibleColumns.map((col, idx) => {
+                    const footerStyle = { textAlign: col.align };
+                    const hasDayCol = visibleColumns.some((c) => c.id === 'day');
+                    const isFirstCol = idx === 0;
+
+                    if (col.id === 'day' || (!hasDayCol && isFirstCol)) {
+                      return (
+                        <td key="tot-day" className="mad-td mad-footer-title" style={footerStyle}>
+                          TỔNG
+                        </td>
+                      );
+                    }
+
+                    switch (col.id) {
+                      case 'dow':
+                        return (
+                          <td key="tot-dow" className="mad-td mad-footer-count" style={footerStyle}>
+                            {displayDays.length} ngày
+                          </td>
+                        );
+                      case 'shift_code':
+                      case 'check_in':
+                      case 'check_out':
+                        return <td key={`tot-${col.id}`} className="mad-td mad-dash" style={footerStyle}>–</td>;
+
+                      case 'work_hours':
+                        return (
+                          <td key="tot-work_hours" className="mad-td mad-footer-val" style={footerStyle}>
+                            {totals.totalHours.toFixed(1)}h
+                          </td>
+                        );
+
+                      case 'ot_hours':
+                        return (
+                          <td key="tot-ot_hours" className="mad-td mad-footer-val" style={footerStyle}>
+                            {totals.totalOt > 0 ? `+${totals.totalOt.toFixed(1)}h` : '0h'}
+                          </td>
+                        );
+
+                      case 'meal_count':
+                        return (
+                          <td key="tot-meal_count" className="mad-td mad-footer-val" style={footerStyle}>
+                            {totals.totalMeals}
+                          </td>
+                        );
+
+                      case 'meal_allowance':
+                        return (
+                          <td key="tot-meal_allowance" className="mad-td mad-td--amount mad-footer-val mad-footer-green" style={footerStyle}>
+                            {totals.totalMealAllowance.toLocaleString()} đ
+                          </td>
+                        );
+
+                      case 'night_allowance':
+                        return (
+                          <td key="tot-night_allowance" className="mad-td mad-td--amount mad-footer-val mad-footer-purple" style={footerStyle}>
+                            {totals.totalNightAllowance > 0 ? `${totals.totalNightAllowance.toLocaleString()} đ` : '–'}
+                          </td>
+                        );
+
+                      case 'total_amount':
+                        return (
+                          <td key="tot-total_amount" className="mad-td mad-td--amount mad-footer-total" style={footerStyle}>
+                            {totals.grandTotal.toLocaleString()} đ
+                          </td>
+                        );
+
+                      case 'status':
+                        return (
+                          <td key="tot-status" className="mad-td" style={footerStyle}>
+                            <span className="mad-badge mad-badge--present">
+                              <span className="mad-badge-dot" />
+                              {totals.workedDays} ngày công
+                            </span>
+                          </td>
+                        );
+
+                      case 'notes':
+                        return <td key="tot-notes" className="mad-td mad-dash" style={footerStyle}>–</td>;
+
+                      default:
+                        return <td key={`tot-${col.id}`} className="mad-td" style={footerStyle}>–</td>;
+                    }
+                  })}
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+
+        <div className="mad-footer-note">
+          * Quy tắc tính: Ca tiêu chuẩn làm đủ thời gian mặc định 8h; thời gian làm việc sau ca được tính tăng ca và làm tròn theo mốc 30 phút. Phụ cấp ca đêm tính theo mức cấu hình.
+        </div>
       </div>
 
       {/* ─── MODAL CUSTOMIZE COLUMNS ─────────────────────────────────── */}
       <Modal
         title={
           <div className="mad-modal-title">
-            <SettingOutlined style={{ color: '#2563eb' }} />
+            <SettingOutlined style={{ color: '#276EF1' }} />
             <span>Tùy chỉnh cột hiển thị &amp; thứ tự</span>
           </div>
         }
@@ -1038,7 +1041,7 @@ export default function MealAllowanceDetail() {
                 <Button
                   size="small"
                   type="text"
-                  icon={col.visible ? <EyeOutlined style={{ color: '#2563eb' }} /> : <EyeInvisibleOutlined style={{ color: '#94a3b8' }} />}
+                  icon={col.visible ? <EyeOutlined style={{ color: '#276EF1' }} /> : <EyeInvisibleOutlined style={{ color: '#94a3b8' }} />}
                   onClick={() => handleToggleColumn(col.id)}
                   title={col.visible ? 'Ẩn' : 'Hiện'}
                 />
